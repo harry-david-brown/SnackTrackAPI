@@ -196,3 +196,109 @@ docker-compose -f docker-compose.prod.yml logs -f
 
 ---
 
+## 🤝 Contributing
+
+### For Contributors
+
+**Prerequisites:** Docker, Docker Compose, and Git installed
+
+### 1. Fork and Clone
+```bash
+# Fork the repository on GitHub first, then:
+git clone https://github.com/harry-david-brown/SnackTrackAPI
+cd SnackTrackAPI
+```
+
+### 2. Create a Feature Branch
+```bash
+# Always create a new branch for your changes
+git checkout -b your-feature-name
+# Example: git checkout -b add-outlook-support
+```
+
+### 3. Development Setup
+```bash
+# Start the API in development mode (with hot reload)
+docker-compose up --build
+
+# The API will be available at http://localhost:3000
+# Changes to your code will automatically restart the server
+```
+
+### 4. Make Your Changes
+- Edit files in the `src/` directory
+- The server will automatically restart when you save changes
+- Test your changes with the API endpoints
+
+### 5. Test Your Changes
+```bash
+# Test the API is working
+curl http://localhost:3000/
+
+# Test your specific changes
+curl -X POST http://localhost:3000/users/create \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com"}'
+```
+
+### 6. Stop Development Server
+```bash
+# Stop the development server when done
+docker-compose down
+```
+
+### 7. Commit and Push
+```bash
+# Add your changes
+git add .
+
+# Commit with a descriptive message
+git commit -m "Add feature: brief description of what you did"
+
+# Push to your fork
+git push origin your-feature-name
+```
+
+### 8. Create Pull Request
+- Go to your fork on GitHub
+- Click "New Pull Request"
+- Select your feature branch
+- Write a description of your changes
+- Submit the pull request
+
+### Development Tips
+
+**Hot Reload:** The development server automatically restarts when you change files, so you can see changes immediately.
+
+**Testing:** Always test your changes before committing. Use the API endpoints to verify everything works.
+
+**Branch Names:** Use descriptive names like `add-outlook-support`, `fix-email-parsing`, `improve-docker-setup`.
+
+**Commit Messages:** Be clear about what you changed, like "Fix email parsing for McDonald's receipts" or "Add error handling for Gmail API".
+
+### For Maintainers
+
+**Reviewing Pull Requests:**
+1. Check the code changes
+2. Test the changes locally:
+   ```bash
+   # Pull their branch
+   git fetch origin
+   git checkout their-feature-branch
+   
+   # Test with development mode
+   docker-compose up --build
+   
+   # Test the changes
+   curl http://localhost:3000/
+   ```
+3. If everything looks good, merge the pull request
+4. Delete the feature branch after merging
+
+**Managing the Repository:**
+- Keep the `main` branch stable
+- Review all pull requests before merging
+- Test changes before accepting them
+- Update the README if needed
+
+---
