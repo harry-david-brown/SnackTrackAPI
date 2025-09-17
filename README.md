@@ -1,4 +1,4 @@
-# 🍕 Snack Track API
+# 🥡 Snack Track API
 
 A Node.js/TypeScript API that automatically tracks your food spending by parsing receipt emails from your Gmail account.
 
