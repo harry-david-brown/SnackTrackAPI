@@ -6,12 +6,30 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+      - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_prod
     env_file:
       - .env
     restart: unless-stopped
+    depends_on:
+      - postgres
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=snacktrack_prod
+      - POSTGRES_USER=snacktrack
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_prod_data:

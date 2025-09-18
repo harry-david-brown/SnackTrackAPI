@@ -4,11 +4,15 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import usersRouter from './routes/users';
+import { PostgresService } from './services/PostgresService';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// Initialize database
+const postgresService = new PostgresService();
 
 // Health check
 app.get('/', (req: Request, res: Response) => {
@@ -42,6 +46,22 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-}); 
+
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Initialize database tables
+    await postgresService.initializeTables();
+    
+    // Start the server
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 Database connected and initialized`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer(); 

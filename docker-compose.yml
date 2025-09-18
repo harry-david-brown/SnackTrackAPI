@@ -1,7 +1,9 @@
 version: '3.8'
 services:
   snack-track-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     ports:
       - "3000:3000"
     volumes:
@@ -9,6 +11,23 @@ services:
       - /usr/src/app/node_modules
     environment:
       - NODE_ENV=development
+      - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_dev
     env_file:
       - .env
-    command: npm run dev 
+    command: npm run dev
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=snacktrack_dev
+      - POSTGRES_USER=snacktrack
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data: 

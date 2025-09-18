@@ -1,17 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { DatabaseService } from '../services/DatabaseService';
 import { LookupService } from '../services/LookupService';
+import { PostgresService } from '../services/PostgresService';
 
 const router = Router();
+const postgresService = new PostgresService();
 const lookupService = new LookupService();
-const databaseService = new DatabaseService(lookupService);
+const databaseService = new DatabaseService(lookupService, postgresService);
 
 router.post('/create', async (req: Request, res: Response) => {
   try {
     const id = await databaseService.createUser(req.body);
     res.json({ id });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create user' });
+    console.error('Error creating user:', err);
+    res.status(500).json({ error: 'Failed to create user', details: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 

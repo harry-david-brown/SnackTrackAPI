@@ -41,6 +41,6 @@ export class Email {
       }
     }
 
-    return new Receipt(this.userId, items, totalAmount);
+    return new Receipt(this.userId, items, totalAmount, this.from, this.to, undefined, this.body);
   }
 } 

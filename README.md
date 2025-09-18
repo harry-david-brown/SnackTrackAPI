@@ -2,6 +2,29 @@
 
 A Node.js/TypeScript API that automatically tracks your food spending by parsing receipt emails from your Gmail account.
 
+## 📋 Project Progress
+
+### Daily Goals (1-3 Day Sprint)
+- [x] **Database Setup** - PostgreSQL integration with Docker
+- [ ] **User Authentication** - JWT-based login/registration
+- [ ] **Receipt CRUD** - Complete receipt management operations
+- [ ] **Enhanced Email Parsing** - Support more receipt formats
+- [ ] **API Documentation** - Swagger/OpenAPI documentation
+
+### Weekly Goals (1-2 Week Sprint)
+- [ ] **Complete API MVP** - Production-ready backend
+- [ ] **Frontend Planning** - Choose React Native vs. Expo
+- [ ] **Design System** - Create basic UI/UX mockups
+- [ ] **Testing Setup** - Add comprehensive tests
+- [ ] **Deployment** - Set up production deployment
+
+### Monthly Goals (3-4 Week Sprint)
+- [ ] **Complete Frontend** - Full React Native app
+- [ ] **Integration** - Connect frontend to API
+- [ ] **Android Testing** - Test on emulator and device
+- [ ] **User Testing** - Get feedback from friends
+- [ ] **Polish** - UI/UX improvements and bug fixes
+
 ## 🚀 Installation
 
 **Prerequisites:** Docker and Docker Compose must be installed
