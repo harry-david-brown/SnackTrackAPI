@@ -10,7 +10,7 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 - [x] **Enhanced Email Parsing** - Support more receipt formats
 - [x] **Enhanced Receipt** - Improved data structure
 - [x] **Spending Analytics** - Average Order Value
-- [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receiptsi
+- [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
 - [x] **Dev/Prod flag** - Instant switching, collect scattered flags
 - [ ] **Duplicate Detection** - Only one receipt per order
 
@@ -28,22 +28,20 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 - [ ] **User Testing** - Get feedback from friends
 - [ ] **Polish** - UI/UX improvements and bug fixes
 
-## 🚀 Installation
+---
 
-**Prerequisites:** Docker and Docker Compose must be installed
+## 🚀 Quick Start
 
-1. **Clone the repository**
+**Prerequisites:** Docker and Docker Compose
+
+1. **Clone and start**
    ```bash
-   git clone <your-repo-url>
-   cd snack-track
-   ```
-
-2. **Run the startup script**
-   ```bash
+   git clone https://github.com/harry-david-brown/SnackTrackAPI
+   cd SnackTrackAPI
    ./start.sh
    ```
 
-3. **Test it works**
+2. **Test it works**
    ```bash
    curl http://localhost:3000/
    # Should return: ALIVE
@@ -51,33 +49,37 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 
 **That's it!** The API is now running on `http://localhost:3000`
 
-## 🎭 Option 1: Demo Mode (Mock Data)
+## 🎯 What This Does
 
-**Use this if you just want to see how it works without any setup.**
+Snack Track automatically:
+- Connects to your Gmail account
+- Finds receipt emails from food delivery services (Uber Eats, etc.)
+- Extracts spending amounts and restaurant names
+- Tracks your total food spending over time
+- Provides spending analytics and insights
 
-The API automatically uses mock data when no Gmail credentials are provided. You'll see fake receipt data from Starbucks, McDonald's, and Chipotle.
+## 🎭 Two Ways to Use It
 
-**Test the demo:**
+### Option 1: Demo Mode (Easiest)
+**Perfect for trying it out - uses fake data**
+
 ```bash
-# Create a user
+# Create a demo user
 curl -X POST http://localhost:3000/users/create \
   -H "Content-Type: application/json" \
   -d '{"email": "demo@example.com"}'
 
-# Copy the user ID from the response, then:
+# Copy the user ID from response, then:
 curl -X POST http://localhost:3000/users/YOUR_USER_ID/update-receipts
 
 # Check total spending
 curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
 ```
 
-## 📧 Option 2: Real Gmail Data
+### Option 2: Real Gmail Data
+**Track your actual food spending**
 
-**Use this to track your actual food spending from your Gmail account.**
-
-### Quick Setup (Using Test Account)
-
-**Easiest option:** Use the pre-configured test account `snacktracktest@gmail.com` (password: `bluetoastsquares1`)
+**Easiest:** Use the pre-configured test account `snacktracktest@gmail.com`
 
 1. **Create .env file**
    ```bash
@@ -87,14 +89,13 @@ curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
    GMAIL_REDIRECT_URI=http://localhost:3000/auth/callback
    GMAIL_REFRESH_TOKEN=1//05uMl2jXPkTkMCgYIARAAGAUSNwF-L9IrS3JQyKkHDSceLQPRudCJHfd-n3A7lIhT69uKZVbN0dbNIVD2XnXP7vuoTZW7S7qXlxI
    PORT=3000
-   NODE_ENV=production
+   NODE_ENV=development
    EOF
    ```
 
 2. **Restart the API**
    ```bash
-   docker-compose -f docker-compose.prod.yml down
-   docker-compose -f docker-compose.prod.yml up --build
+   docker-compose down && docker-compose up --build -d
    ```
 
 3. **Test with real data**
@@ -111,369 +112,130 @@ curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
    curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
    ```
 
-### Setup Your Own Gmail (Advanced)
+## 🔧 Configuration
 
-**Only do this if you want to use your own Gmail account instead of the test account.**
+The system automatically works in **development mode** (most plug-and-play):
+- Uses mock data when no Gmail credentials are provided
+- Uses real Gmail API when credentials are present
+- Includes helpful debug information
+- No SSL requirements for local database
 
-**Important:** You'll need to add yourself as a test user in the Google Cloud Console. Use these credentials to access it:
+**To switch to production mode:**
+```bash
+# Change NODE_ENV in .env file
+NODE_ENV=production
 
+# Restart the server
+docker-compose down && docker-compose up --build -d
+```
+
+## 📊 API Endpoints
+
+**Base URL:** `http://localhost:3000`
+
+### Essential Endpoints
+- `GET /` - Health check (returns "ALIVE")
+- `POST /users/create` - Create a new user
+- `GET /users/:id/totalSpent` - Get total spending
+- `POST /users/:id/update-receipts` - Fetch and parse emails
+- `GET /users/:id/debug/emails` - See raw email data
+- `GET /receipts/analytics/:userId` - Get spending analytics
+
+### Example Usage
+```bash
+# Create user
+curl -X POST http://localhost:3000/users/create \
+  -H "Content-Type: application/json" \
+  -d '{"email": "your@email.com"}'
+
+# Get total spent
+curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
+
+# Get analytics
+curl http://localhost:3000/receipts/analytics/YOUR_USER_ID
+```
+
+---
+
+## 🛠️ Advanced Setup
+
+### Using Your Own Gmail Account
+
+**Note:** You'll need to add yourself as a test user in the Google Cloud Console.
+
+**Credentials for Google Cloud Console:**
 - **Email:** `snacktracktest@gmail.com`
 - **Password:** `bluetoastsquares1`
 
 1. **Add Yourself as Test User**
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Sign in with `snacktracktest@gmail.com` / `bluetoastsquares1`
+   - Sign in with the credentials above
    - Go to "APIs & Services" → "OAuth consent screen"
-   - Scroll down to "Test users" section
-   - Click "Add users" and add your Gmail address
-   - Click "Save"
+   - Add your Gmail address to "Test users"
+   - Save
 
 2. **Get Your Refresh Token**
-   - Create a file called `get-token.js` with this content:
-   ```javascript
-   const { google } = require('googleapis');
-   const readline = require('readline');
-   
-   const CLIENT_ID = '340572988877-8g7j3mqdpa4l69drsjr9r7sscu49j1n7.apps.googleusercontent.com';
-   const CLIENT_SECRET = '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';
-   const REDIRECT_URI = 'http://localhost:3000/auth/callback';
-   
-   const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-   const authUrl = oAuth2Client.generateAuthUrl({
-     access_type: 'offline',
-     scope: ['https://www.googleapis.com/auth/gmail.readonly'],
-   });
-   
-   console.log('Open this URL:', authUrl);
-   console.log('After authorization, copy the code from the URL and paste it here:');
-   
-   const rl = readline.createInterface({
-     input: process.stdin,
-     output: process.stdout,
-   });
-   
-   rl.question('Enter the authorization code: ', async (code) => {
-     const { tokens } = await oAuth2Client.getToken(code);
-     console.log('Add this to your .env file:');
-     console.log(`GMAIL_REFRESH_TOKEN=${tokens.refresh_token}`);
-     rl.close();
-   });
-   ```
+   - Create `get-token.js` with the script from the [scripts folder](scripts/get-refresh-token.js)
    - Run: `node get-token.js`
    - Follow the OAuth flow
    - Add the refresh token to your `.env` file
 
-3. **Create Your .env File**
+3. **Update .env File**
    ```bash
-   cat > .env << 'EOF'
-   GMAIL_CLIENT_ID=340572988877-8g7j3mqdpa4l69drsjr9r7sscu49j1n7.apps.googleusercontent.com
-   GMAIL_CLIENT_SECRET=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
-   GMAIL_REDIRECT_URI=http://localhost:3000/auth/callback
+   # Replace the GMAIL_REFRESH_TOKEN with your token
    GMAIL_REFRESH_TOKEN=YOUR_REFRESH_TOKEN_FROM_STEP_2
-   PORT=3000
-   NODE_ENV=production
-   EOF
    ```
-
-4. **Restart the API**
-   ```bash
-   docker-compose -f docker-compose.prod.yml down
-   docker-compose -f docker-compose.prod.yml up --build
-   ```
-
----
-
-## 📚 Additional Information
-
-### 🔧 Centralized Configuration System
-
-Snack Track uses a centralized configuration system that makes it easy to switch between development and production modes with a single line change.
-
-#### **Environment Modes**
-
-**Development Mode (Default - Plug & Play)**
-- Uses mock data when Gmail credentials aren't configured
-- Uses real Gmail API when credentials are present
-- Includes forwarded receipts from friends (for testing)
-- Detailed debug logging enabled
-- Database SSL disabled (for local testing)
-
-**Production Mode**
-- Always uses real Gmail API (requires credentials)
-- Excludes forwarded receipts (Uber emails only)
-- Minimal logging
-- Database SSL disabled (for local testing)
-
-#### **Quick Environment Switching**
-
-To switch between modes, simply change one line in `.env`:
-
-```bash
-# Development mode (default - most plug & play)
-NODE_ENV=development
-
-# Production mode
-NODE_ENV=production
-```
-
-Then restart the server:
-```bash
-docker-compose down && docker-compose up --build -d
-```
-
-#### **Configuration Features**
-
-- **Single Source of Truth**: All environment settings in `src/config/AppConfig.ts`
-- **Smart Gmail Detection**: Automatically uses real API if credentials are configured
-- **Environment-Aware Logging**: Detailed logs in development, minimal in production
-- **Flexible Database**: SSL can be enabled for cloud deployments
-- **Forwarded Receipt Support**: Configurable per environment
-
-#### **For Friends & Testing**
-
-The system defaults to **development mode** which is the most plug-and-play option:
-- Works with or without Gmail credentials
-- Includes helpful debug information
-- Supports forwarded receipts for testing
-- No SSL requirements for local database
-
-### API Endpoints
-
-**Base URL:** `http://localhost:3000`
-
-#### Health Check
-- `GET /` - Server health check (returns "ALIVE")
-
-#### User Management
-- `POST /users/create` - Create a new user
-  ```bash
-  curl -X POST http://localhost:3000/users/create \
-    -H "Content-Type: application/json" \
-    -d '{"email": "your@email.com", "accountType": "free"}'
-  ```
-
-- `GET /users/:id/totalSpent` - Get total spending for a user
-  ```bash
-  curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
-  ```
-
-- `POST /users/:id/update-receipts` - Fetch emails and parse receipts
-  ```bash
-  curl -X POST http://localhost:3000/users/YOUR_USER_ID/update-receipts
-  ```
-
-- `GET /users/:id/debug/emails` - See raw email data and parsed receipts
-  ```bash
-  curl http://localhost:3000/users/YOUR_USER_ID/debug/emails
-  ```
-
-#### Receipt Management
-- `GET /receipts` - Get all receipts (supports query filters)
-  ```bash
-  # Get all receipts
-  curl http://localhost:3000/receipts
-  
-  # Get receipts for specific user
-  curl http://localhost:3000/receipts?userId=YOUR_USER_ID
-  
-  # Get receipts with pagination
-  curl http://localhost:3000/receipts?limit=10&offset=0
-  
-  # Get receipts with filters
-  curl http://localhost:3000/receipts?receiptType=uber_eats&minAmount=20
-  ```
-
-- `GET /receipts/:id` - Get a specific receipt by ID
-  ```bash
-  curl http://localhost:3000/receipts/RECEIPT_ID
-  ```
-
-- `POST /receipts` - Create a new receipt manually
-  ```bash
-  curl -X POST http://localhost:3000/receipts \
-    -H "Content-Type: application/json" \
-    -d '{"userId": "USER_ID", "amountSpent": 25.50, "receiptType": "uber_eats"}'
-  ```
-
-- `PUT /receipts/:id` - Update a receipt
-  ```bash
-  curl -X PUT http://localhost:3000/receipts/RECEIPT_ID \
-    -H "Content-Type: application/json" \
-    -d '{"amountSpent": 30.00}'
-  ```
-
-- `DELETE /receipts/:id` - Delete a receipt
-  ```bash
-  curl -X DELETE http://localhost:3000/receipts/RECEIPT_ID
-  ```
-
-- `GET /receipts/analytics/:userId` - Get spending analytics for a user
-  ```bash
-  curl http://localhost:3000/receipts/analytics/YOUR_USER_ID
-  ```
-
-#### Testing & Debug Endpoints
-- `POST /receipts/test-filter` - Test email filtering logic
-  ```bash
-  curl -X POST http://localhost:3000/receipts/test-filter \
-    -H "Content-Type: application/json" \
-    -d '{"from": "noreply@uber.com", "subject": "Your order", "body": "Total $25.50"}'
-  ```
-
-- `POST /receipts/analyze` - Email analysis endpoint (ready for integration)
-  ```bash
-  curl -X POST http://localhost:3000/receipts/analyze \
-    -H "Content-Type: application/json" \
-    -d '{"email": "your@email.com"}'
-  ```
-
-#### OAuth
-- `GET /auth/callback` - OAuth callback handler (used during Gmail setup)
-
-#### Query Parameters for Receipts
-- `userId` - Filter by user ID
-- `receiptType` - Filter by receipt type (uber_eats, etc.)
-- `restaurantName` - Filter by restaurant name
-- `startDate` - Filter receipts from this date (YYYY-MM-DD)
-- `endDate` - Filter receipts until this date (YYYY-MM-DD)
-- `minAmount` - Filter receipts with amount >= this value
-- `maxAmount` - Filter receipts with amount <= this value
-- `limit` - Number of receipts to return (default: 50)
-- `offset` - Number of receipts to skip (for pagination)
-
-### How It Works
-
-1. Creates a user with your Gmail address
-2. Connects to Gmail API to fetch inbox emails
-3. Extracts dollar amounts and items from email text
-4. Stores parsed receipts in memory
-5. Calculates total spending
-
-### Docker Commands
-
-```bash
-# Start the API
-./start.sh
-
-# Stop the API
-docker-compose -f docker-compose.prod.yml down
-
-# View logs
-docker-compose -f docker-compose.prod.yml logs -f
-```
 
 ### Troubleshooting
 
-- **"Cannot GET /auth/callback"**: This is normal during OAuth setup
-- **"invalid_client"**: Check your CLIENT_SECRET in the .env file
-- **"Access blocked"**: Add yourself as a test user in Google Cloud Console
-- **Port 3000 in use**: Stop other services or change the port in docker-compose.prod.yml
+- **"Cannot GET /auth/callback"**: Normal during OAuth setup
+- **"invalid_client"**: Check your CLIENT_SECRET in .env
+- **"Access blocked"**: Add yourself as test user in Google Cloud Console
+- **Port 3000 in use**: Stop other services or change port in docker-compose.yml
 
 ---
 
 ## 🤝 Contributing
 
-### For Contributors
+### Quick Start for Contributors
 
-**Prerequisites:** Docker, Docker Compose, and Git installed
+1. **Fork and clone**
+   ```bash
+   git clone https://github.com/harry-david-brown/SnackTrackAPI
+   cd SnackTrackAPI
+   ```
 
-### 1. Fork and Clone
-```bash
-# Fork the repository on GitHub first, then:
-git clone https://github.com/harry-david-brown/SnackTrackAPI
-cd SnackTrackAPI
-```
+2. **Create feature branch**
+   ```bash
+   git checkout -b your-feature-name
+   ```
 
-### 2. Create a Feature Branch
-```bash
-# Always create a new branch for your changes
-git checkout -b your-feature-name
-# Example: git checkout -b add-outlook-support
-```
+3. **Start development**
+   ```bash
+   docker-compose up --build
+   # API available at http://localhost:3000
+   # Hot reload enabled - changes auto-restart server
+   ```
 
-### 3. Development Setup
-```bash
-# Start the API in development mode (with hot reload)
-docker-compose up --build
+4. **Test your changes**
+   ```bash
+   curl http://localhost:3000/
+   # Test your specific endpoints
+   ```
 
-# The API will be available at http://localhost:3000
-# Changes to your code will automatically restart the server
-```
+5. **Commit and push**
+   ```bash
+   git add .
+   git commit -m "Add feature: brief description"
+   git push origin your-feature-name
+   ```
 
-### 4. Make Your Changes
-- Edit files in the `src/` directory
-- The server will automatically restart when you save changes
-- Test your changes with the API endpoints
-
-### 5. Test Your Changes
-```bash
-# Test the API is working
-curl http://localhost:3000/
-
-# Test your specific changes
-curl -X POST http://localhost:3000/users/create \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com"}'
-```
-
-### 6. Stop Development Server
-```bash
-# Stop the development server when done
-docker-compose down
-```
-
-### 7. Commit and Push
-```bash
-# Add your changes
-git add .
-
-# Commit with a descriptive message
-git commit -m "Add feature: brief description of what you did"
-
-# Push to your fork
-git push origin your-feature-name
-```
-
-### 8. Create Pull Request
-- Go to your fork on GitHub
-- Click "New Pull Request"
-- Select your feature branch
-- Write a description of your changes
-- Submit the pull request
+6. **Create pull request** on GitHub
 
 ### Development Tips
-
-**Hot Reload:** The development server automatically restarts when you change files, so you can see changes immediately.
-
-**Testing:** Always test your changes before committing. Use the API endpoints to verify everything works.
-
-**Branch Names:** Use descriptive names like `add-outlook-support`, `fix-email-parsing`, `improve-docker-setup`.
-
-**Commit Messages:** Be clear about what you changed, like "Fix email parsing for McDonald's receipts" or "Add error handling for Gmail API".
-
-### For Maintainers
-
-**Reviewing Pull Requests:**
-1. Check the code changes
-2. Test the changes locally:
-   ```bash
-   # Pull their branch
-   git fetch origin
-   git checkout their-feature-branch
-   
-   # Test with development mode
-   docker-compose up --build
-   
-   # Test the changes
-   curl http://localhost:3000/
-   ```
-3. If everything looks good, merge the pull request
-4. Delete the feature branch after merging
-
-**Managing the Repository:**
-- Keep the `main` branch stable
-- Review all pull requests before merging
-- Test changes before accepting them
-- Update the README if needed
+- **Hot Reload**: Server restarts automatically on file changes
+- **Testing**: Always test with API endpoints before committing
+- **Branch Names**: Use descriptive names like `add-outlook-support`
+- **Commit Messages**: Be clear about what you changed
 
 ---
