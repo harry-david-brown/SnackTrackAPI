@@ -1,4 +1,5 @@
 import { Email } from '../models/Email';
+import { config } from '../config/AppConfig';
 
 export interface EmailClassification {
   isReceipt: boolean;
@@ -38,15 +39,16 @@ export class EmailFilterService {
       };
     }
     
-    // In development mode, also accept emails from Nnamdi (forwarded Uber receipts)
-    if (process.env.NODE_ENV !== 'production') {
-      const isFromNnamdi = from.includes('nnamdi852@gmail.com');
+    // Check for forwarded receipts if enabled in config
+    if (config.shouldAllowForwardedReceipts()) {
+      const forwardedSender = config.getForwardedReceiptSender();
+      const isFromForwardedSender = from.includes(forwardedSender);
       
-      if (isFromNnamdi) {
+      if (isFromForwardedSender) {
         return {
           isReceipt: true,
           confidence: 0.90,
-          reason: 'Email from Nnamdi (forwarded Uber receipts) in development mode',
+          reason: `Email from ${forwardedSender} (forwarded Uber receipts) in ${config.isDevelopment() ? 'development' : 'production'} mode`,
           receiptType: 'uber'
         };
       }

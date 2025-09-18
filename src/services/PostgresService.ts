@@ -1,12 +1,13 @@
 import { Pool, PoolClient } from 'pg';
+import { config } from '../config/AppConfig';
 
 export class PostgresService {
   private pool: Pool;
 
   constructor() {
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: false, // Disable SSL for local development
+      connectionString: config.getDatabaseConnectionString(),
+      ssl: config.shouldUseDatabaseSSL(),
     });
 
     // Handle pool errors

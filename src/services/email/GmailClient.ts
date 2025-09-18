@@ -2,6 +2,7 @@ import { User } from '../../models/User';
 import { Email } from '../../models/Email';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
+import { config } from '../../config/AppConfig';
 
 // Utility for base64 decoding (Gmail uses URL-safe base64)
 function decodeBase64Gmail(str: string): string {
@@ -11,18 +12,17 @@ function decodeBase64Gmail(str: string): string {
 
 export class GmailClient {
   async getEmails(user: User): Promise<Email[]> {
-    // Use mock data only if Gmail credentials are not configured
-    const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
-    const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
-    
-    if (CLIENT_ID === 'your_client_id_here' || REFRESH_TOKEN === 'your_refresh_token_here') {
-      console.log('🧪 Gmail credentials not configured: Using mock Uber emails for testing.');
+    // Use centralized config to determine data source
+    if (config.shouldUseMockData()) {
+      console.log('🧪 Using mock Uber emails for testing.');
       return this.getMockEmails(user);
     }
 
     // Use real Gmail API (credentials are configured)
+    const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
     const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
     const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/callback';
+    const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
 
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
     oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
@@ -31,18 +31,17 @@ export class GmailClient {
     const emailList: Email[] = [];
 
     try {
-      // Use Gmail search to only fetch Uber emails
-      const uberSearchQuery = 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com';
-      // In development, also search for emails from Nnamdi (forwarded Uber receipts)
-      const developmentQuery = process.env.NODE_ENV !== 'production' 
-        ? 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com OR from:nnamdi852@gmail.com'
-        : uberSearchQuery;
+      // Use centralized config for Gmail search query
+      const searchQuery = config.getGmailSearchQuery();
       
-      console.log('🔍 Gmail API: Searching for Uber emails with query:', developmentQuery);
+      if (config.shouldEnableDetailedLogging()) {
+        console.log('🔍 Gmail API: Searching for Uber emails with query:', searchQuery);
+        console.log(config.getEnvironmentInfo());
+      }
       
       const listRes = await gmail.users.messages.list({
         userId: 'me', // Use 'me' for the authenticated user
-        q: developmentQuery, // Use development query that includes forwarded receipts
+        q: searchQuery, // Use centralized config for search query
         maxResults: 100, // Get more emails since we're filtering at source
       });
       

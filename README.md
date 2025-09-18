@@ -10,7 +10,8 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 - [x] **Enhanced Email Parsing** - Support more receipt formats
 - [x] **Enhanced Receipt** - Improved data structure
 - [x] **Spending Analytics** - Average Order Value
-- [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
+- [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receiptsi
+- [x] **Dev/Prod flag** - Instant switching, collect scattered flags
 - [ ] **Duplicate Detection** - Only one receipt per order
 
 ### Weekly Goals (1-2 Week Sprint)
@@ -183,6 +184,58 @@ curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
 ---
 
 ## 📚 Additional Information
+
+### 🔧 Centralized Configuration System
+
+Snack Track uses a centralized configuration system that makes it easy to switch between development and production modes with a single line change.
+
+#### **Environment Modes**
+
+**Development Mode (Default - Plug & Play)**
+- Uses mock data when Gmail credentials aren't configured
+- Uses real Gmail API when credentials are present
+- Includes forwarded receipts from friends (for testing)
+- Detailed debug logging enabled
+- Database SSL disabled (for local testing)
+
+**Production Mode**
+- Always uses real Gmail API (requires credentials)
+- Excludes forwarded receipts (Uber emails only)
+- Minimal logging
+- Database SSL disabled (for local testing)
+
+#### **Quick Environment Switching**
+
+To switch between modes, simply change one line in `.env`:
+
+```bash
+# Development mode (default - most plug & play)
+NODE_ENV=development
+
+# Production mode
+NODE_ENV=production
+```
+
+Then restart the server:
+```bash
+docker-compose down && docker-compose up --build -d
+```
+
+#### **Configuration Features**
+
+- **Single Source of Truth**: All environment settings in `src/config/AppConfig.ts`
+- **Smart Gmail Detection**: Automatically uses real API if credentials are configured
+- **Environment-Aware Logging**: Detailed logs in development, minimal in production
+- **Flexible Database**: SSL can be enabled for cloud deployments
+- **Forwarded Receipt Support**: Configurable per environment
+
+#### **For Friends & Testing**
+
+The system defaults to **development mode** which is the most plug-and-play option:
+- Works with or without Gmail credentials
+- Includes helpful debug information
+- Supports forwarded receipts for testing
+- No SSL requirements for local database
 
 ### API Endpoints
 

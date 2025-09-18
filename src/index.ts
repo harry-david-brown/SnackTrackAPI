@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import usersRouter from './routes/users';
 import receiptsRouter from './routes/receipts';
 import { PostgresService } from './services/PostgresService';
+import { config } from './config/AppConfig';
 
 dotenv.config();
 
@@ -47,7 +48,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = config.getServerPort();
 
 // Initialize database and start server
 async function startServer() {
@@ -59,6 +60,7 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Database connected and initialized`);
+      console.log(config.getEnvironmentInfo());
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
