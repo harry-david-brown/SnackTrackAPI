@@ -68,12 +68,31 @@ export class DatabaseService {
     // Clear existing receipts for this user to avoid duplicates
     await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
     
-    // Insert new receipts
+    // Insert new receipts with enhanced structure
     for (const receipt of newOrders) {
-      await this.postgres.query(
-        'INSERT INTO receipts (user_id, amount_spent, items, email_from, email_to, email_body) VALUES ($1, $2, $3, $4, $5, $6)',
-        [userId, receipt.amountSpent, receipt.items, receipt.emailFrom, receipt.emailTo, receipt.emailBody]
-      );
+      await this.postgres.query(`
+        INSERT INTO receipts (
+          user_id, receipt_type, restaurant_name, order_date, 
+          amount_spent, subtotal, tax, tip, delivery_fee, service_fee,
+          items, email_from, email_to, email_subject, email_body
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `, [
+        userId,
+        receipt.receiptType,
+        receipt.restaurantName,
+        receipt.orderDate,
+        receipt.amountSpent,
+        receipt.subtotal,
+        receipt.tax,
+        receipt.tip,
+        receipt.deliveryFee,
+        receipt.serviceFee,
+        JSON.stringify(receipt.items),
+        receipt.emailFrom,
+        receipt.emailTo,
+        receipt.emailSubject,
+        receipt.emailBody
+      ]);
     }
     
     console.log(`📊 Updated receipts for user ${user.email}: ${newOrders.length} receipts, total: $${newOrders.reduce((sum, r) => sum + r.amountSpent, 0)}`);
