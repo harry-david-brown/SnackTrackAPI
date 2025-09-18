@@ -6,10 +6,12 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 
 ### Daily Goals (1-3 Day Sprint)
 - [x] **Database Setup** - PostgreSQL integration with Docker
-- [ ] **User Authentication** - JWT-based login/registration
-- [ ] **Receipt CRUD** - Complete receipt management operations
-- [ ] **Enhanced Email Parsing** - Support more receipt formats
-- [ ] **API Documentation** - Swagger/OpenAPI documentation
+- [x] **Receipt CRUD** - Complete receipt management operations
+- [x] **Enhanced Email Parsing** - Support more receipt formats
+- [x] **Enhanced Receipt** - Improved data structure
+- [x] **Spending Analytics** - Average Order Value
+- [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
+- [ ] **Duplicate Detection** - Only one receipt per order
 
 ### Weekly Goals (1-2 Week Sprint)
 - [ ] **Complete API MVP** - Production-ready backend
@@ -184,10 +186,107 @@ curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
 
 ### API Endpoints
 
-- `POST /users/create` - Create a user
+**Base URL:** `http://localhost:3000`
+
+#### Health Check
+- `GET /` - Server health check (returns "ALIVE")
+
+#### User Management
+- `POST /users/create` - Create a new user
+  ```bash
+  curl -X POST http://localhost:3000/users/create \
+    -H "Content-Type: application/json" \
+    -d '{"email": "your@email.com", "accountType": "free"}'
+  ```
+
+- `GET /users/:id/totalSpent` - Get total spending for a user
+  ```bash
+  curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
+  ```
+
 - `POST /users/:id/update-receipts` - Fetch emails and parse receipts
-- `GET /users/:id/totalSpent` - Get total spending
-- `GET /users/:id/debug/emails` - See raw email data
+  ```bash
+  curl -X POST http://localhost:3000/users/YOUR_USER_ID/update-receipts
+  ```
+
+- `GET /users/:id/debug/emails` - See raw email data and parsed receipts
+  ```bash
+  curl http://localhost:3000/users/YOUR_USER_ID/debug/emails
+  ```
+
+#### Receipt Management
+- `GET /receipts` - Get all receipts (supports query filters)
+  ```bash
+  # Get all receipts
+  curl http://localhost:3000/receipts
+  
+  # Get receipts for specific user
+  curl http://localhost:3000/receipts?userId=YOUR_USER_ID
+  
+  # Get receipts with pagination
+  curl http://localhost:3000/receipts?limit=10&offset=0
+  
+  # Get receipts with filters
+  curl http://localhost:3000/receipts?receiptType=uber_eats&minAmount=20
+  ```
+
+- `GET /receipts/:id` - Get a specific receipt by ID
+  ```bash
+  curl http://localhost:3000/receipts/RECEIPT_ID
+  ```
+
+- `POST /receipts` - Create a new receipt manually
+  ```bash
+  curl -X POST http://localhost:3000/receipts \
+    -H "Content-Type: application/json" \
+    -d '{"userId": "USER_ID", "amountSpent": 25.50, "receiptType": "uber_eats"}'
+  ```
+
+- `PUT /receipts/:id` - Update a receipt
+  ```bash
+  curl -X PUT http://localhost:3000/receipts/RECEIPT_ID \
+    -H "Content-Type: application/json" \
+    -d '{"amountSpent": 30.00}'
+  ```
+
+- `DELETE /receipts/:id` - Delete a receipt
+  ```bash
+  curl -X DELETE http://localhost:3000/receipts/RECEIPT_ID
+  ```
+
+- `GET /receipts/analytics/:userId` - Get spending analytics for a user
+  ```bash
+  curl http://localhost:3000/receipts/analytics/YOUR_USER_ID
+  ```
+
+#### Testing & Debug Endpoints
+- `POST /receipts/test-filter` - Test email filtering logic
+  ```bash
+  curl -X POST http://localhost:3000/receipts/test-filter \
+    -H "Content-Type: application/json" \
+    -d '{"from": "noreply@uber.com", "subject": "Your order", "body": "Total $25.50"}'
+  ```
+
+- `POST /receipts/analyze` - Email analysis endpoint (ready for integration)
+  ```bash
+  curl -X POST http://localhost:3000/receipts/analyze \
+    -H "Content-Type: application/json" \
+    -d '{"email": "your@email.com"}'
+  ```
+
+#### OAuth
+- `GET /auth/callback` - OAuth callback handler (used during Gmail setup)
+
+#### Query Parameters for Receipts
+- `userId` - Filter by user ID
+- `receiptType` - Filter by receipt type (uber_eats, etc.)
+- `restaurantName` - Filter by restaurant name
+- `startDate` - Filter receipts from this date (YYYY-MM-DD)
+- `endDate` - Filter receipts until this date (YYYY-MM-DD)
+- `minAmount` - Filter receipts with amount >= this value
+- `maxAmount` - Filter receipts with amount <= this value
+- `limit` - Number of receipts to return (default: 50)
+- `offset` - Number of receipts to skip (for pagination)
 
 ### How It Works
 

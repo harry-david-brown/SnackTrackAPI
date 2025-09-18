@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { ReceiptService, ReceiptFilters } from '../services/ReceiptService';
 import { PostgresService } from '../services/PostgresService';
 import { ReceiptType } from '../models/Receipt';
+import { Email } from '../models/Email';
 
 const router = Router();
 const postgresService = new PostgresService();
@@ -134,6 +135,38 @@ router.post('/analyze', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Error analyzing email:', err);
     res.status(500).json({ error: 'Failed to analyze email' });
+  }
+});
+
+// POST /receipts/test-filter - Test email filtering (debug endpoint)
+router.post('/test-filter', async (req: Request, res: Response) => {
+  try {
+    const { from, subject, body } = req.body;
+    
+    if (!from || !body) {
+      return res.status(400).json({ error: 'from and body are required' });
+    }
+
+    // Create a test email
+    const testEmail = new Email('test-user', from, 'test@example.com', body, subject);
+    
+    // Get classification
+    const classification = testEmail.getClassification();
+    const isReceipt = testEmail.isReceipt();
+    
+    res.json({
+      email: {
+        from,
+        subject,
+        bodyLength: body.length
+      },
+      classification,
+      isReceipt,
+      willBeStored: isReceipt && testEmail.toReceipt() !== null
+    });
+  } catch (err) {
+    console.error('Error testing email filter:', err);
+    res.status(500).json({ error: 'Failed to test email filter' });
   }
 });
 

@@ -11,17 +11,18 @@ function decodeBase64Gmail(str: string): string {
 
 export class GmailClient {
   async getEmails(user: User): Promise<Email[]> {
-    // For quick testing - replace with your actual credentials
+    // Use mock data only if Gmail credentials are not configured
     const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
-    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
-    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/callback';
     const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
-
-    // Quick validation
+    
     if (CLIENT_ID === 'your_client_id_here' || REFRESH_TOKEN === 'your_refresh_token_here') {
-      console.log('⚠️  Gmail credentials not configured. Using mock data for testing.');
+      console.log('🧪 Gmail credentials not configured: Using mock Uber emails for testing.');
       return this.getMockEmails(user);
     }
+
+    // Use real Gmail API (credentials are configured)
+    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
+    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/callback';
 
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
     oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
@@ -30,15 +31,26 @@ export class GmailClient {
     const emailList: Email[] = [];
 
     try {
-      // Fetch list of messages in the inbox
+      // Use Gmail search to only fetch Uber emails
+      const uberSearchQuery = 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com';
+      // In development, also search for emails from Nnamdi (forwarded Uber receipts)
+      const developmentQuery = process.env.NODE_ENV !== 'production' 
+        ? 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com OR from:nnamdi852@gmail.com'
+        : uberSearchQuery;
+      
+      console.log('🔍 Gmail API: Searching for Uber emails with query:', developmentQuery);
+      
       const listRes = await gmail.users.messages.list({
         userId: 'me', // Use 'me' for the authenticated user
-        labelIds: ['INBOX'],
-        maxResults: 5, // Limit for testing
+        q: developmentQuery, // Use development query that includes forwarded receipts
+        maxResults: 100, // Get more emails since we're filtering at source
       });
+      
+      console.log('📧 Gmail API: Found', listRes.data.messages?.length || 0, 'Uber emails');
 
       if (listRes.data.messages) {
         for (const msg of listRes.data.messages) {
+          console.log('📨 Gmail API: Processing email ID:', msg.id);
           // Fetch the full message
           const msgRes = await gmail.users.messages.get({
             userId: 'me',
@@ -52,6 +64,7 @@ export class GmailClient {
               if (header.name === 'To') to = header.value || '';
             }
           }
+          console.log('📧 Email from:', from, 'to:', to);
           // Get the body (handle multipart)
           if (payload?.body?.data) {
             body = decodeBase64Gmail(payload.body.data);
@@ -66,6 +79,7 @@ export class GmailClient {
           emailList.push(new Email(user.id, from, to, body));
         }
       }
+      console.log('✅ Gmail API: Returning', emailList.length, 'emails to process');
       return emailList;
     } catch (error) {
       console.error('Gmail API error:', error);
@@ -75,14 +89,17 @@ export class GmailClient {
   }
 
   private getMockEmails(user: User): Email[] {
-    console.log(`📧 Generating mock emails for user: ${user.email}`);
+    console.log(`📧 Generating mock Uber emails for user: ${user.email}`);
     return [
-      new Email(user.id, 'noreply@starbucks.com', user.email, 
-        'Thank you for your purchase at Starbucks! Total: $4.50\nItems: Grande Latte, Blueberry Muffin'),
-      new Email(user.id, 'receipts@mcdonalds.com', user.email, 
-        'McDonald\'s Receipt - Order #12345\nTotal: $8.99\nItems: Big Mac Meal, Apple Pie'),
-      new Email(user.id, 'orders@chipotle.com', user.email, 
-        'Chipotle Order Confirmation\nTotal: $12.75\nItems: Burrito Bowl, Chips & Guac')
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+        'Your Tuesday evening order with Uber Eats\nTotal CA$30.87\nNovember 15, 2022\nThanks for ordering!\nHere\'s your receipt from Sushi Shop (South Keys) and Uber Eats.\nYou ordered from Sushi Shop (South Keys)\nDelivered to Ottawa, ON\nSubtotal: $25.00\nTax: $3.25\nTip: $2.50\nDelivery Fee: $0.12',
+        'Your Tuesday evening order with Uber Eats'),
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+        'Your Friday lunch order with Uber Eats\nTotal CA$18.50\nNovember 18, 2022\nThanks for ordering!\nHere\'s your receipt from McDonald\'s and Uber Eats.\nYou ordered from McDonald\'s\nDelivered to Ottawa, ON\nSubtotal: $15.00\nTax: $1.95\nTip: $1.50\nDelivery Fee: $0.05',
+        'Your Friday lunch order with Uber Eats'),
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+        'Your Sunday brunch order with Uber Eats\nTotal CA$42.30\nNovember 20, 2022\nThanks for ordering!\nHere\'s your receipt from Tim Hortons and Uber Eats.\nYou ordered from Tim Hortons\nDelivered to Ottawa, ON\nSubtotal: $35.00\nTax: $4.55\nTip: $2.75\nDelivery Fee: $0.00',
+        'Your Sunday brunch order with Uber Eats')
     ];
   }
 } 

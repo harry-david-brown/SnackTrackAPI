@@ -10,7 +10,6 @@ services:
       - .:/usr/src/app
       - /usr/src/app/node_modules
     environment:
-      - NODE_ENV=development
       - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_dev
     env_file:
       - .env

@@ -68,33 +68,42 @@ export class DatabaseService {
     // Clear existing receipts for this user to avoid duplicates
     await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
     
-    // Insert new receipts with enhanced structure
+    // Filter and insert only actual receipts
+    let actualReceipts = 0;
+    let skippedEmails = 0;
+    
     for (const receipt of newOrders) {
-      await this.postgres.query(`
-        INSERT INTO receipts (
-          user_id, receipt_type, restaurant_name, order_date, 
-          amount_spent, subtotal, tax, tip, delivery_fee, service_fee,
-          items, email_from, email_to, email_subject, email_body
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      `, [
-        userId,
-        receipt.receiptType,
-        receipt.restaurantName,
-        receipt.orderDate,
-        receipt.amountSpent,
-        receipt.subtotal,
-        receipt.tax,
-        receipt.tip,
-        receipt.deliveryFee,
-        receipt.serviceFee,
-        JSON.stringify(receipt.items),
-        receipt.emailFrom,
-        receipt.emailTo,
-        receipt.emailSubject,
-        receipt.emailBody
-      ]);
+      // Only store receipts with actual spending (amount > 0)
+      if (receipt.amountSpent > 0) {
+        await this.postgres.query(`
+          INSERT INTO receipts (
+            user_id, receipt_type, restaurant_name, order_date, 
+            amount_spent, subtotal, tax, tip, delivery_fee, service_fee,
+            items, email_from, email_to, email_subject, email_body
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `, [
+          userId,
+          receipt.receiptType,
+          receipt.restaurantName,
+          receipt.orderDate,
+          receipt.amountSpent,
+          receipt.subtotal,
+          receipt.tax,
+          receipt.tip,
+          receipt.deliveryFee,
+          receipt.serviceFee,
+          receipt.items.length > 0 ? JSON.stringify(receipt.items) : null,
+          receipt.emailFrom,
+          receipt.emailTo,
+          receipt.emailSubject,
+          receipt.emailBody
+        ]);
+        actualReceipts++;
+      } else {
+        skippedEmails++;
+      }
     }
     
-    console.log(`📊 Updated receipts for user ${user.email}: ${newOrders.length} receipts, total: $${newOrders.reduce((sum, r) => sum + r.amountSpent, 0)}`);
+    console.log(`📊 Updated receipts for user ${user.email}: ${actualReceipts} actual receipts stored, ${skippedEmails} non-receipt emails skipped, total: $${newOrders.filter(r => r.amountSpent > 0).reduce((sum, r) => sum + r.amountSpent, 0)}`);
   }
 } 

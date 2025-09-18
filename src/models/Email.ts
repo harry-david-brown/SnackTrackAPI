@@ -1,6 +1,9 @@
 import { Receipt, ReceiptType, ReceiptItem } from './Receipt';
+import { EmailFilterService } from '../services/EmailFilterService';
 
 export class Email {
+  private static filterService = new EmailFilterService();
+
   constructor(
     public userId: string,
     public from: string,
@@ -9,7 +12,25 @@ export class Email {
     public subject?: string
   ) {}
 
-  toReceipt(): Receipt {
+  /**
+   * Check if this email is likely a receipt before processing
+   */
+  isReceipt(): boolean {
+    return Email.filterService.shouldProcessEmail(this);
+  }
+
+  /**
+   * Get detailed classification of this email
+   */
+  getClassification() {
+    return Email.filterService.classifyEmail(this);
+  }
+
+  toReceipt(): Receipt | null {
+    // Only convert to receipt if it's actually a receipt
+    if (!this.isReceipt()) {
+      return null;
+    }
     const body = this.body.toLowerCase();
     const subject = this.subject?.toLowerCase() || '';
     
@@ -75,52 +96,55 @@ export class Email {
     }
 
     // Extract total amount (look for "Total" or "Order Total")
-    const totalMatch = body.match(/total[:\s]*\$?(\d+\.?\d*)/i);
+    // Handle various currency formats: $30.87, CA$30.87, Total $30.87, Total CA$30.87
+    const totalMatch = body.match(/total[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (totalMatch) {
       totalAmount = parseFloat(totalMatch[1]);
     }
 
     // Extract subtotal
-    const subtotalMatch = body.match(/subtotal[:\s]*\$?(\d+\.?\d*)/i);
+    const subtotalMatch = body.match(/subtotal[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (subtotalMatch) {
       subtotal = parseFloat(subtotalMatch[1]);
     }
 
     // Extract tax
-    const taxMatch = body.match(/tax[:\s]*\$?(\d+\.?\d*)/i);
+    const taxMatch = body.match(/tax[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (taxMatch) {
       tax = parseFloat(taxMatch[1]);
     }
 
     // Extract tip
-    const tipMatch = body.match(/tip[:\s]*\$?(\d+\.?\d*)/i);
+    const tipMatch = body.match(/tip[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (tipMatch) {
       tip = parseFloat(tipMatch[1]);
     }
 
     // Extract delivery fee
-    const deliveryMatch = body.match(/delivery[:\s]*\$?(\d+\.?\d*)/i);
+    const deliveryMatch = body.match(/delivery[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (deliveryMatch) {
       deliveryFee = parseFloat(deliveryMatch[1]);
     }
 
     // Extract service fee
-    const serviceMatch = body.match(/service[:\s]*\$?(\d+\.?\d*)/i);
+    const serviceMatch = body.match(/service[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
     if (serviceMatch) {
       serviceFee = parseFloat(serviceMatch[1]);
     }
 
-    // Extract items (look for item patterns)
-    const itemMatches = body.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/gi);
-    if (itemMatches) {
-      for (const match of itemMatches) {
-        const parts = match.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/i);
-        if (parts) {
-          items.push({
-            name: parts[2].trim(),
-            quantity: parseInt(parts[1]),
-            price: parseFloat(parts[3])
-          });
+    // Extract items (look for item patterns) - but skip for forwarded emails to avoid parsing HTML/URLs
+    if (!body.includes('---------- Forwarded message ---------')) {
+      const itemMatches = body.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/gi);
+      if (itemMatches) {
+        for (const match of itemMatches) {
+          const parts = match.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/i);
+          if (parts) {
+            items.push({
+              name: parts[2].trim(),
+              quantity: parseInt(parts[1]),
+              price: parseFloat(parts[3])
+            });
+          }
         }
       }
     }

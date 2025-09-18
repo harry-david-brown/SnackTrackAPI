@@ -8,7 +8,9 @@ import { GmailClient } from '../services/email/GmailClient';
 export class LookupService {
   async getUserReceipts(user: User): Promise<Receipt[]> {
     const emails = await this.getUserEmails(user);
-    return emails.map(email => email.toReceipt());
+    return emails
+      .map(email => email.toReceipt())
+      .filter(receipt => receipt !== null) as Receipt[];
   }
 
   async getUserEmails(user: User): Promise<Email[]> {
