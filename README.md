@@ -1,18 +1,21 @@
 # 🥡 Snack Track API
 
-A Node.js/TypeScript API that automatically tracks your food spending by parsing receipt emails from your Gmail account.
+A Node.js/TypeScript API that automatically tracks your food spending through multiple data sources: **Uber CSV imports**, **financial aggregators (Plaid/TrueLayer)**, and **email parsing** as a fallback.
 
 ## 📋 Project Progress
 
 ### Daily Goals (1-3 Day Sprint)
 - [x] **Database Setup** - PostgreSQL integration with Docker
 - [x] **Receipt CRUD** - Complete receipt management operations
-- [x] **Enhanced Email Parsing** - Support more receipt formats
-- [x] **Enhanced Receipt** - Improved data structure
-- [x] **Spending Analytics** - Average Order Value
+- [x] **CSV File Parsing** - Parse Uber CSV data and extract order information
+- [x] **CSV Data Import** - Import parsed CSV data into PostgreSQL database
+- [x] **CSV API Endpoints** - Upload, preview, import, and status endpoints
+- [x] **CSV Data Validation** - Comprehensive data integrity verification
+- [x] **CSV User Management** - Create users specifically for CSV imports
+- [x] **Spending Analytics** - Average Order Value and detailed insights
 - [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
 - [x] **Dev/Prod flag** - Instant switching, collect scattered flags
-- [ ] **Duplicate Detection** - Only one receipt per order
+- [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)
 - [ ] **Complete API MVP** - Production-ready backend
@@ -38,7 +41,7 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
    ```bash
    git clone https://github.com/harry-david-brown/SnackTrackAPI
    cd SnackTrackAPI
-   ./start.sh
+   docker-compose up --build -d
    ```
 
 2. **Test it works**
@@ -49,35 +52,105 @@ A Node.js/TypeScript API that automatically tracks your food spending by parsing
 
 **That's it!** The API is now running on `http://localhost:3000`
 
+> **Note:** The system uses standard Docker bridge networking and should work out-of-the-box on any system with Docker installed.
+
+## 🗄️ Database State After Cloning
+
+When you clone this project, you get a **fresh, empty database**:
+
+### ✅ **What You Get:**
+- **Empty database schema** (tables created automatically)
+- **All the code** (CSV import functionality ready to use)
+- **Docker setup** (ready to run immediately)
+- **Test CSV file** (`MockUberData/Uber Data/Eats/user_orders-0.csv`)
+
+### ❌ **What You DON'T Get:**
+- **No users** (database starts completely empty)
+- **No receipts** (no imported data)
+- **No personal data** (each person gets their own clean slate)
+
+### 🔄 **Database Persistence:**
+- **Data persists** between container restarts (stored in Docker volume)
+- **Data is NOT shared** between different machines
+- **Perfect for privacy** - each person's data stays on their machine
+
+### 🎯 **Perfect Setup:**
+This clean slate approach is ideal because:
+1. **No conflicts** - no mixing of different people's data
+2. **Privacy** - each person's data stays on their machine
+3. **Easy setup** - just clone, run Docker, and import your own CSV
+4. **Fresh start** - everyone gets the same clean experience
+
+## 📁 Test Data Structure
+
+The project includes sample Uber CSV data for testing:
+
+```
+MockUberData/
+└── Uber Data/
+    └── Eats/
+        ├── user_orders-0.csv      ← Use this file for testing
+        └── eats_app_analytics-0.csv
+```
+
+**For testing:** Use `MockUberData/Uber Data/Eats/user_orders-0.csv`  
+**For your own data:** Replace with your downloaded Uber CSV file
+
 ## 🎯 What This Does
 
-Snack Track automatically:
+Snack Track automatically tracks your food spending through multiple data sources:
+
+### 🥡 **Primary Method: Uber CSV Import**
+- Import your complete Uber Eats order history (6+ years of data!)
+- Download your data from Uber's privacy portal
+- Upload CSV file for instant analysis
+- **Most comprehensive** - includes every order ever made
+
+### 💳 **Secondary Method: Financial Aggregators**
+- Connect bank/credit card accounts via Plaid/TrueLayer
+- Real-time transaction fetching
+- **Quickest option** - no waiting required
+- Limited to last 1-2 years of transactions
+
+### 📧 **Fallback Method: Email Parsing**
 - Connects to your Gmail account
-- Finds receipt emails from food delivery services (Uber Eats, etc.)
-- Extracts spending amounts and restaurant names
-- Tracks your total food spending over time
-- Provides spending analytics and insights
+- Finds receipt emails from food delivery services
+- **Backup option** - when other methods aren't available
 
-## 🎭 Two Ways to Use It
+## 🎭 Three Ways to Use It
 
-### Option 1: Demo Mode (Easiest)
-**Perfect for trying it out - uses fake data**
+### Option 1: Uber CSV Import (Recommended)
+**Import your complete Uber Eats history**
 
 ```bash
-# Create a demo user
-curl -X POST http://localhost:3000/users/create \
-  -H "Content-Type: application/json" \
-  -d '{"email": "demo@example.com"}'
+# Create a CSV-only user (no email required)
+curl -X POST http://localhost:3000/users/create-csv
 
-# Copy the user ID from response, then:
-curl -X POST http://localhost:3000/users/YOUR_USER_ID/update-receipts
+# Upload your Uber CSV file (example uses the included test data)
+curl -X POST http://localhost:3000/csv/import \
+  -F "csvFile=@MockUberData/Uber Data/Eats/user_orders-0.csv" \
+  -F "userId=YOUR_USER_ID"
 
 # Check total spending
 curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
+
+# Verify data integrity
+curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
 ```
 
-### Option 2: Real Gmail Data
-**Track your actual food spending**
+> **Note:** The example uses the included test CSV file. Replace the file path with your own Uber CSV file when you have it.
+
+### Option 2: Financial Aggregator (Coming Soon)
+**Connect bank/credit card accounts**
+
+```bash
+# Coming soon: Plaid/TrueLayer integration
+# Real-time transaction fetching
+# No waiting required
+```
+
+### Option 3: Email Parsing (Fallback)
+**Use Gmail for receipt parsing**
 
 **Easiest:** Use the pre-configured test account `snacktracktest@gmail.com`
 
@@ -133,26 +206,46 @@ docker-compose down && docker-compose up --build -d
 
 **Base URL:** `http://localhost:3000`
 
-### Essential Endpoints
-- `GET /` - Health check (returns "ALIVE")
-- `POST /users/create` - Create a new user
+### 🥡 CSV Import Endpoints
+- `POST /csv/upload` - Upload and parse CSV file
+- `POST /csv/preview` - Preview CSV data without importing
+- `POST /csv/import` - Import CSV data to database
+- `GET /csv/status/:userId` - Get import status for user
+
+### 📊 Validation & Analytics Endpoints
+- `GET /validation/user/:userId/summary` - Complete user data summary
+- `GET /validation/user/:userId/receipts` - Detailed receipt breakdown
+- `GET /validation/user/:userId/verify-csv` - CSV data integrity verification
+- `GET /validation/database/health` - Database health and statistics
+
+### 👤 User Management Endpoints
+- `POST /users/create` - Create a new user (requires email)
+- `POST /users/create-csv` - Create a CSV-only user (no email required)
 - `GET /users/:id/totalSpent` - Get total spending
+- `GET /receipts/analytics/:userId` - Get spending analytics
+
+### 📧 Email Endpoints (Fallback)
 - `POST /users/:id/update-receipts` - Fetch and parse emails
 - `GET /users/:id/debug/emails` - See raw email data
-- `GET /receipts/analytics/:userId` - Get spending analytics
 
 ### Example Usage
 ```bash
-# Create user
-curl -X POST http://localhost:3000/users/create \
-  -H "Content-Type: application/json" \
-  -d '{"email": "your@email.com"}'
+# Create CSV-only user
+curl -X POST http://localhost:3000/users/create-csv
 
-# Get total spent
-curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
+# Import Uber CSV (using included test data)
+curl -X POST http://localhost:3000/csv/import \
+  -F "csvFile=@MockUberData/Uber Data/Eats/user_orders-0.csv" \
+  -F "userId=YOUR_USER_ID"
 
-# Get analytics
-curl http://localhost:3000/receipts/analytics/YOUR_USER_ID
+# Get comprehensive summary
+curl http://localhost:3000/validation/user/YOUR_USER_ID/summary
+
+# Verify data integrity
+curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
+
+# Check database health
+curl http://localhost:3000/validation/database/health
 ```
 
 ---
@@ -192,6 +285,7 @@ curl http://localhost:3000/receipts/analytics/YOUR_USER_ID
 - **"invalid_client"**: Check your CLIENT_SECRET in .env
 - **"Access blocked"**: Add yourself as test user in Google Cloud Console
 - **Port 3000 in use**: Stop other services or change port in docker-compose.yml
+- **Docker networking issues**: The system uses standard Docker bridge networking and should work on any system with Docker installed
 
 ---
 

@@ -1,0 +1,642 @@
+City_Name,Restaurant_Name,Request_Time_Local,Final_Delivery_Time_Local,Order_Status,Item_Name,Item_quantity,Customizations,Customization_Cost_Local,Special_Instructions,Item_Price,Order_Price,Currency
+Toronto,Papa John's Pizza (2021 Green Rd),2025-08-16T22:42:32.000Z,2025-08-16T23:05:47.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Cut, Normal Bake",0.0,"",28.88,21.37,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-08-16T22:42:32.000Z,2025-08-16T23:05:47.000Z,completed,Special Garlic Sauce,1,Garlic Dipping Sauce,0.0,"",1.69,21.37,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Med Diet Coke [1.0 Cals],1,"Ice [0.0 Cals], Med Diet Coke [1.0 Cals]",0.0,"",3.39,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Med Fries [350.0 Cals],1,Salt [0.0 Cals],0.0,"",5.29,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,Lrg Coca-Cola [280.0 Cals],0.4,"",17.89,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,Lrg Fries [560.0 Cals],0.8,"",17.89,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Med Fries [350.0 Cals],1,Lrg Fries [560.0 Cals],0.8,"",5.29,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,20 Chicken McNuggets (Serves 2) [950-1160 Cals],1,Sweet 'N Sour Sauce [50.0 Cals],0.0,"",17.99,45.78,CAD
+Toronto,McDonald's (2320 Highway 2),2025-08-09T17:27:12.000Z,2025-08-09T17:55:34.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,"Meat Patty [230.0 Cals], Cheese [45.0 Cals], Mustard [0.0 Cals], Onions [10.0 Cals], Salt [0.0 Cals], Ketchup [15.0 Cals], Soft Drinks, Pickles [1.0 Cals], Bun [180.0 Cals], Ice [0.0 Cals]",0.0,"",17.89,45.78,CAD
+Toronto,Burrito Guyz (Newcastle),2025-08-09T16:29:07.000Z,2025-08-09T17:13:34.000Z,completed,Burritos,2,"Brown Rice, Creamy Garlic, Pinto Beans, Cilantro Lime Sour Cream, Pickled Onion, Diced Tomato, Red Onion, Mango Salsa, White Tortilla, Cholula® Green Pepper Hot Sauce, Cheese, Green Onion, Lettuce, Small Size (10''), Mexican Rice, Diced JalapeñO",0.0,"",22.98,32.42,CAD
+Toronto,Burrito Guyz (Newcastle),2025-08-09T16:29:07.000Z,2025-08-09T17:13:34.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,32.42,CAD
+Toronto,Burrito Guyz (Newcastle),2025-08-09T16:29:07.000Z,2025-08-09T17:13:34.000Z,completed,Burritos,2,Spicy Chipotle Chicken,3.99,"",22.98,32.42,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-27T17:47:06.000Z,2025-07-27T18:27:33.000Z,completed,Burritos,2,Chipotle Steak,5.49,"",22.98,36.79,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-27T17:47:06.000Z,2025-07-27T18:27:33.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,36.79,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-27T17:47:06.000Z,2025-07-27T18:27:33.000Z,completed,Burritos,2,"Pinto Beans, Cilantro Lime Sour Cream, Medium Salsa, Diced Jalapeño, Burrito Sauce, Pickled Onion, Diced Tomato, Red Onion, White Tortilla, Cheese, Cholula® Green Pepper Hot Sauce, Green Onion, Lettuce, Small Size (10''), Mexican Rice",0.0,"",22.98,36.79,CAD
+Toronto,Firehouse Subs (Bowmanville),2025-07-26T18:17:50.000Z,2025-07-26T18:45:13.000Z,completed,Hook & Ladder®,2,"Ham, Onion, Side Pickle, Tomato, Turkey, Medium (7-8 inch), Monterey Jack, White Bread, Lettuce, Deli Mustard, Mayo",0.0,"",32.58,21.81,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-19T16:36:07.000Z,2025-07-19T17:09:32.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,36.79,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-19T16:36:07.000Z,2025-07-19T17:09:32.000Z,completed,Burritos,2,Chipotle Steak,5.49,"",22.98,36.79,CAD
+Toronto,Burrito Guyz (Newcastle),2025-07-19T16:36:07.000Z,2025-07-19T17:09:32.000Z,completed,Burritos,2,"Pinto Beans, Cilantro Lime Sour Cream, Diced Jalapeño, Burrito Sauce, Pickled Onion, Diced Tomato, Red Onion, Mango Salsa, White Tortilla, Cheese, Cholula® Green Pepper Hot Sauce, Green Onion, Lettuce, Small Size (10''), Mexican Rice",0.0,"",22.98,36.79,CAD
+Toronto,Goodfella's Pizzeria,2025-07-16T11:14:10.000Z,2025-07-16T11:43:26.000Z,completed,Coke cola,1,"",,"",1.59,18.34,CAD
+Toronto,Goodfella's Pizzeria,2025-07-16T11:14:10.000Z,2025-07-16T11:43:26.000Z,completed,Pepperoni Pizza,1,Small,0.0,"",15.99,18.34,CAD
+Toronto,Goodfella's Pizzeria,2025-07-16T11:14:10.000Z,2025-07-16T11:43:26.000Z,completed,Creamy garlic,1,"",,"",1.69,18.34,CAD
+Toronto,Taco Star (Courtice),2025-07-03T21:20:55.000Z,2025-07-03T22:22:31.000Z,completed,Classic Birria Tacos (3 Pcs),2,"Salsa Roja ( medium), 3 Corn Tortilla",0.0,"",41.98,34.44,CAD
+Toronto,Taco Star (Courtice),2025-07-03T21:20:55.000Z,2025-07-03T22:22:31.000Z,completed,Jarritos,1,Mexican cola,0.0,"",4.0,34.44,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-06-27T13:31:56.000Z,2025-06-27T13:51:53.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Bake, Normal Cut",0.0,"",28.88,20.68,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-06-27T13:31:56.000Z,2025-06-27T13:51:53.000Z,completed,Special Garlic Sauce,1,Garlic Dipping Sauce,0.0,"",1.69,20.68,CAD
+Toronto,A-One Delights Buffet,2025-06-17T14:03:25.000Z,2025-06-17T14:23:01.000Z,completed,Make Your Own Combination,1,"Beef with Broccoli p t, Steamed Fried Rice, General Tao Chicken p t",0.0,"Can you please exchange the beef and broccoli for a double serving of the general tao chicken, the app won’t let me select general tao twice",19.98,23.71,CAD
+Toronto,Burger Factory (Courtice),2025-06-14T21:12:55.000Z,2025-06-14T21:53:49.000Z,completed,Strawberry Milk Shake,1,"",,"",7.99,41.78,CAD
+Toronto,Burger Factory (Courtice),2025-06-14T21:12:55.000Z,2025-06-14T21:53:49.000Z,completed,Cheeseburger Combo,2,"Pickles, Chipotle, Onions, Factory Sauce, Fresh Cut Fries, Lettuce, Tomatoes, BBQ Sauce, Mayo, Water",0.0,"",47.98,41.78,CAD
+Toronto,A-One Delights Buffet,2025-05-24T12:00:53.000Z,2025-05-24T12:18:19.000Z,completed,Make Your Own Combination,1,"Beef with Broccoli p t, Steamed Fried Rice, General Tao Chicken p t",0.0,Can I please have 2 servings of the general tao chicken instead of the beef and broccoli? The app is forcing me to select 2 options. Thank you,19.98,24.16,CAD
+Toronto,"Fresh Burrito- 1635 Durham Regional Hwy 2, Courtice",2025-05-17T22:48:27.000Z,2025-05-17T23:16:00.000Z,completed,Burrito,2,"Sour Cream (Mild), Chicken, Pinto Beans, Tomatoes, Hot Sauce, Salsa Verde (Med Heat and Tangy), Shredded Cheese, NO combo, White Tortilla, Red Onions, Pickled Jalapeños, Lettuce, Regular Size, Mexican Rice",0.0,"",33.98,29.57,CAD
+Toronto,"Fresh Burrito- 1635 Durham Regional Hwy 2, Courtice",2025-05-17T22:48:27.000Z,2025-05-17T23:16:00.000Z,completed,Jarrito Mexican Flavor Drinks Glass Bottles (370ml),1,Mexican Cola,0.0,"",4.19,29.57,CAD
+Toronto,Firehouse Subs (Bowmanville),2025-05-15T15:04:33.000Z,2025-05-15T15:31:16.000Z,completed,Hook & Ladder®,1,"Ham, Onion, Side Pickle, Tomato, Monterey Jack, Turkey, Medium (7-8 inch), White Bread, Lettuce, Deli Mustard, Mayo",0.0,"",16.29,19.75,CAD
+Toronto,Goodfella's Pizzeria,2025-05-10T20:08:32.000Z,2025-05-10T20:55:42.000Z,completed,Coke cola,1,"",,"",1.59,18.12,CAD
+Toronto,Goodfella's Pizzeria,2025-05-10T20:08:32.000Z,2025-05-10T20:55:42.000Z,completed,Creamy garlic,1,"",,"",1.69,18.12,CAD
+Toronto,Goodfella's Pizzeria,2025-05-10T20:08:32.000Z,2025-05-10T20:55:42.000Z,completed,Pepperoni Pizza,1,Small,0.0,"",15.99,18.12,CAD
+Toronto,A-One Delights Buffet,2025-05-08T14:18:13.000Z,2025-05-08T14:36:00.000Z,completed,Make Your Own Combination,1,"Beef with Broccoli p t, Chicken Fried Rice, General Tao Chicken p t",0.0,Can I please have 2 servings of the General Tao Chicken,19.98,25.43,CAD
+Toronto,Lagos Kitchen,2025-05-06T12:36:33.000Z,2025-05-06T13:25:30.000Z,completed,Jollof Rice and Beef,1,"",,"",20.99,27.69,CAD
+Toronto,Burrito Guyz (Newcastle),2025-05-03T14:28:32.000Z,2025-05-03T15:04:59.000Z,completed,Burritos,2,"Pinto Beans, Cilantro Lime Sour Cream, Diced Jalapeño, Burrito Sauce, Pickled Onion, Diced Tomato, Red Onion, Cholula® Chili Garlic Hot Sauce, White Tortilla, Cheese, Lettuce, Mango Salsa (NEW), Small Size (10''), Mexican Rice",0.0,"",22.98,34.97,CAD
+Toronto,Burrito Guyz (Newcastle),2025-05-03T14:28:32.000Z,2025-05-03T15:04:59.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,34.97,CAD
+Toronto,Burrito Guyz (Newcastle),2025-05-03T14:28:32.000Z,2025-05-03T15:04:59.000Z,completed,Burritos,2,Tequila-Lime Chicken,4.99,"",22.98,34.97,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-25T20:03:57.000Z,2025-04-25T20:46:56.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,34.97,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-25T20:03:57.000Z,2025-04-25T20:46:56.000Z,completed,Burritos,2,"Diced Tomato, Red Onion, Cholula® Chili Garlic Hot Sauce, White Tortilla, Pinto Beans, Cheese, Burrito Sauce, Sour Cream, Mango Salsa (NEW), Lettuce, Pickled Onion, Small Size (10''), Mexican Rice",0.0,"",22.98,34.97,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-25T20:03:57.000Z,2025-04-25T20:46:56.000Z,completed,Burritos,2,Tequila-Lime Chicken,4.99,"",22.98,34.97,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-04-24T17:53:39.000Z,2025-04-24T18:18:22.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Bake, Normal Cut",0.0,"",27.68,18.52,CAD
+Toronto,Firehouse Subs (Bowmanville),2025-04-17T18:40:03.000Z,2025-04-17T18:59:25.000Z,completed,Hook & Ladder®,2,"Ham, Onion, Side Pickle, Tomato, Turkey, Medium (7-8 inch), Monterey Jack, White Bread, Lettuce, Deli Mustard, Mayo",0.0,"",32.58,21.81,CAD
+Toronto,BarBurrito: Bowmanville,2025-04-14T15:17:13.000Z,2025-04-14T15:35:44.000Z,completed,Burrito Special,2,Mild Chicken,2.4,"",21.38,26.34,CAD
+Toronto,BarBurrito: Bowmanville,2025-04-14T15:17:13.000Z,2025-04-14T15:35:44.000Z,completed,Bottled Pop,1,Coke bottle,0.0,"",3.95,26.34,CAD
+Toronto,BarBurrito: Bowmanville,2025-04-14T15:17:13.000Z,2025-04-14T15:35:44.000Z,completed,Burrito Special,2,"Burrito Sauce (Mild) (44 Cals), Pickled Onions, Red Onion (5 Cals), Small White, Mexican Rice (130 - 260 Cals), Jalapeno Salsa, Lettuce (2 Cals), Pinto Beans (130 - 250 Cals), Cheese (90 Cals), Sour Cream (37 Cals), Tomatoes (5 Cals)",0.0,"",21.38,26.34,CAD
+Toronto,BarBurrito: Bowmanville,2025-04-14T15:17:13.000Z,2025-04-14T15:35:44.000Z,completed,Side Sauce,1,"Signature Hot Sauce [Very Spicy, +5 Cals]",0.0,"",1.2,26.34,CAD
+Toronto,Burger Factory (Courtice),2025-04-06T12:08:55.000Z,2025-04-06T12:47:55.000Z,completed,Strawberry Milk Shake,1,"",,"",7.99,41.78,CAD
+Toronto,Burger Factory (Courtice),2025-04-06T12:08:55.000Z,2025-04-06T12:47:55.000Z,completed,Cheeseburger Combo,2,"Pickles, Chipotle, Onions, Factory Sauce, Fresh Cut Fries, Lettuce, Tomatoes, Mayo, Water",0.0,"",47.98,41.78,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-05T14:23:00.000Z,2025-04-05T14:57:15.000Z,completed,Burritos,2,Jarritos Mexican cola,4.49,"",22.98,40.05,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-05T14:23:00.000Z,2025-04-05T14:57:15.000Z,completed,Burritos,2,Tequila-Lime Chicken,4.99,"",22.98,40.05,CAD
+Toronto,Burrito Guyz (Newcastle),2025-04-05T14:23:00.000Z,2025-04-05T14:57:15.000Z,completed,Burritos,2,"Diced Tomato, Red Onion, White Tortilla, Pinto Beans, Cheese, Cholula® Green Pepper Hot Sauce, Medium Salsa, Sour Cream, Burrito Sauce, Lettuce, Tex Mex Seasoning, Small Size (10''), Mexican Rice",0.0,"",22.98,40.05,CAD
+Toronto,Kajun Chicken + Seafood (Oshawa),2025-03-24T20:51:37.000Z,2025-03-24T21:42:08.000Z,completed,Triple Crunch Tenders,2,"Spicy Mayo, Spicy",0.0,"",28.58,12.21,CAD
+Toronto,Starbucks (2348 Highway 2),2025-03-19T12:02:18.000Z,2025-03-19T12:23:27.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.1,"",5.45,18.36,CAD
+Toronto,Starbucks (2348 Highway 2),2025-03-19T12:02:18.000Z,2025-03-19T12:23:27.000Z,completed,Caffè Latte,1,"Signature Espresso, Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Foam, 2% Milk",0.0,"",5.45,18.36,CAD
+Toronto,Starbucks (2348 Highway 2),2025-03-19T12:02:18.000Z,2025-03-19T12:23:27.000Z,completed,"Turkey, Provolone & Pesto on Ciabatta",1,"",,"",9.45,18.36,CAD
+Toronto,Burrito Guyz (Newcastle),2025-03-10T12:51:52.000Z,2025-03-10T13:22:58.000Z,completed,Burritos,2,Spicy Chipotle Chicken,3.99,"",22.98,32.71,CAD
+Toronto,Burrito Guyz (Newcastle),2025-03-10T12:51:52.000Z,2025-03-10T13:22:58.000Z,completed,Burritos,2,"Pinto Beans, Medium Salsa, Burrito Sauce, Sour Cream, Pickled Onion, Diced Tomato, Red Onion, Cholula Chili Garlic Hot Sauce, White Tortilla, Cheese, Lettuce, Tex Mex Seasoning, Small Size (10''), Mexican Rice",0.0,"",22.98,32.71,CAD
+Toronto,Burrito Guyz (Newcastle),2025-03-10T12:51:52.000Z,2025-03-10T13:22:58.000Z,completed,Jarritos,1,Mexican Cola,0.0,"",4.49,32.71,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-03-09T12:41:59.000Z,2025-03-09T13:17:09.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Bake, Normal Cut",0.0,"",27.68,18.52,CAD
+Toronto,Burger Factory (Courtice),2025-03-08T19:51:31.000Z,2025-03-08T20:27:32.000Z,completed,Cheeseburger Combo,1,"Pickles, Onions, Factory Sauce, Fresh Cut Fries, Lettuce, Tomatoes, Mayo",0.0,"",17.99,31.47,CAD
+Toronto,Burger Factory (Courtice),2025-03-08T19:51:31.000Z,2025-03-08T20:27:32.000Z,completed,Cheeseburger Combo,1,Strawberry Milk Shake,5.99,"",17.99,31.47,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-02-28T14:52:58.000Z,2025-02-28T15:14:19.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Cut, Normal Bake",0.0,"",27.68,17.9,CAD
+Toronto,Burger Factory (Courtice),2025-02-27T21:34:35.000Z,2025-02-27T22:12:11.000Z,completed,Cheeseburger Combo,1,Strawberry Milk Shake,5.99,"",17.99,30.93,CAD
+Toronto,Burger Factory (Courtice),2025-02-27T21:34:35.000Z,2025-02-27T22:12:11.000Z,completed,Cheeseburger Combo,1,"Pickles, Onions, Factory Sauce, Fresh Cut Fries, Lettuce, Tomatoes",0.0,"",17.99,30.93,CAD
+Toronto,Starbucks (2348 Highway 2),2025-02-26T11:13:11.000Z,2025-02-26T11:29:15.000Z,completed,Caffè Latte,1,Grande Caffè Latte,0.5,"",5.45,23.57,CAD
+Toronto,Starbucks (2348 Highway 2),2025-02-26T11:13:11.000Z,2025-02-26T11:29:15.000Z,completed,Matcha Tea Latte,1,"Included Classic Syrup, Whole Milk, Steamed Hot, Included Matcha Powder, Foam, 2% Milk",0.0,"",6.55,23.57,CAD
+Toronto,Starbucks (2348 Highway 2),2025-02-26T11:13:11.000Z,2025-02-26T11:29:15.000Z,completed,Everything Croissant & Roasted Ham Sandwich,1,"",,"",7.15,23.57,CAD
+Toronto,Starbucks (2348 Highway 2),2025-02-26T11:13:11.000Z,2025-02-26T11:29:15.000Z,completed,Matcha Tea Latte,1,Matcha Green Tea Latte Tall,0.2,"",6.55,23.57,CAD
+Toronto,Starbucks (2348 Highway 2),2025-02-26T11:13:11.000Z,2025-02-26T11:29:15.000Z,completed,Caffè Latte,1,"Signature Espresso, Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Foam, 2% Milk",0.0,"",5.45,23.57,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-02-15T18:55:27.000Z,2025-02-15T19:43:49.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Cut, Normal Bake",0.0,"",27.68,17.88,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2025-02-15T18:55:27.000Z,2025-02-15T19:43:49.000Z,completed,Special Garlic Sauce,1,Garlic Dipping Sauce,0.0,"",1.69,17.88,CAD
+Toronto,Pho surpryz Viet Thai Cuisines,2025-01-27T15:16:01.000Z,2025-01-27T16:14:02.000Z,completed,Broth (Pho) - Beef Base,1,"",,"",6.0,30.67,CAD
+Toronto,Pho surpryz Viet Thai Cuisines,2025-01-27T15:16:01.000Z,2025-01-27T16:14:02.000Z,completed,P3 - Rare Beef Pho,1,"",,"",17.0,30.67,CAD
+Toronto,Goodfella's Pizzeria,2024-12-07T22:55:07.000Z,2024-12-07T23:44:08.000Z,completed,Student Deal,1,"Creamy Garlic, Pepperoni, Coke",0.0,"",16.99,21.59,CAD
+Toronto,Hero Certified Burgers (100 Mearns Avenue),2024-11-10T20:19:19.000Z,2024-11-10T20:48:06.000Z,completed,Signature Cheeseburger,2,"Sesame Poppy Seed, 4oz",0.0,"",25.9,18.68,CAD
+Toronto,Hero Certified Burgers (100 Mearns Avenue),2024-10-29T13:22:24.000Z,2024-10-29T13:46:20.000Z,completed,Bottled Beverage,1,Coca-Cola® 500mL Bottle,3.0,"",0.0,24.4,CAD
+Toronto,Hero Certified Burgers (100 Mearns Avenue),2024-10-29T13:22:24.000Z,2024-10-29T13:46:20.000Z,completed,Signature Cheeseburger,1,Sesame Poppy Seed,0.0,"",10.95,24.4,CAD
+Toronto,Hero Certified Burgers (100 Mearns Avenue),2024-10-29T13:22:24.000Z,2024-10-29T13:46:20.000Z,completed,Signature Cheeseburger,1,6oz,2.0,"",10.95,24.4,CAD
+Toronto,Hero Certified Burgers (100 Mearns Avenue),2024-10-29T13:22:24.000Z,2024-10-29T13:46:20.000Z,completed,Sweet Potato Fries,1,"",,"",5.75,24.4,CAD
+Toronto,A-One Delights Buffet,2024-10-26T11:47:02.000Z,2024-10-26T12:06:59.000Z,completed,Make Your Own Combination,1,"Beef with Broccoli p t, Steamed Fried Rice, General Tao Chicken p t",0.0,"",18.0,24.28,CAD
+Toronto,Booster Juice (2366 Regional Highway 2),2024-10-17T19:21:01.000Z,2024-10-17T19:46:42.000Z,completed,Bananas-A-Whey (Regular Size),1,Power Booster,0.0,"",10.14,13.26,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-10-17T19:17:30.000Z,2024-10-17T19:46:43.000Z,completed,Cinnamon Pull Aparts,1,Cinnamon Pull Aparts,0.0,"",9.79,32.41,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-10-17T19:17:30.000Z,2024-10-17T19:46:43.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Normal Bake, Normal Cut, Sausage",0.0,"",25.28,32.41,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-10-17T19:17:30.000Z,2024-10-17T19:46:43.000Z,completed,Special Garlic Sauce,1,Garlic Dipping Sauce,0.0,"",1.59,32.41,CAD
+Toronto,Eddies Restaurant & Bar,2024-10-09T18:14:41.000Z,2024-10-09T18:59:29.000Z,completed,Butchers Block,2,Regular,0.0,"",31.98,24.76,CAD
+Toronto,Eddies Restaurant & Bar,2024-10-09T18:14:41.000Z,2024-10-09T18:59:29.000Z,completed,Coca-Cola 500ml,1,"",,"",3.25,24.76,CAD
+Toronto,"Fresh Burrito- 1393 Harmony Rd, Oshawa",2024-10-06T22:42:44.000Z,2024-10-06T23:20:29.000Z,completed,Burrito,2,"Salsa Verde (Med Heat and Tangy), Sour Cream (Mild), Shredded Cheese, Burrito Sauce (Medium Spicy), Regular (On 12-inch Tortilla), Fresh Jalapenos, White Tortilla, Pinto Beans, Red Onions, Ground beef, Lettuce, Tomatoes, Mexican Rice",0.0,"",33.98,29.93,CAD
+Toronto,"Fresh Burrito- 1393 Harmony Rd, Oshawa",2024-10-06T22:42:44.000Z,2024-10-06T23:20:29.000Z,completed,Jarrito Mexican Flavor Drinks Glass Bottles (370ml),1,Mexican cola,0.0,"",4.19,29.93,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-10-06T00:34:55.000Z,2024-10-06T00:58:52.000Z,completed,Create Your Own Pizza,1,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Bake, Normal Cut",0.0,"",12.64,17.66,CAD
+Toronto,A-One Delights Buffet,2024-10-04T18:43:44.000Z,2024-10-04T19:06:12.000Z,completed,Make Your Own Combination,1,"Lemon chicken, General Tao Chicken, Steamed Fried Rice",0.0,"",16.2,21.69,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-09-28T18:35:22.000Z,2024-09-28T18:56:34.000Z,completed,Create Your Own Pizza,2,"Small (10"") Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Cut, Normal Bake",0.0,"",25.28,18.26,CAD
+Toronto,Vietnamese Pho,2024-09-21T15:56:18.000Z,2024-09-21T16:36:17.000Z,completed,P2. Rare Beef,1,XL,2.0,"",15.6,24.4,CAD
+Toronto,Papa John's Pizza (2021 Green Rd),2024-09-17T16:41:32.000Z,2024-09-17T17:08:04.000Z,completed,Create Your Own Pizza,2,"10 Inch Original Create Your Own, Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Normal Bake, Normal Cut",0.0,"",25.28,18.26,CAD
+Toronto,"Fresh Burrito- 1635 Durham Regional Hwy 2, Courtice",2024-09-06T23:50:13.000Z,2024-09-07T00:31:19.000Z,completed,Burrito,2,"Salsa Verde (Med Heat and Tangy), Burrito Sauce (Medium Spicy), Shredded Cheese, Regular (On 12-inch Tortilla), Sour Cream (Mild), White Tortilla, Pinto Beans, Red Onions, Ground beef, Lettuce, Tomatoes, Mexican Rice, Pickled Jalapenos",0.0,"",33.98,24.72,CAD
+Toronto,A-One Delights Buffet,2024-07-22T17:05:39.000Z,2024-07-22T17:25:51.000Z,completed,Make Your Own Combination,1,"General Tao Chicken, Steamed Fried Rice, Beef with Broccoli",0.0,"",16.2,21.69,CAD
+Toronto,A-One Delights Buffet,2024-07-11T18:59:12.000Z,2024-07-11T19:14:32.000Z,completed,Make Your Own Combination,1,"General Tao Chicken, Steamed Fried Rice, Beef with Broccoli",0.0,"",16.2,21.69,CAD
+Toronto,The Ice Cream Shop (LONGWORTH AVENUE),2024-07-06T01:55:23.000Z,2024-07-06T02:35:56.000Z,completed,Ben & Jerry's Chocolate Chip Cookie Dough 473mL,1,"",,"",9.99,0.0,CAD
+Toronto,A&W (2475 Energy Drive),2024-07-06T01:52:06.000Z,2024-07-06T02:35:56.000Z,completed,Teen Burger®,2,"",,"",16.98,14.15,CAD
+Toronto,Pita Pit (855 Taunton Rd. East Unit 3),2024-07-03T20:45:34.000Z,2024-07-03T21:23:02.000Z,completed,Regular Pita,2,Chicken Souvlaki,1.7,"",21.58,23.37,CAD
+Toronto,Pita Pit (855 Taunton Rd. East Unit 3),2024-07-03T20:45:34.000Z,2024-07-03T21:23:02.000Z,completed,Regular Pita,2,"Feta, Roasted Red Peppers, Spinach, Tzatziki, Grilled Green Peppers, Iceberg Lettuce, Jalapeños, Tomatoes, Grilled Onions, Roasted Garlic Aioli, Salt, Avocado, Greek Seasoning, Onions, Pepper, Toasted",0.0,"",21.58,23.37,CAD
+Toronto,A-One Delights Buffet,2024-05-28T17:19:06.000Z,2024-05-28T17:36:19.000Z,completed,Make Your Own Combination,1,"General Tao Chicken, Chicken Fried Rice, Black Pepper Steak",0.0,"",16.2,21.69,CAD
+Toronto,Loaded Pierogi (Bowmanville),2024-05-15T12:48:13.000Z,2024-05-15T13:20:12.000Z,completed,Garlic Parm Chicken,2,Crispy fried Pierogies with a side of sour cream,0.0,"",39.88,0.0,CAD
+Toronto,Firehouse Subs (Bowmanville),2024-05-14T15:36:10.000Z,2024-05-14T16:07:45.000Z,completed,"Hook & Ladder® , Medium (7-8 inch)--",2,"Ham, Onion, Side Pickle ""May not be available"", Lettuce (May not be available), Tomato, Turkey, Monterey Jack, White Bread, Deli Mustard, Mayo",0.0,"",28.6,20.51,CAD
+Toronto,BarBurrito (Courtice),2024-04-26T22:42:33.000Z,2024-04-26T23:25:42.000Z,completed,Bottled Pop,1,Coke bottle,0.0,"",3.95,24.91,CAD
+Toronto,BarBurrito (Courtice),2024-04-26T22:42:33.000Z,2024-04-26T23:25:42.000Z,completed,Burrito Special,2,Regular White,2.0,"",21.38,24.91,CAD
+Toronto,BarBurrito (Courtice),2024-04-26T22:42:33.000Z,2024-04-26T23:25:42.000Z,completed,Burrito Special,2,"Burrito Sauce (Mild) (44 Cals), Pickled Onions, Red Salsa (5 Cals), Red Onion (5 Cals), Mexican Rice (130 - 260 Cals), Pinto Beans (130 - 250 Cals), Cheese (90 Cals), Tomatoes (5 Cals), Sour Cream (37 Cals)",0.0,"",21.38,24.91,CAD
+Toronto,BarBurrito (Courtice),2024-04-26T22:42:33.000Z,2024-04-26T23:25:42.000Z,completed,Burrito Special,2,Mild Chicken,2.4,"",21.38,24.91,CAD
+Toronto,BarBurrito (Courtice),2024-04-26T22:42:33.000Z,2024-04-26T23:25:42.000Z,completed,Burrito Special,2,Guacamole (70 Cals),1.2,"",21.38,24.91,CAD
+Ottawa,Petro-Canada (3201 Conroy Road),2023-12-02T08:36:23.000Z,2023-12-02T08:55:45.000Z,completed,Advil Extra Strength Liquid-Gels 10PK,1,"",,"",7.99,20.56,CAD
+Ottawa,Petro-Canada (3201 Conroy Road),2023-12-02T08:36:23.000Z,2023-12-02T08:55:45.000Z,completed,Smartwater 1L,1,"",,"",4.99,20.56,CAD
+Toronto,Starbucks (2348 Highway 2),2023-10-25T11:31:39.000Z,2023-10-25T11:54:10.000Z,completed,Caffè Latte,1,Grande Caffè Latte,0.7,"",5.25,20.9,CAD
+Toronto,Starbucks (2348 Highway 2),2023-10-25T11:31:39.000Z,2023-10-25T11:54:10.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,"",5.25,20.9,CAD
+Toronto,Starbucks (2348 Highway 2),2023-10-25T11:31:39.000Z,2023-10-25T11:54:10.000Z,completed,"Sausage, Cheddar & Egg Sandwich",1,"",,"",6.55,20.9,CAD
+Toronto,Loaded Pierogi (Bowmanville),2023-10-17T12:39:39.000Z,2023-10-17T13:02:13.000Z,completed,Buffalo Chicken,1,Crispy fried Pierogies with a side of sour cream,0.0,"",17.0,23.56,CAD
+Toronto,Loaded Pierogi (Bowmanville),2023-10-17T12:39:39.000Z,2023-10-17T13:02:13.000Z,completed,Buffalo Chicken,1,Crispy Onions,0.86,"",17.0,23.56,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Caffè Latte,1,Venti Caffè Latte,1.3,"",5.25,25.0,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Everything Croissant & Roasted Ham Sandwich,1,"",,"",7.15,25.0,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,"",5.25,25.0,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Caffè Latte,1,Liquid Cane Sugar,0.85,"",5.25,25.0,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Vanilla Sweet Cream Cold Brew,1,"Splash of Vanilla Sweet Cream, Ice, Included Vanilla Syrup",0.0,"",5.55,25.0,CAD
+Toronto,Starbucks (2348 Highway 2),2023-09-28T09:39:22.000Z,2023-09-28T10:00:10.000Z,completed,Vanilla Sweet Cream Cold Brew,1,Grande Vanilla Sweet Cream Cold Brew,0.4,"",5.55,25.0,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2023-09-15T00:14:53.000Z,2023-09-15T00:31:25.000Z,completed,Small,1,Pepperoni,1.75,"",8.59,20.16,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2023-09-15T00:14:53.000Z,2023-09-15T00:31:25.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,"",1.4,20.16,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2023-09-15T00:14:53.000Z,2023-09-15T00:31:25.000Z,completed,Small,1,"Mozzarella Cheese, HOME STYLE ITALIAN TOMATO SAUCE, Regular Dough",0.0,"",8.59,20.16,CAD
+Toronto,Booster Juice (2366 Regional Highway 2),2023-07-06T12:07:25.000Z,2023-07-06T12:25:25.000Z,completed,Bananas-A-Whey (Regular Size),1,Warrior Booster [+5 cal],0.0,,9.71,13.85,CAD
+Toronto,Booster Juice (2366 Regional Highway 2),2023-07-06T12:07:25.000Z,2023-07-06T12:25:25.000Z,completed,Bananas-A-Whey (Regular Size),1,Power Booster [+5 cal],0.57,,9.71,13.85,CAD
+Toronto,Booster Juice (2366 Regional Highway 2),2023-07-06T12:07:25.000Z,2023-07-06T12:25:25.000Z,completed,Bananas-A-Whey (Regular Size),1,Whey Protein [+110 cal],1.98,,9.71,13.85,CAD
+Toronto,Loaded Pierogi (Bowmanville),2023-07-06T12:02:41.000Z,2023-07-06T12:25:25.000Z,completed,Buffalo Chicken,1,Crispy fried Pierogies with a side of sour cream,0.0,,15.65,24.08,CAD
+Toronto,Loaded Pierogi (Bowmanville),2023-07-06T12:02:41.000Z,2023-07-06T12:25:25.000Z,completed,Buffalo Chicken,1,Sauteed Onions,1.44,,15.65,24.08,CAD
+Toronto,Loaded Pierogi (Bowmanville),2023-07-06T12:02:41.000Z,2023-07-06T12:25:25.000Z,completed,Buffalo Chicken,1,Avocado,1.73,,15.65,24.08,CAD
+Ottawa,Dairy Queen (1451 Richmond Rd),2023-04-28T22:01:51.000Z,2023-04-28T22:18:18.000Z,completed,OREO® Cookie BLIZZARD® Treat,1,Medium,2.3,,5.51,25.04,CAD
+Ottawa,Dairy Queen (1451 Richmond Rd),2023-04-28T22:01:51.000Z,2023-04-28T22:18:18.000Z,completed,Spicy Grilled Chicken Sandwich Combo,1,Medium,4.93,,15.51,25.04,CAD
+Ottawa,Dairy Queen (1451 Richmond Rd),2023-04-28T22:01:51.000Z,2023-04-28T22:18:18.000Z,completed,Spicy Grilled Chicken Sandwich Combo,1,"Strawberry, Fries, Shake",0.0,,15.51,25.04,CAD
+Ottawa,Umbrella Burger,2023-04-28T14:35:20.000Z,2023-04-28T15:03:42.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Umbrella Burger,2023-04-28T14:35:20.000Z,2023-04-28T15:03:42.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Noodle House 79,2023-04-27T15:18:36.000Z,2023-04-27T15:45:50.000Z,completed,20. Rare Beef Noodles,1,Medium,0.0,,17.99,0.0,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,Premium Banana (1 banana),2,"",,,1.3,36.13,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,Selection · Large eggs (12 units),1,"",,,3.69,36.13,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,Sliced Whole Beef Shank (price per kg),1,"",,,13.21,36.13,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,Beatrice · Homogenized milk 3.25% (4 L),1,"",,,6.89,36.13,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,PC · Whole white mushrooms (227 g),1,"",,,2.48,36.13,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-25T10:36:52.000Z,2023-04-25T11:44:54.000Z,completed,Selection · Salted butter (454 g),1,"",,,6.49,36.13,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-24T08:21:38.000Z,2023-04-24T08:39:14.000Z,completed,Cinnamon Caramel Cream Cold Brew,1,"Ice, Tall Cinnamon Caramel Cream Cold Brew, Included Vanilla Syrup, Cinnamon Sweet Cream Cold Foam, Cinnamon Dolce Sprinkles",0.0,,5.65,18.84,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-24T08:21:38.000Z,2023-04-24T08:39:14.000Z,completed,Rolled & Steel-Cut Oatmeal,1,"Sugar in the Raw®, Splash of Whole Milk",0.0,,3.95,18.84,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-24T08:21:38.000Z,2023-04-24T08:39:14.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,,5.15,18.84,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-24T08:21:38.000Z,2023-04-24T08:39:14.000Z,completed,Caffè Latte,1,Grande Caffè Latte,0.6,,5.15,18.84,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-21T11:05:42.000Z,2023-04-21T11:36:21.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,,5.15,18.62,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-21T11:05:42.000Z,2023-04-21T11:36:21.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.1,,5.15,18.62,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-21T11:05:42.000Z,2023-04-21T11:36:21.000Z,completed,Caffè Latte,1,Additional Shots,1.15,,5.15,18.62,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-21T11:05:42.000Z,2023-04-21T11:36:21.000Z,completed,"Turkey, Provolone & Pesto on Ciabatta",1,"",,,8.75,18.62,CAD
+Ottawa,Burger's Priest (Baseline),2023-04-16T23:50:08.000Z,2023-04-17T00:11:32.000Z,completed,OG CHEESEBURGER,1,"REGULAR BUN, MUSTARD, MAYONNAISE, ONION, Single, TOMATO, LETTUCE",0.0,,9.29,18.77,CAD
+Ottawa,Burger's Priest (Baseline),2023-04-16T23:50:08.000Z,2023-04-17T00:11:32.000Z,completed,SOFT SERVE SHAKE,1,"",,Strawberry,5.99,18.77,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-15T07:00:10.000Z,2023-04-15T07:15:40.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,,5.15,18.95,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-15T07:00:10.000Z,2023-04-15T07:15:40.000Z,completed,Caffè Latte,1,Grande Caffè Latte,0.6,,5.15,18.95,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-15T07:00:10.000Z,2023-04-15T07:15:40.000Z,completed,Rolled & Steel-Cut Oatmeal,1,"Sugar in the Raw®, Splash of Whole Milk",0.0,,3.95,18.95,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-15T07:00:10.000Z,2023-04-15T07:15:40.000Z,completed,Vanilla Sweet Cream Cold Brew,1,"Ice, Included Vanilla Syrup, Splash of Sweet Cream",0.0,,5.25,18.95,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-04-15T07:00:10.000Z,2023-04-15T07:15:40.000Z,completed,Vanilla Sweet Cream Cold Brew,1,Grande Vanilla Sweet Cream Cold Brew,0.5,,5.25,18.95,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-10T14:46:10.000Z,2023-04-10T15:52:10.000Z,completed,Nongshim · Shin black ramyun noodles with soup mix (4 x 130 g),1,"",,,11.99,57.35,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-10T14:46:10.000Z,2023-04-10T15:52:10.000Z,completed,SirLoin Tip steak,1,"",,,8.38,57.35,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-10T14:46:10.000Z,2023-04-10T15:52:10.000Z,completed,Beatrice · Homogenized milk 3.25% (4 L),1,"",,,6.89,57.35,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-10T14:46:10.000Z,2023-04-10T15:52:10.000Z,completed,Red Bull · Energy (Case) (8x250mL),1,"",,,17.99,57.35,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-04-10T14:46:10.000Z,2023-04-10T15:52:10.000Z,completed,Selection · Extra large eggs (12 units),1,"",,,4.39,57.35,CAD
+Ottawa,Umbrella Burger,2023-04-09T19:44:52.000Z,2023-04-09T20:29:23.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Umbrella Burger,2023-04-09T19:44:52.000Z,2023-04-09T20:29:23.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-04-01T19:45:32.000Z,2023-04-01T20:44:08.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-04-01T19:45:32.000Z,2023-04-01T20:44:08.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-03-29T19:25:46.000Z,2023-03-29T20:49:33.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,,1.4,22.91,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-03-29T19:25:46.000Z,2023-03-29T20:49:33.000Z,completed,Small,2,"Mozzarella Cheese, HOME STYLE ITALIAN TOMATO SAUCE, REGULAR THICK CRUST, Regular Dough",0.0,,8.59,22.91,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-03-29T19:25:46.000Z,2023-03-29T20:49:33.000Z,completed,Small,2,"New York Style Pepperoni, Pepperoni",1.75,,8.59,22.91,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Ben & Jerry's · Chocolate chip cookie dough ice cream (473 mL),1,"",,,7.79,47.95,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Biosteel · Peach-mango hydration mix (7 units),1,"",,,9.99,47.95,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Cinnamon Toast Crunch · Cereal (354 g),1,"",,,6.69,47.95,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Sealtest · Homogenized milk 3.25% (4 L),1,"",,,6.89,47.95,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Baba · Ghee clarified butter (400 g),1,"",,,8.49,47.95,CAD
+Ottawa,Metro (1360 Richmond Rd),2023-03-25T20:27:05.000Z,2023-03-25T21:22:38.000Z,completed,Laviolette Farms · Eggs (1 Dozen),1,"",,,3.99,47.95,CAD
+Ottawa,Send Noods Noodle Bar,2023-03-24T22:58:21.000Z,2023-03-24T23:45:29.000Z,completed,[SIGNATURE SOUP] Bun Bo Hue- Spicy Vietnamese Soup (Anthony Bourdain Favourite),1,Egg Noodle,1.95,,19.99,31.81,CAD
+Ottawa,Send Noods Noodle Bar,2023-03-24T22:58:21.000Z,2023-03-24T23:45:29.000Z,completed,[SIGNATURE SOUP] Bun Bo Hue- Spicy Vietnamese Soup (Anthony Bourdain Favourite),1,Large,2.75,,19.99,31.81,CAD
+Ottawa,"Shanghai 360 (Ottawa, 100 Bayshore)",2023-03-23T19:47:22.000Z,2023-03-23T20:47:13.000Z,completed,Combo 3,1,"Black Pepper Beef (Spicy), General Tao Chicken (Spicy), Chow Mien, Coconut Shrimp",0.0,,19.75,21.25,CAD
+Ottawa,"Shanghai 360 (Ottawa, 100 Bayshore)",2023-03-23T19:47:22.000Z,2023-03-23T20:47:13.000Z,completed,Dim Sim,1,"BBQ Pork Bun, 1 Piece",0.0,,2.25,21.25,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Selection · Large eggs (12 units),1,"",,,3.69,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Selection · Salted butter (454 g),1,"",,,6.49,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Beatrice · Homogenized milk 3.25% (4 L),1,"",,,6.89,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Blueberries (170 g),1,"",,,3.98,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Sliced Whole Beef Shank (price per kg),1,"",,,13.21,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Delphi · Free flowing-Iodized sea salt (750 g),1,"",,,1.99,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,PC · Whole white mushrooms (227 g),1,"",,,2.48,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Ran Foods · Seasoned lavered seaweed (3 x 5 g),1,"",,,2.5,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Selection · Plain bagels (6 units),1,"",,,2.49,50.88,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-21T17:16:07.000Z,2023-03-21T18:26:02.000Z,completed,Siggis · Icelandic strawberry 2% yogurt (650 g),1,"",,,6.49,50.88,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-03-11T15:21:53.000Z,2023-03-11T16:06:27.000Z,completed,JARRITOS BOTTLED SODA,1,Pineapple,0.0,,3.95,20.24,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-03-11T15:21:53.000Z,2023-03-11T16:06:27.000Z,completed,BURRITO,1,Scoop Guacamole,2.0,,9.95,20.24,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-03-11T15:21:53.000Z,2023-03-11T16:06:27.000Z,completed,BURRITO,1,"Cilantro, Pinto Beans, Red Onions, Mexican Lime Rice, Cheese, Pico De Gallo, Sauteed Fajita Peppers & Onions, Flour Premium White, Medium Green, Lettuce, Small 10"", Mexican Style Sour Cream, Pickled Jalapenos",0.0,,9.95,20.24,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-03-11T15:21:53.000Z,2023-03-11T16:06:27.000Z,completed,BURRITO,1,Grilled Chicken-pollo,0.75,,9.95,20.24,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Babybel · Mini original semi soft ripened cheese (240 g),1,"",,,9.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Beatrice · Homogenized milk 3.25% (4 L),1,"",,,6.89,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Bertolli · Extra virgin olive oil (1 L),1,"",,,10.99,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Classico · Roasted garlic & onion pasta sauce (650 mL),1,"",,,4.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Nongshim · Bowl Noodle Soup (86 g),1,"",,,1.89,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,PC · Whole white mushrooms (227 g),1,"",,,2.48,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Pork Picnic Shoulder Roast (price per kg),1,"",,,8.8,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Selection · Large eggs (12 units),1,"",,,3.55,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Selection · Salted butter sticks (454 g),1,"",,,6.79,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Selection · Sesame seed bagels (6 units),1,"",,,2.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Blueberries (170 g),1,"",,,3.98,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Häagen-Dazs · Exträaz Layers mocha cheesecake ice cream (414 mL),1,"",,,6.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Monster Energy · Punch energy drink mango loco (4 x 473 mL),1,"",,,9.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Premium Banana (1 banana),2,"",,,1.3,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Seedless Navel Orange (1 orange),1,"",,,4.14,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Brita · Pitcher Filter (1 ea),1,"",,,8.99,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Cinnamon Toast Crunch · Cereal (354 g),1,"",,,5.49,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Cooking onions (907 g),1,"",,,2.88,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Garlic,1,"",,,1.88,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Redpath · Granulated white sugar (2 kg),1,"",,,2.99,115.72,CAD
+Ottawa,Food Basics (1465 Merivale Road),2023-03-05T19:19:02.000Z,2023-03-06T13:12:00.000Z,completed,Sweet Potatoes (1 potato),1,"",,,3.9,115.72,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Beatrice · Homogenized milk 3.25% (4 L),1,"",,,6.89,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Chicken Thighs Family Pack (price per kg),1,"",,,8.58,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Häagen-Dazs · Exträaz layers berry explosion ice cream (414 mL),1,"",,,6.49,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Kraft Dinner · Original macaroni & cheese (225 g),2,"",,,1.99,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Premium Banana (1 banana),2,"",,,1.3,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Dole · Pineapple slices in pineapple juice (398 mL),1,"",,,2.29,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Jamieson · Melatonin Dual Action Timed Release (60 ea),1,"",,,11.99,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Nongshim · Tempura udon noodles soup cup (75 g),1,"",,,1.89,49.51,CAD
+Ottawa,Food Basics (667 Kirkwood Ave),2023-03-01T14:10:24.000Z,2023-03-01T14:52:54.000Z,completed,Selection · Large eggs (12 units),1,"",,,3.55,49.51,CAD
+Ottawa,Umbrella Burger,2023-02-27T20:01:10.000Z,2023-02-27T20:29:17.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,26.84,CAD
+Ottawa,Umbrella Burger,2023-02-27T20:01:10.000Z,2023-02-27T20:29:17.000Z,completed,Umbrella Double Burger,1,"Add Extra Burger Sauce, Add Tomato",0.0,,14.75,26.84,CAD
+Ottawa,Umbrella Burger,2023-02-25T16:40:52.000Z,2023-02-25T17:00:31.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-02-25T16:40:52.000Z,2023-02-25T17:00:31.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-24T17:12:10.000Z,2023-02-24T17:39:08.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,,1.35,20.39,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-24T17:12:10.000Z,2023-02-24T17:39:08.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,"Mozzarella Cheese, Creamy Garlic, HOME STYLE ITALIAN TOMATO SAUCE, REGULAR THICK CRUST, Regular Dough",0.0,,11.44,20.39,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-24T17:12:10.000Z,2023-02-24T17:39:08.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,"Salami, Sun-Dried Tomatoes",2.0,,11.44,20.39,CAD
+Ottawa,Greek On Wheels (Cobden Rd),2023-02-22T21:53:27.000Z,2023-02-22T22:10:53.000Z,completed,Beef Gyro,2,"",,,12.99,16.97,CAD
+Ottawa,Hung Mein Chinese Takeout,2023-02-21T21:06:43.000Z,2023-02-21T21:50:13.000Z,completed,Combo #9,1,"",,,16.75,20.35,CAD
+Ottawa,Umbrella Burger,2023-02-20T19:48:46.000Z,2023-02-20T20:21:39.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-02-20T19:48:46.000Z,2023-02-20T20:21:39.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-19T17:56:21.000Z,2023-02-19T18:32:31.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,Salami,2.0,,11.44,21.46,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-19T17:56:21.000Z,2023-02-19T18:32:31.000Z,completed,Peace Tea Peach,1,"",,,2.99,21.46,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-19T17:56:21.000Z,2023-02-19T18:32:31.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,,1.35,21.46,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-19T17:56:21.000Z,2023-02-19T18:32:31.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,"Mozzarella Cheese, Creamy Garlic, HOME STYLE ITALIAN TOMATO SAUCE, REGULAR THICK CRUST, Regular Dough",0.0,,11.44,21.46,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2023-02-17T21:12:21.000Z,2023-02-17T21:55:24.000Z,completed,Big Burrito,2,Barbacoa (Beef) (177 cal),2.4,,13.49,23.35,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2023-02-17T21:12:21.000Z,2023-02-17T21:55:24.000Z,completed,Big Burrito,2,"Sour Cream Sauce (20 cal), Rice (162 cal), Guacamole (45 cal), Refried Beans (106 cal), Onion & Peppers (sauteed) (91 cal), Lettuce (6 cal), Burrito Sauce (35 cal), Hot Sauce - Medium (3 cal), Cheese (113 cal), White (334 cal), Green Onion (3 cal)",0.0,,13.49,23.35,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-02-17T09:18:50.000Z,2023-02-17T10:02:52.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.1,,5.15,20.4,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-02-17T09:18:50.000Z,2023-02-17T10:02:52.000Z,completed,Caffè Latte,1,Additional Shots,1.15,,5.15,20.4,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-02-17T09:18:50.000Z,2023-02-17T10:02:52.000Z,completed,Rolled & Steel-Cut Oatmeal,1,Splash of Whole Milk,0.0,,3.95,20.4,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-02-17T09:18:50.000Z,2023-02-17T10:02:52.000Z,completed,"Spinach, Feta and Cage Free Egg White Wrap",1,"",,,6.45,20.4,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-02-17T09:18:50.000Z,2023-02-17T10:02:52.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,,5.15,20.4,CAD
+Ottawa,Umbrella Burger,2023-02-16T16:16:54.000Z,2023-02-16T16:50:18.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-02-16T16:16:54.000Z,2023-02-16T16:50:18.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Angry Dragonz on Kent,2023-02-14T12:12:45.000Z,2023-02-14T12:51:13.000Z,completed,Crispy Beef Bowl,1,"Sauce on the Side, Rice on Side",0.5,,16.05,25.47,CAD
+Ottawa,Angry Dragonz on Kent,2023-02-14T12:12:45.000Z,2023-02-14T12:51:13.000Z,completed,Crispy Beef Bowl,1,Extra Egg,1.5,,16.05,25.47,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2023-02-13T19:58:27.000Z,2023-02-13T20:30:04.000Z,completed,Cheeseburger,1,"Grilled Onions (+ 10 calories), Mayo (+110 calories), Tomato (+10 calories), Lettuce (+5 calories), Mustard (+ 0 calories)",0.0,,11.14,22.6,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2023-02-13T19:58:27.000Z,2023-02-13T20:30:04.000Z,completed,Milkshake,1,Strawberry (+ 20 calories),0.0,,7.69,22.6,CAD
+Ottawa,Umbrella Burger,2023-02-12T19:54:41.000Z,2023-02-12T20:52:17.000Z,completed,Spiced Curly Fries,1,"",,,7.75,28.87,CAD
+Ottawa,Umbrella Burger,2023-02-12T19:54:41.000Z,2023-02-12T20:52:17.000Z,completed,Chicken Sandwich,1,Medium,0.0,,13.95,28.87,CAD
+Ottawa,Umbrella Burger,2023-02-12T19:54:41.000Z,2023-02-12T20:52:17.000Z,completed,Cream Soda,1,"",,,2.5,28.87,CAD
+Ottawa,Fiazza Fresh Fired Pizza (Westboro),2023-02-11T20:54:48.000Z,2023-02-11T21:31:25.000Z,completed,Garlic Aioli Dipping Sauce,1,"",,,1.95,19.21,CAD
+Ottawa,Fiazza Fresh Fired Pizza (Westboro),2023-02-11T20:54:48.000Z,2023-02-11T21:31:25.000Z,completed,Margherita,1,"",,,13.75,19.21,CAD
+Ottawa,Umbrella Burger,2023-02-11T14:59:11.000Z,2023-02-11T15:32:35.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,25.88,CAD
+Ottawa,Umbrella Burger,2023-02-11T14:59:11.000Z,2023-02-11T15:32:35.000Z,completed,Soft Serve Shake,1,Strawberry,0.0,,7.75,25.88,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2023-02-07T11:39:12.000Z,2023-02-07T12:08:49.000Z,completed,Cheeseburger,1,"Grilled Onions (+ 10 calories), Mayo (+110 calories), Tomato (+10 calories), Lettuce (+5 calories), Mustard (+ 0 calories)",0.0,,11.14,22.6,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2023-02-07T11:39:12.000Z,2023-02-07T12:08:49.000Z,completed,Milkshake,1,Strawberry (+ 20 calories),0.0,,7.69,22.6,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-05T19:00:50.000Z,2023-02-05T20:11:28.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,"Mozzarella Cheese, Creamy Garlic, HOME STYLE ITALIAN TOMATO SAUCE, Regular Dough",0.0,,11.44,0.0,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-05T19:00:50.000Z,2023-02-05T20:11:28.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,,1.35,0.0,CAD
+Ottawa,Pizza Pizza (Richmond rd),2023-02-05T19:00:50.000Z,2023-02-05T20:11:28.000Z,completed,Single Pizza (Medium) + Dipping Sauce,1,"Salami, Sun-Dried Tomatoes",2.0,,11.44,0.0,CAD
+Ottawa,Burger's Priest (Baseline),2023-02-03T22:44:45.000Z,2023-02-03T23:33:27.000Z,completed,SOFT SERVE SHAKE,1,"",,,5.99,20.06,CAD
+Ottawa,Burger's Priest (Baseline),2023-02-03T22:44:45.000Z,2023-02-03T23:33:27.000Z,completed,OG CHEESEBURGER,1,"REGULAR BUN, THE WORKS [EVERYTHING ON IT], Single",0.0,,9.29,20.06,CAD
+Ottawa,Burger's Priest (Baseline),2023-02-03T22:44:45.000Z,2023-02-03T23:33:27.000Z,completed,OG CHEESEBURGER,1,GRILLED ONIONS,1.2,,9.29,20.06,CAD
+Ottawa,Umbrella Burger,2023-02-02T21:25:01.000Z,2023-02-02T21:49:15.000Z,completed,Chicken Sandwich,1,"Medium, Add Tomato",0.0,,13.95,20.03,CAD
+Ottawa,Umbrella Burger,2023-02-02T21:25:01.000Z,2023-02-02T21:49:15.000Z,completed,Cream Soda,1,"",,,2.5,20.03,CAD
+Ottawa,Greek On Wheels (Cobden Rd),2023-01-24T15:14:14.000Z,2023-01-24T15:30:13.000Z,completed,Chicken Breast Value Box (4.5 oz),2,Greek Salad,0.0,,17.99,26.39,CAD
+Ottawa,Greek On Wheels (Cobden Rd),2023-01-24T15:14:14.000Z,2023-01-24T15:30:13.000Z,completed,Beef Gyro,2,"",,,12.99,26.39,CAD
+Ottawa,Greek On Wheels (Cobden Rd),2023-01-24T15:14:14.000Z,2023-01-24T15:30:13.000Z,completed,Greek Pita,1,"",,,1.19,26.39,CAD
+Ottawa,Hung Mein Chinese Takeout,2023-01-22T15:21:07.000Z,2023-01-22T16:26:58.000Z,completed,Cantonese Lo Mein (Soft Noodle),1,"",,,15.99,11.51,CAD
+Ottawa,Hung Mein Chinese Takeout,2023-01-22T15:21:07.000Z,2023-01-22T16:26:58.000Z,completed,Chicken Fried Rice,1,"",,,9.99,11.51,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-20T17:05:43.000Z,2023-01-20T17:44:56.000Z,completed,BURRITO,1,"Pulled Beef-barbacoa, Cilantro, Pinto Beans, Red Onions, Cheese, Spicy Hot Salsa, Mexican Lime Rice, Pico De Gallo, Sauteed Fajita Peppers & Onions, Flour Premium White, Lettuce, Mexican Style Sour Cream, Pickled Jalapenos",0.0,,9.95,10.05,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-20T17:05:43.000Z,2023-01-20T17:44:56.000Z,completed,BURRITO,1,Scoop Guacamole,2.0,,9.95,10.05,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-20T17:05:43.000Z,2023-01-20T17:44:56.000Z,completed,BURRITO,1,"Large 12""",3.0,,9.95,10.05,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-20T17:05:43.000Z,2023-01-20T17:44:56.000Z,completed,BURRITO,1,Double-grilled Steak,4.0,,9.95,10.05,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-20T17:05:43.000Z,2023-01-20T17:44:56.000Z,completed,JARRITOS BOTTLED SODA,1,Pineapple,0.0,,3.75,10.05,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-13T18:37:57.000Z,2023-01-13T19:39:47.000Z,completed,BURRITO,1,"Pulled Beef-barbacoa, Cilantro, Pinto Beans, Red Onions, Cheese, Mexican Lime Rice, Sauteed Fajita Peppers & Onions, Flour Premium White, Medium Green, Lettuce, Small 10"", Mexican Style Sour Cream, Pickled Jalapenos",0.0,,9.95,20.58,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-13T18:37:57.000Z,2023-01-13T19:39:47.000Z,completed,BURRITO,1,Scoop Guacamole,2.0,,9.95,20.58,CAD
+Ottawa,Burrito Gringo (566 Bronson Ave),2023-01-13T18:37:57.000Z,2023-01-13T19:39:47.000Z,completed,JARRITOS BOTTLED SODA,1,Pineapple,0.0,,3.75,20.58,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-01-11T12:55:46.000Z,2023-01-11T13:11:38.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Sugar in the Raw®, Steamed Hot, Cinnamon Powder, Milk Foam, Signature Espresso Roast, 2% Milk",0.0,,5.15,22.42,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-01-11T12:55:46.000Z,2023-01-11T13:11:38.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.1,,5.15,22.42,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-01-11T12:55:46.000Z,2023-01-11T13:11:38.000Z,completed,Caffè Latte,1,Additional Shots,1.15,,5.15,22.42,CAD
+Ottawa,Starbucks (Carling & Woodroffe),2023-01-11T12:55:46.000Z,2023-01-11T13:11:38.000Z,completed,"Spinach, Feta and Cage Free Egg White Wrap",1,"",,,6.45,22.42,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-12-12T20:52:01.000Z,2022-12-12T21:31:12.000Z,completed,Burrito Bowl,2,Carnitas (Pork) (157 cal),1.2,,13.49,23.53,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-12-12T20:52:01.000Z,2022-12-12T21:31:12.000Z,completed,Burrito Bowl,2,"Sour Cream Sauce (20 cal), Rice (162 cal), Guacamole (45 cal), Refried Beans (106 cal), Onion & Peppers (sauteed) (91 cal), Jalapeno (3 cal), Lettuce (6 cal), Burrito Sauce (35 cal), Mild Salsa (17 cal), Cheese (113 cal), Green Onion (3 cal)",0.0,,13.49,23.53,CAD
+Ottawa,Fiazza Fresh Fired Pizza (Westboro),2022-12-07T14:21:58.000Z,2022-12-07T15:27:04.000Z,completed,Garlic Aioli Dipping Sauce,1,"",,,1.95,22.81,CAD
+Ottawa,Fiazza Fresh Fired Pizza (Westboro),2022-12-07T14:21:58.000Z,2022-12-07T15:27:04.000Z,completed,Margherita,1,"",,,13.75,22.81,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-10-09T00:15:04.000Z,2022-10-09T00:56:00.000Z,completed,Jarritos,1,Pineapple,0.0,,3.95,26.66,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-10-09T00:15:04.000Z,2022-10-09T00:56:00.000Z,completed,Jerk Chicken,1,Big [450-710 Calories],1.95,,13.7,26.66,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-10-09T00:15:04.000Z,2022-10-09T00:56:00.000Z,completed,Jerk Chicken,1,"Sour Cream [15-30 Cals], Rice [140-190 Cals], Green Onions [1-3 Cals], Burrito Spice [2-5 Cals], Guacamole [35-70 Cals], White Tortilla, Burrito Sauce [20-50 Cals], Cheese [90-140 Cals], Pinto Beans [60-110 Cals], Lettuce [4-10 Cals], Medium [10 Calories], Baked Chicken",0.0,,13.7,26.66,CAD
+Ottawa,John Juan Burrito,2022-04-15T22:51:45.000Z,2022-04-15T23:39:04.000Z,completed,Burrito,1,"Sauteed Peppers and Onions, White Tortilla, Pinto Beans, Lime Rice, Red Medium Salsa, Sour Cream, Fresh Jalapeno, Refried Beans, Pico de Gallo (tomatoes)",0.0,,10.0,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-15T22:51:45.000Z,2022-04-15T23:39:04.000Z,completed,Burrito,1,Regular,3.0,,10.0,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-15T22:51:45.000Z,2022-04-15T23:39:04.000Z,completed,Authentic Mexican Soda,1,Pineapple Jarritos,0.0,,3.75,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-15T22:51:45.000Z,2022-04-15T23:39:04.000Z,completed,Burrito,1,Assada Steak,1.5,,10.0,21.97,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-04-14T00:48:19.000Z,2022-04-14T01:33:01.000Z,completed,Chicken Wings (10 Wings),1,Classic Wings,0.0,,13.99,19.51,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-04-14T00:48:19.000Z,2022-04-14T01:33:01.000Z,completed,Chicken Wings (10 Wings),1,"Creamy Garlic, Tossed And Sauced Buffalo Sauce",0.99,,13.99,19.51,CAD
+Ottawa,John Juan Burrito,2022-04-03T18:21:06.000Z,2022-04-03T19:10:05.000Z,completed,Authentic Mexican Soda,1,Pineapple Jarritos,0.0,,3.75,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-03T18:21:06.000Z,2022-04-03T19:10:05.000Z,completed,Burrito,1,"Sauteed Peppers and Onions, Green Medium Salsa, White Tortilla, Pinto Beans, Lime Rice, Sour Cream, Fresh Jalapeno, Refried Beans, Pico de Gallo (tomatoes)",0.0,,10.0,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-03T18:21:06.000Z,2022-04-03T19:10:05.000Z,completed,Burrito,1,Assada Steak,1.5,,10.0,21.97,CAD
+Ottawa,John Juan Burrito,2022-04-03T18:21:06.000Z,2022-04-03T19:10:05.000Z,completed,Burrito,1,Regular,3.0,,10.0,21.97,CAD
+Ottawa,Booster Juice (Riverside Dr.),2022-03-26T09:44:19.000Z,2022-03-26T10:11:29.000Z,completed,Regular Combo,1,Whey Protein [+110 cal],1.65,,14.62,0.0,CAD
+Ottawa,Booster Juice (Riverside Dr.),2022-03-26T09:44:19.000Z,2022-03-26T10:11:29.000Z,completed,Regular Combo,1,"Power Booster [+5 cal], Bananas-A-Whey (Regular Size), Chipotle Chicken Wrap",0.0,,14.62,0.0,CAD
+Ottawa,Booster Juice (Riverside Dr.),2022-03-26T09:44:19.000Z,2022-03-26T10:11:29.000Z,completed,Regular Combo,1,Combo Booster [+4 cal],0.55,,14.62,0.0,CAD
+Ottawa,The Burgery {FRESH BEEF},2022-03-25T16:54:33.000Z,2022-03-25T17:40:29.000Z,completed,The American Burger,1,Medium Hand Cut Fries,5.5,,10.5,19.54,CAD
+Ottawa,The Burgery {FRESH BEEF},2022-03-25T16:54:33.000Z,2022-03-25T17:40:29.000Z,completed,The American Burger,1,"Chipotle Mayo DIP, Tomato",0.0,,10.5,19.54,CAD
+Ottawa,Starbucks (Bank & Third),2022-03-25T09:55:34.000Z,2022-03-25T10:16:26.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.2,,4.95,20.46,CAD
+Ottawa,Starbucks (Bank & Third),2022-03-25T09:55:34.000Z,2022-03-25T10:16:26.000Z,completed,"Turkey, Provolone & Pesto on Ciabatta",1,"",,,8.55,20.46,CAD
+Ottawa,Starbucks (Bank & Third),2022-03-25T09:55:34.000Z,2022-03-25T10:16:26.000Z,completed,Cold Milk,1,"Whole Milk, Ice, Tall Cold Milk, 2% Milk",0.0,,3.15,20.46,CAD
+Ottawa,Starbucks (Bank & Third),2022-03-25T09:55:34.000Z,2022-03-25T10:16:26.000Z,completed,Caffè Latte,1,"Signature Espresso, Whole Milk, Included Shots, Steamed Hot, Whipped Cream, Cinnamon Powder, Sugar In The Raw®, Milk Foam, 2% Milk",0.0,,4.95,20.46,CAD
+Ottawa,Cadmans Montreal Bagels ((Mtl rd & Vanier Pkwy),2022-03-24T08:14:23.000Z,2022-03-24T09:11:16.000Z,completed,Breakfast Bagel Sandwich,2,Blueberry,0.0,,9.59,19.66,CAD
+Ottawa,Cadmans Montreal Bagels ((Mtl rd & Vanier Pkwy),2022-03-24T08:14:23.000Z,2022-03-24T09:11:16.000Z,completed,Butter Tarts,1,"",,,2.99,19.66,CAD
+Ottawa,Cadmans Montreal Bagels ((Mtl rd & Vanier Pkwy),2022-03-24T08:14:23.000Z,2022-03-24T09:11:16.000Z,completed,Large Coffee,1,"",,Regular columbian 1 milk 1 sugar,2.99,19.66,CAD
+Ottawa,Pizza Nerds (Centretown),2022-03-23T22:38:11.000Z,2022-03-23T23:31:43.000Z,completed,Chili Garlic Dip,2,"",,,2.0,22.89,CAD
+Ottawa,Pizza Nerds (Centretown),2022-03-23T22:38:11.000Z,2022-03-23T23:31:43.000Z,completed,Lyon - Nerd Pizza,1,"",,,17.0,22.89,CAD
+Ottawa,John Juan Burrito,2022-03-17T23:12:05.000Z,2022-03-18T00:06:30.000Z,completed,Burrito,1,"Sauteed Peppers and Onions, Brown Tortilla, Cilantro, Small, Lime Rice, Cheese, Sour Cream, Red Medium Salsa, Fresh Jalapeno, Refried Beans, Pico de Gallo (tomatoes)",0.0,,10.0,18.73,CAD
+Ottawa,John Juan Burrito,2022-03-17T23:12:05.000Z,2022-03-18T00:06:30.000Z,completed,Burrito,1,Assada Steak,1.5,,10.0,18.73,CAD
+Ottawa,John Juan Burrito,2022-03-17T23:12:05.000Z,2022-03-18T00:06:30.000Z,completed,Authentic Mexican Soda,1,Pineapple Jarritos,0.0,,3.75,18.73,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-02-25T15:46:08.000Z,2022-02-25T16:49:26.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,Cheese [45.0 Cals],0.6,,13.19,18.78,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-02-25T15:46:08.000Z,2022-02-25T16:49:26.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,Med Strawberry Triple Thick Milkshake [740.0 Cals],1.5,,13.19,18.78,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-02-25T15:46:08.000Z,2022-02-25T16:49:26.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,"Bacon Strips [70.0 Cals], Sesame and Poppy Seed Bun [260.0 Cals], Triple Thick Milkshake, Med Fries [350.0 Cals], Mayo-Style Sauce [40.0 Cals], Leaf Lettuce [0.0 Cals], Grilled Chicken Patty [120.0 Cals], Salt [0.0 Cals], Tomato [3.0 Cals]",0.0,,13.19,18.78,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2022-02-15T03:52:09.000Z,2022-02-15T04:15:10.000Z,completed,Beef Shawarma Wrap,1,"Small, Hummus",0.0,,9.49,0.0,CAD
+Ottawa,The Burgery {FRESH BEEF},2022-02-13T23:01:03.000Z,2022-02-13T23:47:27.000Z,completed,Chocolate Milk,1,"",,,3.75,23.44,CAD
+Ottawa,The Burgery {FRESH BEEF},2022-02-13T23:01:03.000Z,2022-02-13T23:47:27.000Z,completed,The American Burger,1,Add Premium Bacon,2.0,,10.0,23.44,CAD
+Ottawa,The Burgery {FRESH BEEF},2022-02-13T23:01:03.000Z,2022-02-13T23:47:27.000Z,completed,The American Burger,1,Tomato,0.0,,10.0,23.44,CAD
+Ottawa,Starbucks (4791 Bank Street),2022-02-02T14:31:36.000Z,2022-02-02T14:53:51.000Z,completed,Caffè Latte,1,"Grande Caffè Latte, Cinnamon Dolce Sprinkles",0.6,,4.85,34.28,CAD
+Ottawa,Starbucks (4791 Bank Street),2022-02-02T14:31:36.000Z,2022-02-02T14:53:51.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Steamed Hot, Cinnamon Powder, Sugar In The Raw®, Milk Foam, 2% Milk",0.0,,4.85,34.28,CAD
+Ottawa,Starbucks (4791 Bank Street),2022-02-02T14:31:36.000Z,2022-02-02T14:53:51.000Z,completed,Chimichurri Chicken Sandwich,1,"",,,8.95,34.28,CAD
+Ottawa,Starbucks (Elmvale),2022-02-01T11:14:53.000Z,2022-02-01T11:43:17.000Z,completed,Caffè Latte,1,"Whole Milk, Included Shots, Steamed Hot, Cinnamon Powder, Sugar In The Raw®, Milk Foam, 2% Milk",0.0,,4.85,22.03,CAD
+Ottawa,Starbucks (Elmvale),2022-02-01T11:14:53.000Z,2022-02-01T11:43:17.000Z,completed,Caffè Latte,1,Tall Caffè Latte,0.1,,4.85,22.03,CAD
+Ottawa,Starbucks (Elmvale),2022-02-01T11:14:53.000Z,2022-02-01T11:43:17.000Z,completed,Caprese Sandwich,1,"",,,8.55,22.03,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-31T12:53:25.000Z,2022-01-31T13:04:57.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,Med Iced Coffee [170.0 Cals],0.1,,12.69,18.5,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-31T12:53:25.000Z,2022-01-31T13:04:57.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,Cheese [45.0 Cals],0.59,,12.69,18.5,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-31T12:53:25.000Z,2022-01-31T13:04:57.000Z,completed,BLT with Grilled Chicken Extra Value Meal [700-1130 Cals],1,"Bacon Strips [70.0 Cals], Sesame and Poppy Seed Bun [260.0 Cals], Med Fries [350.0 Cals], Mayo-Style Sauce [40.0 Cals], Liquid Sugar [60.0 Cals], Leaf Lettuce [0.0 Cals], Grilled Chicken Patty [120.0 Cals], Cream, Salt [0.0 Cals], Iced Coffee, Ice [0.0 Cals], Tomato [3.0 Cals]",0.0,,12.69,18.5,CAD
+Ottawa,McDonald's (2210 Bank Street),2022-01-30T13:45:46.000Z,2022-01-30T14:07:13.000Z,completed,Med Premium Roast Coffee [4.0 Cals],1,"1 Milk [15-35 Cals], 1 Sugar [35-70 Cals], Med Premium Roast Coffee [4.0 Cals]",0.0,,1.79,5.4,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-29T07:32:16.000Z,2022-01-29T07:55:49.000Z,completed,"Coffee, Large",1,"Medium Roast, Sugar (2), Milk (2)",0.0,,3.39,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-29T07:32:16.000Z,2022-01-29T07:55:49.000Z,completed,Kettlemans Special,1,Add Butter,0.75,,12.59,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-29T07:32:16.000Z,2022-01-29T07:55:49.000Z,completed,Kettlemans Special,1,Blueberry,0.0,,12.59,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-29T07:32:16.000Z,2022-01-29T07:55:49.000Z,completed,Kettlemans Special,1,Add Tomato,1.0,,12.59,26.8,CAD
+Ottawa,Sansotei Ramen (Nepean),2022-01-26T15:13:47.000Z,2022-01-26T16:00:12.000Z,completed,Gyoza,2,"",,,7.0,82.2,CAD
+Ottawa,Sansotei Ramen (Nepean),2022-01-26T15:13:47.000Z,2022-01-26T16:00:12.000Z,completed,Ramune,1,"",,,4.5,82.2,CAD
+Ottawa,Sansotei Ramen (Nepean),2022-01-26T15:13:47.000Z,2022-01-26T16:00:12.000Z,completed,Tonkotsu Black Ramen,1,"Thick Noodle, Broth together with noodles",0.0,,17.75,82.2,CAD
+Ottawa,Sansotei Ramen (Nepean),2022-01-26T15:13:47.000Z,2022-01-26T16:00:12.000Z,completed,Tonkotsu Black Ramen,2,"Thin Noodle, Broth together with noodles",0.0,,17.75,82.2,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-24T08:55:49.000Z,2022-01-24T09:03:41.000Z,completed,Med Premium Roast Coffee [4.0 Cals],1,"1 Milk [15-35 Cals], 1 Sugar [35-70 Cals]",0.0,,1.99,5.85,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-24T08:55:49.000Z,2022-01-24T09:03:41.000Z,completed,Med Premium Roast Coffee [4.0 Cals],1,Lrg Premium Roast Coffee [5.0 Cals],0.2,,1.99,5.85,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-22T21:51:39.000Z,2022-01-22T22:22:16.000Z,completed,Kettlemans Special,1,"Sesame seed, No Black Olives",0.0,,12.59,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-22T21:51:39.000Z,2022-01-22T22:22:16.000Z,completed,Kettlemans Special,1,Add Butter,0.75,,12.59,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-22T21:51:39.000Z,2022-01-22T22:22:16.000Z,completed,"Coffee, Large",1,"Sugar (1), Medium Roast, Milk (1)",0.0,,3.39,26.8,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-22T21:51:39.000Z,2022-01-22T22:22:16.000Z,completed,Kettlemans Special,1,Add Tomato,1.0,,12.59,26.8,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-01-21T00:42:18.000Z,2022-01-21T01:18:04.000Z,completed,Jerk Chicken,1,"Sour Cream [15-30 Cals], Rice [140-190 Cals], Guacamole [35-70 Cals], Burrito Sauce [20-50 Cals], Black Beans [60-110 Cals], Pinto Beans [60-110 Cals], Medium [10 Calories], Baked Chicken",0.0,,13.19,41.07,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-01-21T00:42:18.000Z,2022-01-21T01:18:04.000Z,completed,Jerk Chicken,1,Big- Whole Wheat [450-710 Cals],1.85,,13.19,41.07,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-01-21T00:42:18.000Z,2022-01-21T01:18:04.000Z,completed,Jerk Chicken,1,Meat/Protein [110-300 Calories],4.39,,13.19,41.07,CAD
+Ottawa,Fat Bastard Burrito (1642 Merivale Rd),2022-01-21T00:42:18.000Z,2022-01-21T01:18:04.000Z,completed,Loaded Waffle Fries [662 Cals],1,"Green Onions [1-3 Cals], Burrito Sauce [20-50 Cals], Mild Salsa [15-20 Cals], Cheese [90-140 Cals], Sour Cream [15-30 Cals]",0.0,,9.99,41.07,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,B.L.T.,1,Sesame seed,0.0,,8.59,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,"Coffee, Small",1,"Sugar (1), Medium Roast, Milk (1)",0.0,,2.89,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,Kettlemans Special,1,Add Butter,0.75,,12.59,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,Kettlemans Special,1,"Blueberry, No Black Olives",0.0,,12.59,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,Kettlemans Special,1,Add Tomato,1.0,,12.59,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T23:51:38.000Z,2022-01-20T00:39:01.000Z,completed,Kettlemans Special,1,Pure Leaf Lemon,4.09,,12.59,41.69,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T07:17:16.000Z,2022-01-19T07:59:16.000Z,completed,Kettlemans Special,1,Blueberry,0.0,,12.59,21.84,CAD
+Ottawa,Kettlemans Bagel (Bank),2022-01-19T07:17:16.000Z,2022-01-19T07:59:16.000Z,completed,Kettlemans Special,1,Add Butter,0.75,,12.59,21.84,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Dipping Sauce,1,"Hot Sauce, Honey Garlic",0.0,,1.09,55.03,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Nestea,1,"",,,2.49,55.03,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Chicken Wings (10 Wings),1,Tossed And Sauced Buffalo Sauce,0.99,,13.49,55.03,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Chicken Wings (10 Wings),1,Classic Wings,0.0,,13.49,55.03,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Popcorn Chicken,1,"",,,7.49,55.03,CAD
+Ottawa,Chicken Chicken by Pizza Pizza (1717 Bank Street),2022-01-19T01:15:03.000Z,2022-01-19T01:50:51.000Z,completed,Popcorn Chicken,2,"",,,7.49,55.03,CAD
+Ottawa,Shawarma Station (Bank St),2022-01-17T23:52:18.000Z,2022-01-18T00:43:29.000Z,completed,Shawarma Beef Sandwich,1,"Tomatoes , Spicy Garlic Sauce , Small, Onions , Hummus",0.0,Can you please also put tzatziki on it? Thanks v much,6.99,16.35,CAD
+Ottawa,Shawarma Station (Bank St),2022-01-17T23:52:18.000Z,2022-01-18T00:43:29.000Z,completed,Vitamin Water,1,Orange,0.0,,3.49,16.35,CAD
+Ottawa,Harvey's (Bank & Hunt Club),2022-01-17T01:16:01.000Z,2022-01-17T01:44:57.000Z,completed,Original Burger Combo,1,Regular Strawberry Shake,0.5,,11.29,30.94,CAD
+Ottawa,Harvey's (Bank & Hunt Club),2022-01-17T01:16:01.000Z,2022-01-17T01:44:57.000Z,completed,Original Burger Combo,1,"Strawberry Shake, 7 Up, Regular Fries, Regular 7 Up, Pickle, White Bun, Mustard, Onion, Shredded Lettuce, Multigrain Bun, Tomato, Salt & Pepper, Ketchup, Mayo",0.0,,11.29,30.94,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-12T02:33:45.000Z,2022-01-12T03:03:19.000Z,completed,Fudge Sundae [340.0 Cals],1,Fudge [130.0 Cals],0.0,,2.99,17.69,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-12T02:33:45.000Z,2022-01-12T03:03:19.000Z,completed,Med Iced Coffee [170.0 Cals],1,"Liquid Sugar [60.0 Cals], Cream, Ice [0.0 Cals], Substitute Milk",0.0,,2.59,17.69,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-12T02:33:45.000Z,2022-01-12T03:03:19.000Z,completed,Med Iced Coffee [170.0 Cals],1,Lrg Iced Coffee [230.0 Cals],0.5,,2.59,17.69,CAD
+Ottawa,McDonald's (Cahill & Dazé),2022-01-12T02:33:45.000Z,2022-01-12T03:03:19.000Z,completed,Med Strawberry Triple Thick Milkshake [740.0 Cals],1,Sml Strawberry Triple Thick Milkshake [550.0 Cals],-0.6,,4.09,17.69,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2022-01-07T00:22:01.000Z,2022-01-07T00:53:13.000Z,completed,Nestea,1,"",,,2.49,41.1,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2022-01-07T00:22:01.000Z,2022-01-07T00:53:13.000Z,completed,Single Pizzas (Small),1,"New York Style Pepperoni, Parmesan Cheese",1.6,,8.49,41.1,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2022-01-07T00:22:01.000Z,2022-01-07T00:53:13.000Z,completed,Funnel Cake Stix with Caramel,1,Caramel Dip,0.0,,6.89,41.1,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2022-01-07T00:22:01.000Z,2022-01-07T00:53:13.000Z,completed,Single Pizzas (Small),1,"Mozzarella Cheese, Regular, Home Style Italian Tomato Sauce, Regular Dough",0.0,,8.49,41.1,CAD
+Toronto,Pizza Pizza (570 Longworth Avenue),2022-01-07T00:22:01.000Z,2022-01-07T00:53:13.000Z,completed,Single Pizzas (Small),1,Grilled Chicken,2.6,,8.49,41.1,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-12-27T11:06:39.000Z,2021-12-27T11:48:59.000Z,completed,Buffalo Chicken,1,Extra Sour Cream,1.09,,11.39,20.75,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-12-27T11:06:39.000Z,2021-12-27T11:48:59.000Z,completed,Buffalo Chicken,1,Avocado,1.89,,11.39,20.75,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-12-27T11:06:39.000Z,2021-12-27T11:48:59.000Z,completed,Buffalo Chicken,1,"Pierogi (Classic-Boiled), Small",0.0,,11.39,20.75,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-22T11:04:00.000Z,2021-12-22T11:37:31.000Z,completed,SAJ Beef Shawarma Wrap,1,"Medium, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-22T11:04:00.000Z,2021-12-22T11:37:31.000Z,completed,SAJ Beef Shawarma Wrap,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-22T11:04:00.000Z,2021-12-22T11:37:31.000Z,completed,SAJ Beef Shawarma Wrap,1,Chocolate Milk,3.09,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-12-11T18:22:34.000Z,2021-12-11T21:22:54.000Z,completed,Creamy Garlic Sauce,1,"",,,0.89,33.0,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-12-11T18:22:34.000Z,2021-12-11T21:22:54.000Z,completed,Prosciutto & Arugula,1,Traditional Bake,0.0,,17.99,33.0,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-12-11T18:22:34.000Z,2021-12-11T21:22:54.000Z,completed,6 Garlic Bread Knots,2,Fresh Tomato Sauce [+60 Calories],0.0,,4.36,33.0,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-12-11T18:22:34.000Z,2021-12-11T21:22:54.000Z,completed,Brisk Iced Tea,1,1 Bottle,0.0,,2.21,33.0,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-12-10T11:12:05.000Z,2021-12-10T11:31:36.000Z,completed,Veal Sandwich,1,Cheese,1.0,Have a good day :-),12.99,20.32,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-12-10T11:12:05.000Z,2021-12-10T11:31:36.000Z,completed,Veal Sandwich,1,Medium Sauce,0.0,Have a good day :-),12.99,20.32,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-12-10T11:12:05.000Z,2021-12-10T11:31:36.000Z,completed,Veal Sandwich,1,"Peppers, Onions",0.5,Have a good day :-),12.99,20.32,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-08T11:03:31.000Z,2021-12-08T11:41:14.000Z,completed,SAJ Beef Shawarma Wrap,1,"Medium, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,12.42,19.51,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-08T11:03:31.000Z,2021-12-08T11:41:14.000Z,completed,SAJ Beef Shawarma Wrap,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,12.42,19.51,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-06T11:02:07.000Z,2021-12-06T11:26:50.000Z,completed,SAJ Beef Shawarma Wrap,1,"Medium, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-06T11:02:07.000Z,2021-12-06T11:26:50.000Z,completed,SAJ Beef Shawarma Wrap,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-06T11:02:07.000Z,2021-12-06T11:26:50.000Z,completed,SAJ Beef Shawarma Wrap,1,Chocolate Milk,3.09,Can you please put the tzatziki on the wrap,12.42,23.0,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-03T11:11:55.000Z,2021-12-03T12:09:43.000Z,completed,SAJ Lamb Shawarma  Wrap,1,Tzatziki Sauce,0.85,Can you please put the tzatziki in the wrap,12.98,20.14,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-12-03T11:11:55.000Z,2021-12-03T12:09:43.000Z,completed,SAJ Lamb Shawarma  Wrap,1,"Hot, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki in the wrap,12.98,20.14,CAD
+Toronto,Shawarma Gate,2021-12-01T10:42:38.000Z,2021-12-01T11:02:50.000Z,completed,Beef Shawarma Wrap,1,"Hot Sauce, Tzatziki Sauce, Red Onions, Thahini, Tomatoes",0.0,,11.99,20.31,CAD
+Toronto,Shawarma Gate,2021-12-01T10:42:38.000Z,2021-12-01T11:02:50.000Z,completed,Pop,1,Ice Tea (Can),0.0,,1.99,20.31,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-25T11:04:43.000Z,2021-11-25T11:44:26.000Z,completed,Pure Leaf Iced Tea (547 ml),1,"",,,3.89,25.04,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-25T11:04:43.000Z,2021-11-25T11:44:26.000Z,completed,BBQ Brisket,1,"Pierogi (Classic-Boiled), Small",0.0,,13.19,25.04,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-25T11:04:43.000Z,2021-11-25T11:44:26.000Z,completed,BBQ Brisket,1,Extra Sour Cream,1.09,,13.19,25.04,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-11-25T10:32:17.000Z,2021-11-25T10:42:58.000Z,canceled,Blackened Ranch,1,"",,,0.5,0.0,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-11-25T10:32:17.000Z,2021-11-25T10:42:58.000Z,canceled,Monster Energy,1,"",,,4.79,0.0,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-11-25T10:32:17.000Z,2021-11-25T10:42:58.000Z,canceled,Spicy Chicken Sandwich,1,"",,,7.29,0.0,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-11-25T10:32:17.000Z,2021-11-25T10:42:58.000Z,canceled,Biscuit,1,"",,,1.29,0.0,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-11-10T15:26:30.000Z,2021-11-10T15:47:20.000Z,completed,Veal Sandwich,1,Medium Sauce,0.0,,12.99,19.75,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-11-10T15:26:30.000Z,2021-11-10T15:47:20.000Z,completed,Veal Sandwich,1,Onions,0.5,,12.99,19.75,CAD
+Toronto,Mia Sandwiches Tasty Italian,2021-11-10T15:26:30.000Z,2021-11-10T15:47:20.000Z,completed,Veal Sandwich,1,Cheese,1.0,,12.99,19.75,CAD
+Toronto,"Pizza Pizza (200 King St, Bowmanville)",2021-11-07T00:57:55.000Z,2021-11-07T01:52:05.000Z,completed,Single Pizzas (Small),1,"Regular Thick Crust, Mozzarella Cheese, Regular, Home Style Italian Tomato Sauce",0.0,,8.39,22.56,CAD
+Toronto,"Pizza Pizza (200 King St, Bowmanville)",2021-11-07T00:57:55.000Z,2021-11-07T01:52:05.000Z,completed,Dipping Sauce,1,Creamy Garlic,0.0,,1.09,22.56,CAD
+Toronto,"Pizza Pizza (200 King St, Bowmanville)",2021-11-07T00:57:55.000Z,2021-11-07T01:52:05.000Z,completed,Dipping Sauce,1,Blue Cheese,0.99,,1.09,22.56,CAD
+Toronto,"Pizza Pizza (200 King St, Bowmanville)",2021-11-07T00:57:55.000Z,2021-11-07T01:52:05.000Z,completed,Single Pizzas (Small),1,"Salami, Spicy Italian Sausage",1.5,,8.39,22.56,CAD
+Toronto,"Pizza Pizza (200 King St, Bowmanville)",2021-11-07T00:57:55.000Z,2021-11-07T01:52:05.000Z,completed,Single Pizzas (Small),1,Proscuitto,2.5,,8.39,22.56,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-04T12:20:41.000Z,2021-11-04T12:49:37.000Z,completed,BBQ Brisket,1,Extra Truffle Sour Cream,1.69,,13.19,36.15,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-04T12:20:41.000Z,2021-11-04T12:49:37.000Z,completed,BBQ Brisket,1,Extra Cheese (Cheese Curds),2.19,,13.19,36.15,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-04T12:20:41.000Z,2021-11-04T12:49:37.000Z,completed,BBQ Brisket,1,Large,5.4,,13.19,36.15,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-04T12:20:41.000Z,2021-11-04T12:49:37.000Z,completed,Pure Leaf Iced Tea (547 ml),1,"",,,3.89,36.15,CAD
+Toronto,Loaded Pierogi (Bowmanville),2021-11-04T12:20:41.000Z,2021-11-04T12:49:37.000Z,completed,BBQ Brisket,1,Pierogi (Classic-Boiled),0.0,,13.19,36.15,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-10-30T18:30:10.000Z,2021-10-30T21:30:30.000Z,completed,"12"" Medium Pizza",1,"Traditional Bake, Mozzarella Cheese (regular amount), Tomato Sauce [10-15 Calories], Thick [190 Calories]",0.0,,9.99,27.33,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-10-30T18:30:10.000Z,2021-10-30T21:30:30.000Z,completed,Brisk Iced Tea,1,1 Bottle,0.0,,2.21,27.33,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-10-30T18:30:10.000Z,2021-10-30T21:30:30.000Z,completed,"12"" Medium Pizza",1,"Soppressata (Mild) [10-20 Calories], Asiago Cheese [10-20 Calories], Fresh Baby Spinach [1 Calories]",2.15,,9.99,27.33,CAD
+Toronto,Pizzaville (680 Longworth Ave),2021-10-30T18:30:10.000Z,2021-10-30T21:30:30.000Z,completed,Creamy Garlic Sauce,2,"",,,0.89,27.33,CAD
+Toronto,Shell (114 Liberty St S),2021-10-29T13:49:35.000Z,2021-10-29T14:07:07.000Z,completed,Rockstar 473mL 3 for $5,1,"Rockstar Punched Tropical Energy Drink 473mL, Rockstar Pure Zero Punched Energy Drink 473mL, Rockstar XD Thermo Blue Raspberry 473ml",0.0,,5.0,11.29,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-29T13:43:31.000Z,2021-10-29T14:47:25.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,"Little, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,12.73,21.83,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-29T13:43:31.000Z,2021-10-29T14:47:25.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,12.73,21.83,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-29T13:43:31.000Z,2021-10-29T14:47:25.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,Chocolate Milk,1.75,Can you please put the tzatziki on the wrap,12.73,21.83,CAD
+Toronto,Shell (114 Liberty St S),2021-10-20T14:41:01.000Z,2021-10-20T15:16:57.000Z,completed,Rockstar Pure Zero Punched Energy Drink 473mL,1,"",,,3.49,4.33,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-20T14:39:13.000Z,2021-10-20T15:16:58.000Z,completed,Biscuit,2,"",,,1.29,22.76,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-20T14:39:13.000Z,2021-10-20T15:16:58.000Z,completed,Blackened Ranch,2,"",,,0.5,22.76,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-20T14:39:13.000Z,2021-10-20T15:16:58.000Z,completed,Bottled Ice Tea,1,"",,,2.79,22.76,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-20T14:39:13.000Z,2021-10-20T15:16:58.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,22.76,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-20T14:39:13.000Z,2021-10-20T15:16:58.000Z,completed,Spicy Chicken Sandwich,1,"",,,7.29,22.76,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-18T14:50:56.000Z,2021-10-18T15:17:23.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-18T14:50:56.000Z,2021-10-18T15:17:23.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,"Little, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-18T14:50:56.000Z,2021-10-18T15:17:23.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,Chocolate Milk,1.75,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-17T11:08:32.000Z,2021-10-17T11:32:05.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-17T11:08:32.000Z,2021-10-17T11:32:05.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,Chocolate Milk,1.75,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-17T11:08:32.000Z,2021-10-17T11:32:05.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,"Little, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,11.37,19.62,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-13T14:27:26.000Z,2021-10-13T15:18:25.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,"Garlic Sauce, Tahini Sauce, Tzatziki Sauce",0.85,,11.37,19.73,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-13T14:27:26.000Z,2021-10-13T15:18:25.000Z,completed,SAJ Beef Shawarma Wrap with Drink,1,"Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), CAN - Sprite, Tomatoes, Mild",0.0,,11.37,19.73,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-13T14:27:26.000Z,2021-10-13T15:18:25.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,"Little, Onions, Garlic Sauce & Tahini (Recommended), BOTTLE - Water, NO STIXS (No fries in wrap), Tomatoes",0.0,Could you please put the tzatziki on the wrap,12.73,19.73,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-13T14:27:26.000Z,2021-10-13T15:18:25.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,Tzatziki Sauce,0.85,Could you please put the tzatziki on the wrap,12.73,19.73,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-09T13:28:26.000Z,2021-10-09T14:01:41.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,"Little, Onions, Garlic Sauce & Tahini (Recommended), NO STIXS (No fries in wrap), Tomatoes",0.0,Can you please put the tzatziki on the wrap,12.73,25.14,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-09T13:28:26.000Z,2021-10-09T14:01:41.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,Tzatziki Sauce,0.85,Can you please put the tzatziki on the wrap,12.73,25.14,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-09T13:28:26.000Z,2021-10-09T14:01:41.000Z,completed,SAJ Lamb Shawarma  Wrap with Drink,1,Chocolate Milk,1.75,Can you please put the tzatziki on the wrap,12.73,25.14,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-09T13:28:26.000Z,2021-10-09T14:01:41.000Z,completed,Chocolate Milk,1,"",,,3.09,25.14,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-08T16:37:57.000Z,2021-10-08T17:14:47.000Z,completed,Chocolate Milk,1,"",,,3.09,20.74,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-08T16:37:57.000Z,2021-10-08T17:14:47.000Z,completed,JR Lamb Shawarma,1,Tzatziki Sauce,0.85,,7.49,20.74,CAD
+Toronto,Osmow's Shawarma (Bowmanville - 2021 Green Rd),2021-10-08T16:37:57.000Z,2021-10-08T17:14:47.000Z,completed,JR Lamb Shawarma,1,"Medium, Onions, Garlic Sauce & Tahini (Recommended), Tomatoes",0.0,,7.49,20.74,CAD
+Toronto,Shell (114 Liberty St S),2021-10-04T12:47:58.000Z,2021-10-04T13:08:35.000Z,completed,Sprite 500ml,1,"",,,2.49,2.97,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-04T12:46:03.000Z,2021-10-04T13:30:57.000Z,completed,Bottled Ice Tea,1,"",,,2.79,31.38,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-04T12:46:03.000Z,2021-10-04T13:30:57.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,31.38,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-04T12:46:03.000Z,2021-10-04T13:30:57.000Z,completed,Biscuit,2,"",,,1.29,31.38,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-04T12:46:03.000Z,2021-10-04T13:30:57.000Z,completed,Blackened Ranch,2,"",,,0.5,31.38,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-10-04T12:46:03.000Z,2021-10-04T13:30:57.000Z,completed,Spicy Chicken Sandwich,1,"",,,7.29,31.38,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Elk on a Beech,1,"Beechhouse, White Bun (220 Cals)",0.0,,21.98,48.56,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Elk on a Beech,1,Add Smoked Bacon (130 Cals),1.97,,21.98,48.56,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Classic Milkshake (550-1050Cals),1,"Strawberry, 16 oz",0.0,,6.78,48.56,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Elk on a Beech,1,Add Brie (90 Cals),0.98,,21.98,48.56,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Son of A Beech,1,"White Bun (220 Cals), Fresh Cut Fries (620 Cals), Fresh 100% Canadian Beef Patty (370 Cals), Bacon Roasted Garlic Aioli",0.0,,18.02,48.56,CAD
+Ottawa,The Works (2525 Bank St),2021-10-03T16:14:56.000Z,2021-10-03T16:45:30.000Z,completed,Elk on a Beech,1,Sweet Potato Fries (440 Cals),1.98,,21.98,48.56,CAD
+Ottawa,McDonald's (Donald & St Laurent),2021-10-02T20:46:58.000Z,2021-10-02T21:05:52.000Z,completed,McPicks McDouble Meal [520-950 Cals],1,"Med Fries [350.0 Cals], Bun [140.0 Cals], Mustard [0.0 Cals], Meat Patty [80.0 Cals], Salt [0.0 Cals], Ketchup [15.0 Cals], Onions [5.0 Cals], Coffee or Tea, Med Premium Roast Coffee [4.0 Cals], Pickles [1.0 Cals], 2 Sugar [70-140 Cals], 2 Milk [30-70 Cals]",0.0,,5.99,17.65,CAD
+Ottawa,McDonald's (Donald & St Laurent),2021-10-02T20:46:58.000Z,2021-10-02T21:05:52.000Z,completed,Regular Oreo McFlurry [570.0 Cals],1,Oreo Pieces [120.0 Cals],0.0,,3.49,17.65,CAD
+Ottawa,McDonald's (Donald & St Laurent),2021-10-02T20:46:58.000Z,2021-10-02T21:05:52.000Z,completed,Med Premium Roast Coffee [4.0 Cals],1,"Med Premium Roast Coffee [4.0 Cals], 2 Sugar [70-140 Cals], 2 Milk [30-70 Cals]",0.0,,1.79,17.65,CAD
+Ottawa,McDonald's (Donald & St Laurent),2021-10-02T20:46:58.000Z,2021-10-02T21:05:52.000Z,completed,Regular Oreo McFlurry [570.0 Cals],1,Snack Oreo McFlurry [330.0 Cals],-0.7,,3.49,17.65,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Blackened Ranch,2,"",,,0.5,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Honey Mustard,1,"",,,0.5,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Buttermilk Ranch,1,"",,,0.5,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Biscuit,1,"",,,1.29,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Bonafide Chicken Combo (2 Piece),1,"Leg and Thigh (Dark Meat Only), Bottled Diet Coke, Cajun Fries (Regular), Spicy, Bonafide Chicken (2 Pieces), Bottled Sprite, Biscuit, Mild",0.0,,11.49,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-28T17:17:47.000Z,2021-09-28T17:53:37.000Z,completed,Spicy Chicken Sandwich,1,"",,,7.29,46.49,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Biscuit,1,"",,,1.29,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Blackened Ranch,2,"",,,0.5,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Butterfly Shrimp (8pcs),1,Bayou Buffalo,0.0,,7.79,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Blackened Ranch,1,"",,,0.5,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-09-22T17:43:49.000Z,2021-09-22T18:42:06.000Z,completed,Spicy Chicken Sandwich,1,"",,,7.29,29.16,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-22T13:35:22.000Z,2021-08-22T14:08:43.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,24.03,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-22T13:35:22.000Z,2021-08-22T14:08:43.000Z,completed,Biscuit,2,"",,,1.29,24.03,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-22T13:35:22.000Z,2021-08-22T14:08:43.000Z,completed,Blackened Ranch,2,"",,,0.5,24.03,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-22T13:35:22.000Z,2021-08-22T14:08:43.000Z,completed,Bottled Ice Tea,1,"",,,2.79,24.03,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-22T13:35:22.000Z,2021-08-22T14:08:43.000Z,completed,Spicy Chicken Sandwich,1,No Pickles,0.0,,7.29,24.03,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Bottled Ice Tea,1,"",,,2.79,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Chicken Sandwich,1,"",,,7.29,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Biscuit,1,"",,,1.29,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Blackened Ranch,1,"",,,0.5,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Bonafide Chicken Combo (2 Piece),1,"Leg and Thigh (Dark Meat Only), Cajun Fries (Regular), Spicy, Bonafide Chicken (2 Pieces), Biscuit, Bottled Coke",0.0,,11.49,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Cajun Fries (Regular),1,"",,,2.49,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Spicy Chicken Sandwich,1,"",,,7.29,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Tender Combo (5 Pieces),1,"Bottled Root Beer, Bayou Buffalo, Tenders Only (5 Piece), Blackened Ranch, Cajun Fries (Regular), Spicy, Bottle Dasani Water, Biscuit",0.0,,14.99,91.98,CAD
+Toronto,Popeyes Louisiana Kitchen (Bowmanville),2021-08-14T18:53:43.000Z,2021-08-14T19:36:28.000Z,completed,Tenders Only (5 Piece),1,"Buttermilk Ranch, Half Mild, Half Spicy, Blackened Ranch",0.0,,11.29,91.98,CAD
+Toronto,Little Caesars (King Street East),2021-07-20T11:07:26.000Z,2021-07-20T11:30:31.000Z,completed,Crazy Bread,3,"",,,3.99,17.14,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2021-04-27T19:59:09.000Z,2021-04-27T20:42:13.000Z,completed,Milkshake,1,Strawberry (+ 20 calories),0.0,,6.49,29.87,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2021-04-27T19:59:09.000Z,2021-04-27T20:42:13.000Z,completed,Regular Cajun Fries,1,"",,,5.49,29.87,CAD
+Ottawa,Five Guys (324 Hunt Club Rd W) (ON-1641),2021-04-27T19:59:09.000Z,2021-04-27T20:42:13.000Z,completed,Cheeseburger,1,"Grilled Onions (+ 10 calories), Mayo (+110 calories), Tomato (+10 calories), Mustard (+ 0 calories)",0.0,,9.89,29.87,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Blueberry Muffin Pairing [430.0 Cals],1,Add Espresso [1.0 Cals],0.89,,2.59,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Orange Juice [110.0 Cals],1,Medium [180.0 Cals],0.3,,1.89,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Blueberry Muffin Pairing [430.0 Cals],1,Lrg Premium Roast Coffee [5.0 Cals],0.6,,2.59,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Blueberry Muffin Pairing [430.0 Cals],1,"1 Milk [15-35 Cals], Heated, 1 Sugar [35-70 Cals]",0.0,,2.59,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Chicken McMuffin Extra Value Meal [523.0 Cals],1,"2 Cream [80-200 Cals], Hash Brown [160.0 Cals], Sml Premium Roast Coffee [3.0 Cals], 2 Sugar [70-140 Cals], 2 Milk [30-70 Cals]",0.0,,5.99,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Premium Roast Coffee [3.0 Cals],1,"1 Milk [15-35 Cals], 1 Sugar [35-70 Cals]",0.0,,1.59,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-19T09:54:39.000Z,2021-04-19T10:05:46.000Z,completed,Premium Roast Coffee [3.0 Cals],1,Large [5.0 Cals],0.6,,1.59,19.09,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Small French Fries [240.0 Cals], 1 Milk [15-35 Cals], Extra Butter [15.0 Cals], Add Mayo-Style Sauce [40.0 Cals], 1 Sugar [35-70 Cals]",0.0,,5.99,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Double Quarter Pounder BLT Extra Value Meal [990-1430 Cals],1,Lrg Fries [560.0 Cals],0.5,,13.19,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Sausage McMuffin [370.0 Cals],1,"",,,2.69,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Double Quarter Pounder BLT Extra Value Meal [990-1430 Cals],1,Med NESTEA Iced Tea [150.0 Cals],0.0,,13.19,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Add Tomato [3.0 Cals],0.59,,5.99,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Lrg Premium Roast Coffee [5.0 Cals],0.6,,5.99,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-14T01:30:39.000Z,2021-04-14T01:44:41.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,5.99,32.13,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Double Quarter Pounder BLT Extra Value Meal [990-1430 Cals],1,Med NESTEA Iced Tea [150.0 Cals],0.0,,13.19,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Small French Fries [240.0 Cals], 1 Milk [15-35 Cals], Extra Butter [15.0 Cals], Add Mayo-Style Sauce [40.0 Cals], 1 Sugar [35-70 Cals]",0.0,,5.99,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Lrg Premium Roast Coffee [5.0 Cals],0.6,,5.99,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Oreo McFlurry [330.0 Cals],1,Snack [330.0 Cals],0.0,,3.19,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Add Tomato [3.0 Cals],0.59,,5.99,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,10 McNuggets Extra Value Meal [670-1102 Cals],1,"Hot Mustard [60.0 Cals], Med Fries [350.0 Cals], Barbeque Sauce [40.0 Cals], Med Coca-Cola [190.0 Cals]",0.0,,12.29,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Double Quarter Pounder BLT Extra Value Meal [990-1430 Cals],1,Lrg Fries [560.0 Cals],0.5,,13.19,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Oreo McFlurry [330.0 Cals],1,Extra Oreo Pieces [120.0 Cals],0.29,,3.19,48.38,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-04-10T22:39:48.000Z,2021-04-10T22:59:23.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,5.99,48.38,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Green Iced Tea,1,"",,,3.25,86.85,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Create your own,1,"10"" Small",0.0,,11.99,86.85,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Create your own,1,"Pineapple, Pepperoni",2.0,,11.99,86.85,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Garlic Fingers,1,"",,,12.95,86.85,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Create your own,1,"Chicken Shawarma, Fetta",2.5,,11.99,86.85,CAD
+Ottawa,3 Brothers Pizza & Poutine,2021-04-08T02:14:26.000Z,2021-04-08T03:15:02.000Z,completed,Garlic Sauce,1,Small,0.0,,1.35,86.85,CAD
+Ottawa,Pizza Pizza (2515 Bank St.),2021-04-08T01:42:22.000Z,2021-04-08T02:00:08.000Z,canceled,Funnel Cake Stix with Caramel,1,Caramel Dip,0.0,,6.29,0.0,CAD
+Ottawa,Pizza Pizza (2515 Bank St.),2021-04-08T01:42:22.000Z,2021-04-08T02:00:08.000Z,canceled,Single Pizzas (Small),1,"Mozzarella Cheese, Regular, Creamy Garlic Sauce, Regular Dough",0.0,,7.99,0.0,CAD
+Ottawa,Pizza Pizza (2515 Bank St.),2021-04-08T01:42:22.000Z,2021-04-08T02:00:08.000Z,canceled,Single Pizzas (Small),1,"Salami, Spinach, Pepperoni, Goat Cheese, Pineapple",1.5,,7.99,0.0,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-04-06T22:37:18.000Z,2021-04-06T23:32:31.000Z,completed,Canadian Panburger,1,"Add Cheddar Cheese Slice, Add Bacon Strip (1 pcs.)",1.99,,19.99,38.02,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-04-06T22:37:18.000Z,2021-04-06T23:32:31.000Z,completed,Canadian Panburger,1,Fries with chipotle dip,0.0,,19.99,38.02,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-04-06T22:37:18.000Z,2021-04-06T23:32:31.000Z,completed,Maple Syrup - 2oz,1,"",,,2.99,38.02,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-21T04:59:51.000Z,2021-02-21T05:17:30.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"1 Milk [15-35 Cals], Add Mayo-Style Sauce [40.0 Cals], Extra Butter [15.0 Cals], Hash Brown [160.0 Cals], 2 Sugar [70-140 Cals]",0.0,,6.99,14.29,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-21T04:59:51.000Z,2021-02-21T05:17:30.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Med Premium Roast Brewed Coffee [4.0 Cals],0.4,,6.99,14.29,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-21T04:59:51.000Z,2021-02-21T05:17:30.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,6.99,14.29,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Big Mac Extra Value Meal [710-1140 Cals],1,Med NESTEA Iced Tea [150.0 Cals],0.0,,9.89,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Premium Roast Brewed Coffee [3.0 Cals],1,Medium [4.0 Cals],0.3,,1.49,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,6.99,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,Remove Pickles [1.0 Cals],0.0,,12.39,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,Lrg Coke Zero [2.0 Cals],0.2,,12.39,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Oreo McFlurry [330.0 Cals],1,Snack [330.0 Cals],0.0,,3.19,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Big Mac Extra Value Meal [710-1140 Cals],1,Lrg Fries [560.0 Cals],0.5,,9.89,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Big Mac [560.0 Cals],1,"Extra Onions [5.0 Cals], Extra Big Mac Sauce [170.0 Cals], Remove Pickles [1.0 Cals]",0.0,,5.49,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Double Quarter Pounder with Cheese Extra Value Meal [890-1320 Cals],1,Lrg Fries [560.0 Cals],0.5,,12.39,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Premium Roast Brewed Coffee [3.0 Cals],1,"2 Cream [80-200 Cals], 2 Sugar [70-140 Cals], 2 Milk [30-70 Cals]",0.0,,1.49,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Small French Fries [240.0 Cals], 1 Milk [15-35 Cals], Add Mayo-Style Sauce [40.0 Cals], Extra Butter [15.0 Cals], 2 Sugar [70-140 Cals]",0.0,,6.99,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-19T21:56:44.000Z,2021-02-19T22:20:49.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Med Premium Roast Brewed Coffee [4.0 Cals],0.4,,6.99,48.74,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-18T05:21:43.000Z,2021-02-18T05:48:34.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Sausage Patty [170.0 Cals],1.09,,6.99,28.26,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-18T05:21:43.000Z,2021-02-18T05:48:34.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,6.99,28.26,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-18T05:21:43.000Z,2021-02-18T05:48:34.000Z,completed,Orange Juice [110.0 Cals],1,Large [220.0 Cals],0.5,,1.89,28.26,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-18T05:21:43.000Z,2021-02-18T05:48:34.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Add Mayo-Style Sauce [40.0 Cals], Extra Butter [15.0 Cals], Hash Brown [160.0 Cals]",0.0,,6.99,28.26,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-18T05:21:43.000Z,2021-02-18T05:48:34.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Sml Orange Juice [110.0 Cals],0.3,,6.99,28.26,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,M&M McFlurry [410.0 Cals],1,Snack [410.0 Cals],0.0,,3.19,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,McPicks McDouble Meal [520-950 Cals],1,Large Fries [560.0 Cals],0.5,,6.19,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Add Tomato [3.0 Cals],0.59,,4.39,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Extra Butter [15.0 Cals],0.0,,4.39,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,20 Chicken McNuggets (Serves 2) [830.0 Cals],1,Sweet & Sour Sauce [50.0 Cals],0.0,,13.59,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,Fudge Sundae [340.0 Cals],1,"",,,2.99,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,McPicks McDouble Meal [520-950 Cals],1,Lrg Coke Zero [2.0 Cals],0.2,,6.19,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Extra Sausage Patty [170.0 Cals],1.09,,4.39,43.53,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-16T22:23:41.000Z,2021-02-16T22:51:21.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,4.39,43.53,CAD
+Ottawa,[LOST] JOEY Restaurants (Lansdowne),2021-02-15T23:35:18.000Z,2021-02-15T23:36:47.000Z,canceled,"Smirnoff Vodka, 750ml bottle Spirit (Vodka)(40% ABV)",1,"",,,60.0,0.0,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-15T00:16:20.000Z,2021-02-15T00:40:22.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Extra Butter [15.0 Cals],0.0,,4.39,10.57,CAD
+Ottawa,McDonald's (Cahill & Dazé),2021-02-15T00:16:20.000Z,2021-02-15T00:40:22.000Z,completed,Sausage 'N Egg McMuffin [430.0 Cals],1,Extra Round Egg [70.0 Cals],1.39,,4.39,10.57,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-02-13T21:39:57.000Z,2021-02-13T22:18:16.000Z,completed,Canadian Panburger,1,Add Extra Cheese Curds,3.0,,19.99,44.8,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-02-13T21:39:57.000Z,2021-02-13T22:18:16.000Z,completed,Maple Syrup - 2oz,2,"",,,2.99,44.8,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-02-13T21:39:57.000Z,2021-02-13T22:18:16.000Z,completed,Canadian Panburger,1,Creamy Coleslaw,0.0,,19.99,44.8,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-02-13T21:39:57.000Z,2021-02-13T22:18:16.000Z,completed,Canadian Panburger,1,Add Bacon Strip (1 pcs.),1.99,,19.99,44.8,CAD
+Ottawa,Flapjack's Canadian Diner Express,2021-02-13T21:39:57.000Z,2021-02-13T22:18:16.000Z,completed,Mini Donuts,1,"Cinnamon Sugar, 6 Mini Donuts",0.0,,5.99,44.8,CAD
+Ottawa,Flapjack's Canadian Diner Express,2020-10-29T17:40:24.000Z,2020-10-29T18:30:40.000Z,completed,Canadian Panburger,1,Creamy Coleslaw,0.0,,19.99,45.13,CAD
+Ottawa,Flapjack's Canadian Diner Express,2020-10-29T17:40:24.000Z,2020-10-29T18:30:40.000Z,completed,Canadian Panburger,1,Add 1oz of Maple Syrup,1.25,,19.99,45.13,CAD
+Ottawa,Flapjack's Canadian Diner Express,2020-10-29T17:40:24.000Z,2020-10-29T18:30:40.000Z,completed,Cinnamon Sugar Mini Donuts (6 pcs.),1,"",,,5.99,45.13,CAD
+Ottawa,Flapjack's Canadian Diner Express,2020-10-29T17:40:24.000Z,2020-10-29T18:30:40.000Z,completed,Pancake Battered Brownie Bites,1,"",,,9.99,45.13,CAD
+Ottawa,Wild Wing (Hog's Back South),2020-10-28T19:32:01.000Z,2020-10-28T20:04:53.000Z,completed,Single Wings,1,"Classic Wings (Non-Breaded), Additional Carrots, Celery & Blue Cheese Dip 230 Cals, Fries 640 Cals, Tradtional Wings (Breaded), Honey BBQ (Honey Garlic + BBQ) 180 Cals, Sour Cream 150 Cals, Jamaican Me Crazy (Pineapple Curry + Caribbean Jerk) 150 Cals, Blue Cheese 220 Cals",0.0,,18.5,47.11,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,Gravy,0.5,,9.89,32.03,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,4 Onion Rings,0.7,,9.89,32.03,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,Apple Pie,1.59,,9.89,32.03,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,"Pickles, Tzatziki, Chipotle Sauce, Onions, Regular Iced Tea (20 oz), Regular Pepsi (20 oz), Tomato, Onion Rings, Garlic Mayo, Salt & Pepper, Ketchup, Jalapeños, BBQ Sauce",0.0,,9.89,32.03,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,Cheese,0.8,,9.89,32.03,CAD
+Ottawa,Harvey's (Baseline & Merivale),2020-03-16T18:04:20.000Z,2020-03-16T18:19:11.000Z,completed,Original Burger Combo,1,Donuts (4),2.29,,9.89,32.03,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-27T19:56:14.000Z,2020-02-27T20:18:55.000Z,completed,Mighty Angus Original [790.0 Cals],1,"Extra Smoky Angus Sauce [80.0 Cals], Extra Tomato [3.0 Cals]",0.0,,7.19,21.47,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-27T19:56:14.000Z,2020-02-27T20:18:55.000Z,completed,Mighty Angus Original [790.0 Cals],1,Extra Cheese [45.0 Cals],0.5,,7.19,21.47,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-27T19:56:14.000Z,2020-02-27T20:18:55.000Z,completed,Strawberry Triple Thick Milkshake [540.0 Cals],1,Medium [720.0 Cals],0.8,,3.39,21.47,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-27T19:56:14.000Z,2020-02-27T20:18:55.000Z,completed,Mighty Angus Original [790.0 Cals],1,Add Natural Cheddar [80.0 Cals],0.99,,7.19,21.47,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-27T19:56:14.000Z,2020-02-27T20:18:55.000Z,completed,Mighty Angus Original [790.0 Cals],1,Extra Angus Patty [320.0 Cals],3.5,,7.19,21.47,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-10T19:47:35.000Z,2020-02-10T20:09:54.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,Extra Natural Cheddar [80.0 Cals],0.99,,10.79,19.99,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-10T19:47:35.000Z,2020-02-10T20:09:54.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,"Extra Maple Mustard Sauce [32.0 Cals], Med NESTEA Iced Tea [150.0 Cals], Med French Fries [350.0 Cals], Extra Tomato [3.0 Cals], Extra Onion Crisps [25.0 Cals]",0.0,,10.79,19.99,CAD
+Ottawa,McDonald's (Bank & Queen),2020-02-10T19:47:35.000Z,2020-02-10T20:09:54.000Z,completed,Strawberry Triple Thick Milkshake [540.0 Cals],1,Medium [720.0 Cals],0.8,,3.39,19.99,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-31T00:28:32.000Z,2020-01-31T00:48:02.000Z,completed,Chicken Wings,1,"15 pcs, Honey Garlic",0.0,,13.98,19.74,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-31T00:28:32.000Z,2020-01-31T00:48:02.000Z,completed,Chicken Wings,1,Medium Sauce (On the Side),0.99,,13.98,19.74,CAD
+Ottawa,z-McDonald's (Rideau),2020-01-29T19:33:01.000Z,2020-01-29T19:49:03.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,Extra Grilled Chicken Patty [120.0 Cals],3.5,,10.79,20.0,CAD
+Ottawa,z-McDonald's (Rideau),2020-01-29T19:33:01.000Z,2020-01-29T19:49:03.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,"Extra Maple Mustard Sauce [32.0 Cals], Remove Leaf Lettuce [0.0 Cals], Extra Tomato [3.0 Cals], Extra Onion Crisps [25.0 Cals]",0.0,,10.79,20.0,CAD
+Ottawa,z-McDonald's (Rideau),2020-01-29T19:33:01.000Z,2020-01-29T19:49:03.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,Lrg NESTEA Iced Tea [220.0 Cals],0.3,,10.79,20.0,CAD
+Ottawa,z-McDonald's (Rideau),2020-01-29T19:33:01.000Z,2020-01-29T19:49:03.000Z,completed,Maple & Cheddar with Grilled Chicken Extra Value Meal [730-1160 Cals],1,Spicy Chipotle Seasoned Fries [420.0 Cals],0.6,,10.79,20.0,CAD
+Ottawa,Wild Wing (Ottawa East),2020-01-26T20:47:12.000Z,2020-01-26T21:25:29.000Z,completed,Bottle of Pop,1,Brisk Iced Tea,0.0,,2.99,26.53,CAD
+Ottawa,Wild Wing (Ottawa East),2020-01-26T20:47:12.000Z,2020-01-26T21:25:29.000Z,completed,Single Wings (1 Flavour),1,"Fries [+640 Calories], Smoke that Jerk (Smokey BBQ, Caribbean Jerk) (Medium), Traditional Wings (Breaded), Blue Cheese",0.0,,18.25,26.53,CAD
+Ottawa,Greek Souvlaki Shack,2020-01-21T19:13:25.000Z,2020-01-21T19:37:37.000Z,completed,Gyro Pita (Pork),1,Tzatziki (Yogurt with Cucumber and Garlic),0.0,Can you please add some tomato?,6.2,13.26,CAD
+Ottawa,Greek Souvlaki Shack,2020-01-21T19:13:25.000Z,2020-01-21T19:37:37.000Z,completed,Pop,1,Ice Tea,0.0,,1.75,13.26,CAD
+Ottawa,The Koven,2020-01-19T23:07:44.000Z,2020-01-19T23:43:12.000Z,completed,Behemoth Burger,1,"",,Can you please add some aioli to it,11.0,16.66,CAD
+Ottawa,The Koven,2020-01-19T23:07:44.000Z,2020-01-19T23:43:12.000Z,completed,Ginger Ale,1,"",,,1.5,16.66,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-19T00:34:31.000Z,2020-01-19T00:52:52.000Z,completed,Beef Shawarma Wrap,1,"Small, Hummus",0.0,,6.99,3.47,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-18T02:41:48.000Z,,completed,Iced Tea,1,"",,,2.99,26.18,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-18T02:41:48.000Z,,completed,Wings & Fries Specials,1,"Medium, 15 pcs",0.0,,16.98,26.18,CAD
+Ottawa,3 Brothers Shawarma and Poutine,2020-01-18T02:41:48.000Z,,completed,Wings & Fries Specials,1,Honey Garlic (On the Side),0.99,,16.98,26.18,CAD
+Ottawa,Greek Souvlaki Shack,2020-01-17T20:37:36.000Z,,completed,Pop,1,Ice Tea,0.0,,1.75,13.26,CAD
+Ottawa,Greek Souvlaki Shack,2020-01-17T20:37:36.000Z,,completed,Gyro Pita (Pork),1,Tzatziki (Yogurt with Cucumber and Garlic),0.0,Can you also add some tomato?,6.2,13.26,CAD
+Ottawa,Kettlemans Bagel (Trainyards),2019-12-03T23:53:16.000Z,2019-12-04T00:14:50.000Z,completed,Cinnamon Puffs,1,One,0.0,,3.63,24.83,CAD
+Ottawa,Kettlemans Bagel (Trainyards),2019-12-03T23:53:16.000Z,2019-12-04T00:14:50.000Z,completed,Pure Leaf Peach,1,"",,,3.65,24.83,CAD
+Ottawa,Kettlemans Bagel (Trainyards),2019-12-03T23:53:16.000Z,2019-12-04T00:14:50.000Z,completed,Oven Roasted Chicken,1,Cinnamon Raisin,0.0,,9.98,24.83,CAD
+Ottawa,z-McDonald's (Rideau),2019-11-19T09:31:18.000Z,2019-11-19T09:53:19.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Med Premium Roast Brewed Coffee [4.0 Cals],0.3,,6.59,16.54,CAD
+Ottawa,z-McDonald's (Rideau),2019-11-19T09:31:18.000Z,2019-11-19T09:53:19.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Add Espresso [1.0 Cals], Add Tomato [3.0 Cals]",0.5,,6.59,16.54,CAD
+Ottawa,z-McDonald's (Rideau),2019-11-19T09:31:18.000Z,2019-11-19T09:53:19.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,"Hash Brown [160.0 Cals], 2 Sugar [70-140 Cals], 2 Milk [30-70 Cals]",0.0,,6.59,16.54,CAD
+Ottawa,z-McDonald's (Rideau),2019-11-19T09:31:18.000Z,2019-11-19T09:53:19.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Sausage Patty [170.0 Cals],1.29,,6.59,16.54,CAD
+Ottawa,z-McDonald's (Rideau),2019-11-19T09:31:18.000Z,2019-11-19T09:53:19.000Z,completed,Sausage 'N Egg McMuffin Extra Value Meal [590.0 Cals],1,Extra Round Egg [70.0 Cals],1.4,,6.59,16.54,CAD
+Ottawa,McDonald's (Bank & Queen),2019-11-10T22:28:06.000Z,2019-11-10T22:46:15.000Z,completed,Mighty Angus Original [790.0 Cals],1,Extra Cheese [45.0 Cals],0.5,,7.19,20.47,CAD
+Ottawa,McDonald's (Bank & Queen),2019-11-10T22:28:06.000Z,2019-11-10T22:46:15.000Z,completed,Mighty Angus Original [790.0 Cals],1,"Extra Smoky Angus Sauce [80.0 Cals], Extra Grilled Onions [10.0 Cals], Extra Tomato [3.0 Cals]",0.0,,7.19,20.47,CAD
+Ottawa,McDonald's (Bank & Queen),2019-11-10T22:28:06.000Z,2019-11-10T22:46:15.000Z,completed,French Fries [240.0 Cals],1,Medium [350.0 Cals],1.2,,1.69,20.47,CAD
+Ottawa,McDonald's (Bank & Queen),2019-11-10T22:28:06.000Z,2019-11-10T22:46:15.000Z,completed,Strawberry Triple Thick Milkshake [540.0 Cals],1,Large [1100.0 Cals],1.6,,3.39,20.47,CAD
+Ottawa,The Works Craft Burgers & Beers (Manor Park),2019-10-26T17:28:52.000Z,,completed,The Tom Green Burger,1,Sweet Potato Fries (440 Calories),1.93,,17.98,25.01,CAD
+Ottawa,The Works Craft Burgers & Beers (Manor Park),2019-10-26T17:28:52.000Z,,completed,The Tom Green Burger,1,"Fresh 100 Percentage Canadian Beef (370 Calories), Bacon Roasted Garlic Aioli (180 Calories), White Bun (220 Calories), Tomatoes",0.0,,17.98,25.01,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-25T21:33:33.000Z,,completed,Chocolate Milk Bottle [170.0 Cals],1,"",,,1.49,15.01,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-25T21:33:33.000Z,,completed,French Fries [240.0 Cals],1,Medium [350.0 Cals],1.2,,1.69,15.01,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-25T21:33:33.000Z,,completed,Mighty Angus Original [790.0 Cals],1,Extra Cheese [45.0 Cals],0.5,,7.19,15.01,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-25T21:33:33.000Z,,completed,Mighty Angus Original [790.0 Cals],1,"Extra Smoky Angus Sauce [80.0 Cals], Extra Tomato [3.0 Cals]",0.0,,7.19,15.01,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-12T17:22:58.000Z,2019-10-12T17:42:32.000Z,completed,Tomato & Mozzarella with Grilled Chicken Extra Value Meal [701-1280 Cals],1,Extra Mozzarella Cheese [70.0 Cals],0.99,,10.79,15.39,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-12T17:22:58.000Z,2019-10-12T17:42:32.000Z,completed,Tomato & Mozzarella with Grilled Chicken Extra Value Meal [701-1280 Cals],1,"Med NESTEA Iced Tea [160.0 Cals], Extra Tomato [3.0 Cals]",0.0,,10.79,15.39,CAD
+Ottawa,z-McDonald's (Rideau),2019-10-12T17:22:58.000Z,2019-10-12T17:42:32.000Z,completed,Tomato & Mozzarella with Grilled Chicken Extra Value Meal [701-1280 Cals],1,Lrg French Fries [560.0 Cals],0.6,,10.79,15.39,CAD
+Ottawa,McDonald's (Bank & Queen),2019-10-01T02:10:17.000Z,2019-10-01T02:36:39.000Z,completed,Mighty Angus Original Extra Value Meal [950-1390 Cals],1,"Extra Smoky Angus Sauce [80.0 Cals], Med NESTEA Iced Tea [160.0 Cals], Extra Tomato [3.0 Cals]",0.0,,10.69,26.33,CAD
+Ottawa,McDonald's (Bank & Queen),2019-10-01T02:10:17.000Z,2019-10-01T02:36:39.000Z,completed,Mighty Angus Original Extra Value Meal [950-1390 Cals],1,Extra Angus Patty [320.0 Cals],3.5,,10.69,26.33,CAD
+Ottawa,McDonald's (Bank & Queen),2019-10-01T02:10:17.000Z,2019-10-01T02:36:39.000Z,completed,Mighty Angus Original Extra Value Meal [950-1390 Cals],1,Extra Cheese [45.0 Cals],0.5,,10.69,26.33,CAD
+Ottawa,McDonald's (Bank & Queen),2019-10-01T02:10:17.000Z,2019-10-01T02:36:39.000Z,completed,Mighty Angus Original Extra Value Meal [950-1390 Cals],1,Lrg French Fries [560.0 Cals],0.6,,10.69,26.33,CAD
+Ottawa,McDonald's (Bank & Queen),2019-10-01T02:10:17.000Z,2019-10-01T02:36:39.000Z,completed,Strawberry Triple Thick Milkshake [540.0 Cals],1,Large [1100.0 Cals],1.6,,3.39,26.33,CAD
+Ottawa,z-McDonald's (Rideau),2019-01-11T21:36:01.000Z,2019-01-11T21:55:23.000Z,completed,Tomato & Mozzarella with Grilled Chicken Extra Value Meal [701-1280 Cals],1,"Med French Fries [350 Cals], Med NESTEA Iced Tea [160 Cals]",,,,14.1,CAD

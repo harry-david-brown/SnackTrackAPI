@@ -1,0 +1,29 @@
+Trip Request Time,Create Ticket Time,City,Country,Product Name,Locale,Modality
+2025-08-09 20:35:47,2025-08-09 22:28:08,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+"",2025-05-08 18:20:16,Toronto,CA,,en_US,chat
+2025-03-25 01:06:33,2025-03-25 01:45:34,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+2024-10-29 17:30:55,2024-10-29 17:47:55,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+2024-10-04 22:56:27,2024-10-04 23:08:05,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+2024-07-06 05:56:13,2024-07-06 06:38:32,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+2024-05-15 16:52:36,2024-05-15 17:22:27,Toronto,CA,UberEATS Marketplace (delivery),en_US,chat
+2023-12-02 21:37:27,2023-12-02 22:15:39,Ottawa,CA,UberX,en_US,messaging
+2023-12-02 21:37:27,2023-12-02 22:13:40,Ottawa,CA,UberX,en_US,chat
+2023-04-27 19:19:11,2023-04-27 19:53:10,Ottawa,CA,UberEATS Marketplace (delivery),en_US,chat
+2023-04-24 02:32:59,2023-04-24 14:44:06,Gatineau,CA,UberX,en_US,messaging
+2023-04-24 02:32:59,2023-04-24 14:42:43,Gatineau,CA,UberX,en_US,chat
+2023-04-10 00:01:53,2023-04-10 00:43:00,Ottawa,CA,UberEATS Marketplace (delivery),en_US,messaging
+2023-04-10 00:01:53,2023-04-10 00:42:07,Ottawa,CA,UberEATS Marketplace (delivery),en_US,chat
+2023-03-06 17:05:02,2023-03-06 19:24:44,Ottawa,CA,UberEATS Marketplace (delivery),en_US,chat
+2023-03-06 17:05:02,2023-03-06 19:24:08,Ottawa,CA,UberEATS Marketplace (delivery),en_US,chat
+2023-02-06 00:07:32,2023-02-06 01:13:07,Ottawa,CA,UberEATS Marketplace (delivery),en_US,chat
+2022-03-26 13:47:24,2022-03-26 14:19:14,Ottawa,CA,UberEATS Marketplace (order),en,messaging
+2022-03-26 13:47:24,2022-03-26 14:16:46,Ottawa,CA,UberEATS Marketplace (order),en_US,chat
+2022-03-25 13:59:03,2022-03-25 14:21:17,Ottawa,CA,UberEATS Marketplace (order),en_US,chat
+2022-03-24 12:31:10,2022-03-24 13:13:52,Ottawa,CA,UberEATS Marketplace (order),en_US,chat
+2022-02-25 20:46:50,2022-02-25 21:52:18,Ottawa,CA,UberEATS Marketplace (order),en_US,chat
+2022-02-15 08:52:25,2022-02-15 09:30:16,Ottawa,CA,UberEATS Marketplace (order),en,messaging
+2022-02-15 08:52:25,2022-02-15 09:28:20,Ottawa,CA,UberEATS Marketplace (order),en_US,chat
+2021-10-13 18:28:56,2021-10-13 21:18:41,Toronto,CA,UberEATS Marketplace (order),en_US,chat
+2020-01-20 04:32:25,2020-01-20 05:01:43,Ottawa,CA,UberEATS Marketplace (order),en_US,messaging
+"",2019-11-29 10:39:46,Toronto,CA,,en_US,messaging
+"",2019-03-11 16:49:21,unknown,US,,en_US,messaging

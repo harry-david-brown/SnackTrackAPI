@@ -5,6 +5,8 @@ import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import usersRouter from './routes/users';
 import receiptsRouter from './routes/receipts';
+import csvRouter from './routes/csv';
+import validationRouter from './routes/validation';
 import { PostgresService } from './services/PostgresService';
 import { config } from './config/AppConfig';
 
@@ -42,6 +44,8 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 // Mount routers
 app.use('/users', usersRouter);
 app.use('/receipts', receiptsRouter);
+app.use('/csv', csvRouter);
+app.use('/validation', validationRouter);
 
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   console.error(err);
