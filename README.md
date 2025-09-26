@@ -15,6 +15,7 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Spending Analytics** - Average Order Value and detailed insights
 - [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
 - [x] **Dev/Prod flag** - Instant switching, collect scattered flags
+- [x] **Restaurant Chain Consolidation** - Group spending across multiple locations of major chains
 - [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)

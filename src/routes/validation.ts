@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PostgresService } from '../services/PostgresService';
 import { CsvImportService } from '../services/CsvImportService';
+import { getChainName } from '../config/ChainConfig';
 
 const router = Router();
 const postgresService = new PostgresService();
@@ -66,6 +67,63 @@ router.get('/user/:userId/summary', async (req: Request, res: Response) => {
       LIMIT 12
     `, [userId]);
     
+    // Get chain spending breakdown
+    const chainSpending = await postgresService.query(`
+      SELECT 
+        restaurant_name,
+        SUM(amount_spent) as total_spent,
+        COUNT(*) as order_count,
+        COUNT(DISTINCT restaurant_name) as location_count
+      FROM receipts 
+      WHERE user_id = $1 AND restaurant_name IS NOT NULL
+      GROUP BY restaurant_name
+      ORDER BY total_spent DESC
+    `, [userId]);
+    
+    // Process chain data
+    const chainMap = new Map<string, {
+      totalSpent: number;
+      orderCount: number;
+      locationCount: number;
+      locations: string[];
+    }>();
+    
+    for (const row of chainSpending.rows) {
+      const chainName = getChainName(row.restaurant_name);
+      const totalSpent = parseFloat(row.total_spent);
+      const orderCount = parseInt(row.order_count);
+      
+      if (chainName) {
+        // This is a major chain
+        if (!chainMap.has(chainName)) {
+          chainMap.set(chainName, {
+            totalSpent: 0,
+            orderCount: 0,
+            locationCount: 0,
+            locations: []
+          });
+        }
+        
+        const chainData = chainMap.get(chainName)!;
+        chainData.totalSpent += totalSpent;
+        chainData.orderCount += orderCount;
+        chainData.locationCount += 1;
+        chainData.locations.push(row.restaurant_name);
+      }
+    }
+    
+    // Convert to array and sort by total spent
+    const topChains = Array.from(chainMap.entries())
+      .map(([chainName, data]) => ({
+        chainName,
+        totalSpent: data.totalSpent,
+        orderCount: data.orderCount,
+        locationCount: data.locationCount,
+        locations: data.locations
+      }))
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .slice(0, 10);
+    
     const stats = receiptStats.rows[0];
     
     res.json({
@@ -98,7 +156,8 @@ router.get('/user/:userId/summary', async (req: Request, res: Response) => {
         month: row.month,
         orderCount: parseInt(row.order_count),
         totalSpent: parseFloat(row.total_spent)
-      }))
+      })),
+      topChains: topChains
     });
     
   } catch (error) {
