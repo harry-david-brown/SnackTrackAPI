@@ -1,5 +1,5 @@
 import { Receipt, ReceiptType, ReceiptItem } from '../../models/Receipt';
-import { Email } from '../../models/Email';
+import { Email } from '../email/Email';
 
 /**
  * Service responsible for parsing emails into receipts

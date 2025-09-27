@@ -72,25 +72,7 @@ export class PostgresService {
         CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts(created_at)
       `);
 
-      // Add new receipt columns if they don't exist (migration)
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS receipt_type VARCHAR(50) DEFAULT 'unknown'
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS restaurant_name VARCHAR(255)
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS order_date TIMESTAMP
-      `);
-      
-
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS data_source VARCHAR(20) DEFAULT 'email'
-      `);
-
-      // Convert items from TEXT[] to JSONB if needed (handle existing data)
+      // Migration: Convert items from TEXT[] to JSONB if needed
       try {
         await this.query(`
           ALTER TABLE receipts ALTER COLUMN items TYPE JSONB USING items::JSONB

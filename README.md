@@ -16,7 +16,6 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Smart Email Filtering** - Only query Google for emails from Uber, only store receipts
 - [x] **Dev/Prod flag** - Instant switching, collect scattered flags
 - [x] **Restaurant Chain Consolidation** - Group spending across multiple locations of major chains
-- [x] **Deduplication Scaffolding** - Abstract system for handling multiple data sources
 - [x] **Refactoring** - Project restructuring, decoupling, dependency injection, separation of concerns
 - [x] **Database Management API** - Complete database viewing and management endpoints
 - [x] **API Streamlining & Cleanup** - Remove unnecessary endpoints

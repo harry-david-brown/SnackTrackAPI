@@ -1,5 +1,5 @@
 import { User } from '../../models/User';
-import { Email } from '../../models/Email';
+import { Email } from './Email';
 import { EmailClient } from './EmailClient';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';

@@ -1,6 +1,6 @@
 import { User } from '../../models/User';
 import { Receipt } from '../../models/Receipt';
-import { Email } from '../../models/Email';
+import { Email } from '../email/Email';
 import { EmailClient, EmailClientFactory } from '../email/EmailClient';
 
 /**

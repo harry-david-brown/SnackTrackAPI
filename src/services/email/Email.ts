@@ -1,6 +1,6 @@
-import { Receipt } from './Receipt';
-import { EmailFilterService } from '../services/email/EmailFilterService';
-import { ReceiptParserService } from '../services/receipt/ReceiptParserService';
+import { Receipt } from '../../models/Receipt';
+import { EmailFilterService } from './EmailFilterService';
+import { ReceiptParserService } from '../receipt/ReceiptParserService';
 
 export class Email {
   private static filterService = new EmailFilterService();

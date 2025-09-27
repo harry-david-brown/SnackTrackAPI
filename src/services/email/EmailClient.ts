@@ -1,5 +1,5 @@
 import { User } from '../../models/User';
-import { Email } from '../../models/Email';
+import { Email } from './Email';
 
 /**
  * Interface for email clients

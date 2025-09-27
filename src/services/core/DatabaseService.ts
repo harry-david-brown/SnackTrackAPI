@@ -1,6 +1,5 @@
 import { User } from '../../models/User';
 import { Receipt } from '../../models/Receipt';
-import { CreateUserDTO } from '../../models/CreateUserDTO';
 import { ReceiptLookupService } from '../receipt/ReceiptLookupService';
 import { UserRepository } from '../data/UserRepository';
 import { ReceiptRepository } from '../data/ReceiptRepository';
@@ -16,8 +15,8 @@ export class DatabaseService {
     private receiptRepository: ReceiptRepository
   ) {}
 
-  async createUser(dto: CreateUserDTO): Promise<string> {
-    return await this.userRepository.createUser(dto);
+  async createUser(email: string): Promise<string> {
+    return await this.userRepository.createUser(email);
   }
 
 

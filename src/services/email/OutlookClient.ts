@@ -1,5 +1,5 @@
 import { User } from '../../models/User';
-import { Email } from '../../models/Email';
+import { Email } from './Email';
 import { EmailClient } from './EmailClient';
 
 export class OutlookClient implements EmailClient {

@@ -1,5 +1,4 @@
 import { User } from '../../models/User';
-import { CreateUserDTO } from '../../models/CreateUserDTO';
 import { PostgresService } from './PostgresService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,11 +9,11 @@ import { v4 as uuidv4 } from 'uuid';
 export class UserRepository {
   constructor(private postgres: PostgresService) {}
 
-  async createUser(dto: CreateUserDTO): Promise<string> {
+  async createUser(email: string): Promise<string> {
     const userId = uuidv4();
     const result = await this.postgres.query(
       'INSERT INTO users (id, email) VALUES ($1, $2) RETURNING id',
-      [userId, dto.email]
+      [userId, email]
     );
     return result.rows[0].id;
   }
