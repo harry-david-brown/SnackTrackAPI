@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
-import { ReceiptFilters, ReceiptType } from '../models/Receipt';
+import { ReceiptType } from '../models/Receipt';
 import { PostgresService } from '../services/data/PostgresService';
-import { ReceiptService } from '../services/receipt/ReceiptService';
+import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
 
 const router = Router();
 const postgresService = container.postgres;
@@ -118,8 +118,21 @@ router.get('/', async (req: Request, res: Response) => {
     if (req.query.minAmount) filters.minAmount = parseFloat(req.query.minAmount as string);
     if (req.query.maxAmount) filters.maxAmount = parseFloat(req.query.maxAmount as string);
 
-    const result = await receiptService.getReceipts(filters, limit, offset);
-    res.json(result);
+    const receipts = await receiptService.getReceipts(filters, limit, offset);
+    
+    // Get total count for pagination
+    const totalResult = await postgresService.query('SELECT COUNT(*) as count FROM receipts');
+    const total = parseInt(totalResult.rows[0].count);
+    
+    res.json({
+      receipts,
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total
+      }
+    });
   } catch (err) {
     console.error('Error fetching receipts:', err);
     res.status(500).json({ error: 'Failed to fetch receipts' });

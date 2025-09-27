@@ -83,12 +83,16 @@ router.post('/import', csvImportRateLimit, upload.single('csvFile'), async (req:
       return res.status(400).json({ error: 'userId is required' });
     }
 
-    const csvData = req.file.buffer.toString('utf8');
-    const importedCount = await csvImportService.importReceipts(csvData, userId);
+    const csvBuffer = req.file.buffer;
+    const importResult = await csvImportService.parseCsvFile(csvBuffer, userId);
+    
+    if (importResult.success && importResult.receipts.length > 0) {
+      await csvImportService.importReceipts(importResult.receipts, userId);
+    }
     
     res.json({
       message: 'CSV imported successfully',
-      importedCount
+      importedCount: importResult.totalReceipts
     });
   } catch (error) {
     console.error('CSV import error:', error);
