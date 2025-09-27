@@ -18,6 +18,7 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Restaurant Chain Consolidation** - Group spending across multiple locations of major chains
 - [x] **Deduplication Scaffolding** - Abstract system for handling multiple data sources
 - [x] **Refactoring** - Project restructuring, decoupling, dependency injection, separation of concerns
+- [x] **Database Management API** - Complete database viewing and management endpoints
 - [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)
@@ -177,6 +178,15 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 - `POST /users/:id/update-receipts` - Fetch and parse emails
 - `GET /users/:id/debug/emails` - See raw email data
 
+### 🗄️ Database Management Endpoints
+- `GET /database/users` - View all users with statistics
+- `GET /database/users/:id` - View specific user with all receipts
+- `GET /database/receipts` - View all receipts with filtering and pagination
+- `GET /database/receipts/:id` - View specific receipt details
+- `GET /database/stats` - Comprehensive database analytics
+- `DELETE /database/users/:id` - Delete user and all receipts (optional)
+- `DELETE /database/receipts/:id` - Delete specific receipt (optional)
+
 ### Example Usage
 ```bash
 # Create CSV-only user
@@ -195,6 +205,12 @@ curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
 
 # Check database health
 curl http://localhost:3000/validation/database/health
+
+# Database management examples
+curl http://localhost:3000/database/users
+curl http://localhost:3000/database/stats
+curl "http://localhost:3000/database/receipts?limit=5"
+curl http://localhost:3000/database/receipts/RECEIPT_ID
 ```
 
 ---
