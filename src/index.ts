@@ -10,6 +10,7 @@ import validationRouter from './routes/validation';
 import databaseRouter from './routes/database';
 import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
+import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
 
@@ -49,10 +50,8 @@ app.use('/csv', csvRouter);
 app.use('/validation', validationRouter);
 app.use('/database', databaseRouter);
 
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error(err);
-  res.status(500).json({ error: 'Internal Server Error' });
-});
+// Error handling middleware (must be last)
+app.use(errorHandler);
 
 const PORT = config.getServerPort();
 

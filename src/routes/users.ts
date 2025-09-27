@@ -1,47 +1,61 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
+import { asyncHandler, NotFoundError, DatabaseError } from '../middleware/errorHandler';
+import { validateUUIDParam, validateUserCreation } from '../middleware/validation';
 
 const router = Router();
 const databaseService = container.databaseService;
 
-router.post('/create', async (req: Request, res: Response) => {
+// Create a new user
+router.post('/create', validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
   try {
     const id = await databaseService.createUser(req.body);
-    res.json({ id });
-  } catch (err) {
-    console.error('Error creating user:', err);
-    res.status(500).json({ error: 'Failed to create user', details: err instanceof Error ? err.message : 'Unknown error' });
+    res.status(201).json({ 
+      id,
+      message: 'User created successfully'
+    });
+  } catch (error) {
+    throw new DatabaseError('Failed to create user', error as Error);
   }
-});
+}));
 
-
-router.get('/:id/totalSpent', async (req: Request, res: Response) => {
+// Get user's total spending
+router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
+    // First check if user exists
+    const user = await databaseService.getUser(req.params.id);
+    if (!user) {
+      throw new NotFoundError('User', req.params.id);
+    }
+    
     const total = await databaseService.getUserTotalSpent(req.params.id);
     res.json({ total });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to get total spent' });
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    throw new DatabaseError('Failed to get user total spent', error as Error);
   }
-});
+}));
 
 // Update user receipts from emails
-router.post('/:id/update-receipts', async (req: Request, res: Response) => {
+router.post('/:id/update-receipts', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     await databaseService.updateUserReceiptsForUser(req.params.id);
     const total = await databaseService.getUserTotalSpent(req.params.id);
-    res.json({ message: 'Receipts updated', total });
-  } catch (err) {
-    console.error('Update receipts error:', err);
-    res.status(500).json({ error: 'Failed to update receipts', details: err instanceof Error ? err.message : 'Unknown error' });
+    res.json({ 
+      message: 'Receipts updated successfully',
+      total 
+    });
+  } catch (error) {
+    throw new DatabaseError('Failed to update receipts', error as Error);
   }
-});
+}));
 
 // Debug endpoint to test email fetching and parsing
-router.get('/:id/debug/emails', async (req: Request, res: Response) => {
+router.get('/:id/debug/emails', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const user = await databaseService.getUser(req.params.id);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      throw new NotFoundError('User', req.params.id);
     }
     
     const emails = await container.receiptLookupService.getUserEmails(user);
@@ -57,10 +71,10 @@ router.get('/:id/debug/emails', async (req: Request, res: Response) => {
       emailCount: emails.length,
       emails: receipts
     });
-  } catch (err) {
-    console.error('Debug endpoint error:', err);
-    res.status(500).json({ error: 'Failed to fetch emails', details: err instanceof Error ? err.message : 'Unknown error' });
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    throw new DatabaseError('Failed to fetch emails', error as Error);
   }
-});
+}));
 
 export default router; 
