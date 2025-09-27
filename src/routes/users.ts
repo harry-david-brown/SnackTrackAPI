@@ -2,12 +2,13 @@ import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { asyncHandler, NotFoundError, DatabaseError } from '../middleware/errorHandler';
 import { validateUUIDParam, validateUserCreation } from '../middleware/validation';
+import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
 
 const router = Router();
 const databaseService = container.databaseService;
 
-// Create a new user
-router.post('/create', validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
+// Create a new user (with rate limiting)
+router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
   try {
     const id = await databaseService.createUser(req.body);
     res.status(201).json({ 
@@ -36,8 +37,8 @@ router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: 
   }
 }));
 
-// Update user receipts from emails
-router.post('/:id/update-receipts', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+// Update user receipts from emails (with rate limiting)
+router.post('/:id/update-receipts', emailOperationRateLimit, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     await databaseService.updateUserReceiptsForUser(req.params.id);
     const total = await databaseService.getUserTotalSpent(req.params.id);

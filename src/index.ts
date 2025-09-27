@@ -11,11 +11,35 @@ import databaseRouter from './routes/database';
 import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
+import { 
+  securityHeaders, 
+  corsConfig, 
+  requestSizeLimit, 
+  securityLogger,
+  apiRateLimit,
+  progressiveSlowDown 
+} from './middleware/security';
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+
+// Trust proxy for accurate IP addresses (important for rate limiting)
+app.set('trust proxy', 1);
+
+// Security middleware (must be applied early)
+app.use(securityHeaders);
+app.use(corsConfig);
+app.use(requestSizeLimit);
+app.use(securityLogger);
+
+// Rate limiting middleware
+app.use(apiRateLimit);
+app.use(progressiveSlowDown);
+
+// Body parsing (with size limits)
+app.use(express.json({ limit: config.isProduction() ? '10mb' : '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: config.isProduction() ? '10mb' : '50mb' }));
 
 // Initialize database
 const postgresService = new PostgresService();

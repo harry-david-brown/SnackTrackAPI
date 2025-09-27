@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { container } from '../services/core/ServiceContainer';
+import { csvImportRateLimit } from '../middleware/security';
 
 const router = Router();
 const csvImportService = container.csvImportService;
@@ -66,7 +67,7 @@ router.post('/upload', upload.single('csvFile'), async (req: Request, res: Respo
 });
 
 // POST /csv/import - Import parsed CSV data to database
-router.post('/import', upload.single('csvFile'), async (req: Request, res: Response) => {
+router.post('/import', csvImportRateLimit, upload.single('csvFile'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No CSV file uploaded' });
