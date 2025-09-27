@@ -74,7 +74,7 @@ router.get('/receipts', async (req: Request, res: Response) => {
     const restaurantName = req.query.restaurantName as string;
 
     let query = `
-      SELECT r.*, u.email as user_email, u.account_type as user_account_type
+      SELECT r.*, u.email as user_email
       FROM receipts r
       LEFT JOIN users u ON r.user_id = u.id
       WHERE 1=1
@@ -131,8 +131,35 @@ router.get('/receipts', async (req: Request, res: Response) => {
     const countResult = await container.postgres.query(countQuery, countParams);
     const totalCount = parseInt(countResult.rows[0].count);
 
+    // Clean up the receipt data for API response
+    const cleanReceipts = result.rows.map((row: any) => {
+      const cleanReceipt: any = {
+        id: row.id,
+        userId: row.user_id,
+        receiptType: row.receipt_type,
+        dataSource: row.data_source,
+        restaurantName: row.restaurant_name,
+        orderDate: row.order_date,
+        amountSpent: parseFloat(row.amount_spent),
+        items: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
+        userEmail: row.user_email,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+
+      // Only include email fields for email-based receipts
+      if (row.data_source === 'email') {
+        cleanReceipt.emailFrom = row.email_from;
+        cleanReceipt.emailTo = row.email_to;
+        cleanReceipt.emailSubject = row.email_subject;
+        cleanReceipt.emailBody = row.email_body;
+      }
+
+      return cleanReceipt;
+    });
+
     res.json({
-      receipts: result.rows,
+      receipts: cleanReceipts,
       pagination: {
         total: totalCount,
         limit,
@@ -153,7 +180,7 @@ router.get('/receipts', async (req: Request, res: Response) => {
 router.get('/receipts/:id', async (req: Request, res: Response) => {
   try {
     const result = await container.postgres.query(`
-      SELECT r.*, u.email as user_email, u.account_type as user_account_type
+      SELECT r.*, u.email as user_email
       FROM receipts r
       LEFT JOIN users u ON r.user_id = u.id
       WHERE r.id = $1
@@ -163,19 +190,32 @@ router.get('/receipts/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Receipt not found' });
     }
 
-    const receipt = result.rows[0];
+    const row = result.rows[0];
     
-    // Parse items if they exist
-    if (receipt.items && typeof receipt.items === 'string') {
-      try {
-        receipt.items = JSON.parse(receipt.items);
-      } catch (e) {
-        console.warn('Failed to parse items JSON:', e);
-        receipt.items = [];
-      }
+    // Clean up the receipt data for API response
+    const cleanReceipt: any = {
+      id: row.id,
+      userId: row.user_id,
+      receiptType: row.receipt_type,
+      dataSource: row.data_source,
+      restaurantName: row.restaurant_name,
+      orderDate: row.order_date,
+      amountSpent: parseFloat(row.amount_spent),
+      items: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
+      userEmail: row.user_email,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+
+    // Only include email fields for email-based receipts
+    if (row.data_source === 'email') {
+      cleanReceipt.emailFrom = row.email_from;
+      cleanReceipt.emailTo = row.email_to;
+      cleanReceipt.emailSubject = row.email_subject;
+      cleanReceipt.emailBody = row.email_body;
     }
 
-    res.json(receipt);
+    res.json(cleanReceipt);
   } catch (err) {
     console.error('Error fetching receipt:', err);
     res.status(500).json({ 

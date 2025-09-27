@@ -14,20 +14,6 @@ router.post('/create', async (req: Request, res: Response) => {
   }
 });
 
-// Create a user specifically for CSV import (no email required)
-router.post('/create-csv', async (req: Request, res: Response) => {
-  try {
-    const userId = await databaseService.createCsvUser();
-    res.json({ 
-      id: userId,
-      message: 'CSV user created successfully',
-      dataSource: 'CSV'
-    });
-  } catch (err) {
-    console.error('Error creating CSV user:', err);
-    res.status(500).json({ error: 'Failed to create CSV user', details: err instanceof Error ? err.message : 'Unknown error' });
-  }
-});
 
 router.get('/:id/totalSpent', async (req: Request, res: Response) => {
   try {

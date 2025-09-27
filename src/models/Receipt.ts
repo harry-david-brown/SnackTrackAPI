@@ -7,6 +7,12 @@ export enum ReceiptType {
   UNKNOWN = 'unknown'
 }
 
+export enum DataSource {
+  CSV = 'csv',
+  EMAIL = 'email',
+  API = 'api'
+}
+
 export interface ReceiptItem {
   name: string;
   quantity: number;
@@ -14,6 +20,10 @@ export interface ReceiptItem {
   category?: string;
 }
 
+/**
+ * Streamlined Receipt model - development focused
+ * Only essential fields for MVP
+ */
 export class Receipt {
   constructor(
     public userId: string,
@@ -22,15 +32,8 @@ export class Receipt {
     public receiptType: ReceiptType,
     public restaurantName?: string,
     public orderDate?: Date,
-    public emailFrom?: string,
-    public emailTo?: string,
-    public emailSubject?: string,
-    public emailBody?: string,
-    public subtotal?: number,
-    public tax?: number,
-    public tip?: number,
-    public deliveryFee?: number,
-    public serviceFee?: number
+    // Data source tracking
+    public dataSource: DataSource = DataSource.CSV
   ) {}
 
   // Helper method to get total items count
@@ -43,15 +46,27 @@ export class Receipt {
     return this.items.filter(item => item.category === category);
   }
 
-  // Helper method to get spending breakdown
-  getSpendingBreakdown() {
+  // Helper method to check if this is an email-based receipt
+  isEmailBased(): boolean {
+    return this.dataSource === DataSource.EMAIL;
+  }
+
+  // Helper method to check if this is a CSV-based receipt
+  isCsvBased(): boolean {
+    return this.dataSource === DataSource.CSV;
+  }
+
+  // Helper method to get clean receipt data for API responses
+  toApiResponse() {
     return {
-      subtotal: this.subtotal || 0,
-      tax: this.tax || 0,
-      tip: this.tip || 0,
-      deliveryFee: this.deliveryFee || 0,
-      serviceFee: this.serviceFee || 0,
-      total: this.amountSpent
+      id: (this as any).id, // Will be set by database
+      userId: this.userId,
+      items: this.items,
+      amountSpent: this.amountSpent,
+      receiptType: this.receiptType,
+      restaurantName: this.restaurantName,
+      orderDate: this.orderDate,
+      dataSource: this.dataSource
     };
   }
-} 
+}

@@ -101,20 +101,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// GET /receipts/analytics/:userId - Get spending analytics for a user
-router.get('/analytics/:userId', async (req: Request, res: Response) => {
-  try {
-    const userId = req.params.userId;
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-
-    const analytics = await receiptService.getReceiptAnalytics(userId, startDate, endDate);
-    res.json(analytics);
-  } catch (err) {
-    console.error('Error fetching analytics:', err);
-    res.status(500).json({ error: 'Failed to fetch analytics' });
-  }
-});
 
 // POST /receipts/analyze - Email-only analysis endpoint (perfect for viral app!)
 router.post('/analyze', async (req: Request, res: Response) => {

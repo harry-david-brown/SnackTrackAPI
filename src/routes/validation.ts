@@ -129,7 +129,6 @@ router.get('/user/:userId/summary', async (req: Request, res: Response) => {
       user: {
         id: user.id,
         email: user.email,
-        accountType: user.account_type,
         createdAt: user.created_at
       },
       summary: {
@@ -181,14 +180,8 @@ router.get('/user/:userId/receipts', async (req: Request, res: Response) => {
         restaurant_name,
         order_date,
         amount_spent,
-        subtotal,
-        tax,
-        tip,
-        delivery_fee,
-        service_fee,
         items,
-        email_from,
-        email_subject,
+        data_source,
         created_at
       FROM receipts 
       WHERE user_id = $1
@@ -207,16 +200,8 @@ router.get('/user/:userId/receipts', async (req: Request, res: Response) => {
         restaurantName: row.restaurant_name,
         orderDate: row.order_date,
         amountSpent: parseFloat(row.amount_spent),
-        breakdown: {
-          subtotal: row.subtotal ? parseFloat(row.subtotal) : null,
-          tax: row.tax ? parseFloat(row.tax) : null,
-          tip: row.tip ? parseFloat(row.tip) : null,
-          deliveryFee: row.delivery_fee ? parseFloat(row.delivery_fee) : null,
-          serviceFee: row.service_fee ? parseFloat(row.service_fee) : null
-        },
         items: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
-        emailFrom: row.email_from,
-        emailSubject: row.email_subject,
+        dataSource: row.data_source,
         createdAt: row.created_at
       })),
       pagination: {
@@ -248,7 +233,7 @@ router.get('/user/:userId/verify-csv', async (req: Request, res: Response) => {
         order_date,
         amount_spent,
         items,
-        email_from
+        data_source
       FROM receipts 
       WHERE user_id = $1
       ORDER BY order_date DESC
@@ -257,12 +242,12 @@ router.get('/user/:userId/verify-csv', async (req: Request, res: Response) => {
     // Perform data integrity checks
     const checks = {
       totalReceipts: receipts.rows.length,
-      receiptsWithAmount: receipts.rows.filter((r: any) => r.amount_spent > 0).length,
-      refundedReceipts: receipts.rows.filter((r: any) => r.amount_spent === 0).length,
+      receiptsWithAmount: receipts.rows.filter((r: any) => parseFloat(r.amount_spent) > 0).length,
+      refundedReceipts: receipts.rows.filter((r: any) => parseFloat(r.amount_spent) === 0).length,
       receiptsWithRestaurant: receipts.rows.filter((r: any) => r.restaurant_name).length,
       receiptsWithDate: receipts.rows.filter((r: any) => r.order_date).length,
       receiptsWithItems: receipts.rows.filter((r: any) => r.items && (Array.isArray(r.items) ? r.items : JSON.parse(r.items)).length > 0).length,
-      csvImportedReceipts: receipts.rows.filter((r: any) => r.email_from === 'uber-csv-import').length,
+      csvImportedReceipts: receipts.rows.filter((r: any) => r.data_source === 'csv').length,
       totalAmount: receipts.rows.reduce((sum: number, r: any) => sum + parseFloat(r.amount_spent), 0),
       duplicateRestaurants: new Set(receipts.rows.map((r: any) => r.restaurant_name)).size,
       dateRange: {
@@ -273,9 +258,8 @@ router.get('/user/:userId/verify-csv', async (req: Request, res: Response) => {
     
     // Check for potential issues
     const issues = [];
-    const refundedReceipts = checks.totalReceipts - checks.receiptsWithAmount;
-    if (refundedReceipts > 0) {
-      issues.push(`${refundedReceipts} receipts have zero amount (likely refunded orders)`);
+    if (checks.refundedReceipts > 0) {
+      issues.push(`${checks.refundedReceipts} receipts have zero amount (likely refunded orders)`);
     }
     if (checks.receiptsWithRestaurant !== checks.totalReceipts) {
       issues.push(`${checks.totalReceipts - checks.receiptsWithRestaurant} receipts missing restaurant name`);
@@ -296,7 +280,7 @@ router.get('/user/:userId/verify-csv', async (req: Request, res: Response) => {
         orderDate: row.order_date,
         amountSpent: parseFloat(row.amount_spent),
         itemCount: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items).length : 0,
-        emailFrom: row.email_from
+        dataSource: row.data_source
       }))
     });
     

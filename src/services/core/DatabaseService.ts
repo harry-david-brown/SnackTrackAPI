@@ -20,9 +20,6 @@ export class DatabaseService {
     return await this.userRepository.createUser(dto);
   }
 
-  async createCsvUser(): Promise<string> {
-    return await this.userRepository.createCsvUser();
-  }
 
   async getUser(id: string): Promise<User | undefined> {
     return await this.userRepository.findById(id);

@@ -42,7 +42,6 @@ export class PostgresService {
         CREATE TABLE IF NOT EXISTS users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           email VARCHAR(255) UNIQUE NOT NULL,
-          account_type VARCHAR(50) NOT NULL DEFAULT 'Gmail',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -54,20 +53,11 @@ export class PostgresService {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           receipt_type VARCHAR(50) NOT NULL DEFAULT 'unknown',
+          data_source VARCHAR(20) NOT NULL DEFAULT 'csv',
           restaurant_name VARCHAR(255),
           order_date TIMESTAMP,
           amount_spent DECIMAL(10,2) NOT NULL DEFAULT 0,
-          subtotal DECIMAL(10,2),
-          tax DECIMAL(10,2),
-          tip DECIMAL(10,2),
-          delivery_fee DECIMAL(10,2),
-          service_fee DECIMAL(10,2),
           items JSONB,
-          email_from VARCHAR(255),
-          email_to VARCHAR(255),
-          email_subject VARCHAR(500),
-          email_body TEXT,
-          parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -95,24 +85,9 @@ export class PostgresService {
         ALTER TABLE receipts ADD COLUMN IF NOT EXISTS order_date TIMESTAMP
       `);
       
+
       await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS subtotal DECIMAL(10,2)
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS tax DECIMAL(10,2)
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS tip DECIMAL(10,2)
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS delivery_fee DECIMAL(10,2)
-      `);
-      
-      await this.query(`
-        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS service_fee DECIMAL(10,2)
+        ALTER TABLE receipts ADD COLUMN IF NOT EXISTS data_source VARCHAR(20) DEFAULT 'email'
       `);
 
       // Convert items from TEXT[] to JSONB if needed (handle existing data)
@@ -132,6 +107,10 @@ export class PostgresService {
 
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_receipt_type ON receipts(receipt_type)
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_data_source ON receipts(data_source)
       `);
 
       await this.query(`

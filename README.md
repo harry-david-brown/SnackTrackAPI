@@ -19,21 +19,73 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Deduplication Scaffolding** - Abstract system for handling multiple data sources
 - [x] **Refactoring** - Project restructuring, decoupling, dependency injection, separation of concerns
 - [x] **Database Management API** - Complete database viewing and management endpoints
+- [x] **API Streamlining & Cleanup** - Removed bloated fields, unified user creation, eliminated redundant endpoints
 - [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)
-- [ ] **Complete API MVP** - Production-ready backend
-- [ ] **Frontend Planning** - Choose React Native vs. Expo
-- [ ] **Design System** - Create basic UI/UX mockups
-- [ ] **Testing Setup** - Add comprehensive tests
-- [ ] **Deployment** - Set up production deployment
+
+#### 🎯 **Complete API MVP** - Production-ready backend
+- [x] Core user management (create, view, delete)
+- [x] Receipt import from CSV and email
+- [x] Database management endpoints
+- [x] Data validation and integrity checks
+- [x] API endpoint streamlining and cleanup
+- [ ] Error handling improvements
+- [ ] Rate limiting and security
+- [ ] API documentation (Swagger/OpenAPI)
+
+#### 🎨 **Frontend Planning** - Choose React Native vs. Expo
+- [ ] Technology stack decision
+- [ ] Project structure planning
+- [ ] Development environment setup
+
+#### 🎨 **Design System** - Create basic UI/UX mockups
+- [ ] User flow wireframes
+- [ ] Component library planning
+- [ ] Brand identity and styling
+
+#### 🧪 **Testing Setup** - Add comprehensive tests
+- [ ] Unit test framework setup
+- [ ] API endpoint testing
+- [ ] Database integration tests
+
+#### 🚀 **Deployment** - Set up production deployment
+- [ ] Production environment configuration
+- [ ] CI/CD pipeline setup
+- [ ] Monitoring and logging
 
 ### Monthly Goals (3-4 Week Sprint)
-- [ ] **Complete Frontend** - Full React Native app
-- [ ] **Integration** - Connect frontend to API
-- [ ] **Android Testing** - Test on emulator and device
-- [ ] **User Testing** - Get feedback from friends
-- [ ] **Polish** - UI/UX improvements and bug fixes
+
+#### 📱 **Complete Frontend** - Full React Native app
+- [ ] Authentication screens (login/register)
+- [ ] Dashboard with spending overview
+- [ ] Receipt history and details
+- [ ] CSV upload functionality
+- [ ] Settings and user management
+
+#### 🔗 **Integration** - Connect frontend to API
+- [ ] API client setup and configuration
+- [ ] State management (Redux/Zustand)
+- [ ] Error handling and loading states
+- [ ] Offline functionality planning
+
+#### 📱 **Android Testing** - Test on emulator and device
+- [ ] Android emulator setup
+- [ ] Device testing on physical Android
+- [ ] Performance optimization
+- [ ] Platform-specific bug fixes
+
+#### 👥 **User Testing** - Get feedback from friends
+- [ ] Beta testing group setup
+- [ ] Feedback collection system
+- [ ] Usability testing sessions
+- [ ] Feature prioritization based on feedback
+
+#### ✨ **Polish** - UI/UX improvements and bug fixes
+- [ ] Visual design refinements
+- [ ] Animation and transitions
+- [ ] Accessibility improvements
+- [ ] Performance optimizations
 
 ---
 
@@ -89,8 +141,10 @@ MockUberData/
 **Import your complete Uber Eats history**
 
 ```bash
-# Create a CSV-only user (no email required)
-curl -X POST http://localhost:3000/users/create-csv
+# Create a user (requires email)
+curl -X POST http://localhost:3000/users/create \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
 
 # Upload your Uber CSV file (example uses the included test data)
 curl -X POST http://localhost:3000/csv/import \
@@ -162,17 +216,9 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 - `POST /csv/import` - Import CSV data to database
 - `GET /csv/status/:userId` - Get import status for user
 
-### 📊 Validation & Analytics Endpoints
-- `GET /validation/user/:userId/summary` - Complete user data summary
-- `GET /validation/user/:userId/receipts` - Detailed receipt breakdown
-- `GET /validation/user/:userId/verify-csv` - CSV data integrity verification
-- `GET /validation/database/health` - Database health and statistics
-
 ### 👤 User Management Endpoints
 - `POST /users/create` - Create a new user (requires email)
-- `POST /users/create-csv` - Create a CSV-only user (no email required)
 - `GET /users/:id/totalSpent` - Get total spending
-- `GET /receipts/analytics/:userId` - Get spending analytics
 
 ### 📧 Email Endpoints (Fallback)
 - `POST /users/:id/update-receipts` - Fetch and parse emails
@@ -187,10 +233,18 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 - `DELETE /database/users/:id` - Delete user and all receipts (optional)
 - `DELETE /database/receipts/:id` - Delete specific receipt (optional)
 
+### 📊 Validation & Analytics Endpoints
+- `GET /validation/user/:userId/summary` - Complete user data summary with spending analytics
+- `GET /validation/user/:userId/receipts` - Detailed receipt breakdown with pagination
+- `GET /validation/user/:userId/verify-csv` - CSV data integrity verification
+- `GET /validation/database/health` - Database health and statistics
+
 ### Example Usage
 ```bash
-# Create CSV-only user
-curl -X POST http://localhost:3000/users/create-csv
+# Create user
+curl -X POST http://localhost:3000/users/create \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
 
 # Import Uber CSV (using included test data)
 curl -X POST http://localhost:3000/csv/import \
@@ -307,7 +361,7 @@ snack-track/
 │   ├── config/                          # Configuration management
 │   │   ├── AppConfig.ts                 # Centralized app configuration and environment settings
 │   │   ├── ChainConfig.ts               # Restaurant chain consolidation logic
-│   │   └── DataSourcePriority.ts       # Data source priority and deduplication rules
+│   │   └── DataSourcePriority.ts        # Data source priority and deduplication rules
 │   │
 │   ├── models/                          # Data models and interfaces
 │   │   ├── AccountType.ts               # User account type enumeration
@@ -318,7 +372,7 @@ snack-track/
 │   ├── routes/                          # API route handlers
 │   │   ├── csv.ts                       # CSV import/export endpoints
 │   │   ├── receipts.ts                  # Receipt management endpoints
-│   │   ├── users.ts                     # User management and spending analytics
+│   │   ├── users.ts                     # User management and total spending
 │   │   └── validation.ts                # Data validation and health check endpoints
 │   │
 │   ├── services/                        # Business logic and data access

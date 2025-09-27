@@ -1,6 +1,5 @@
 import { User } from '../../models/User';
 import { CreateUserDTO } from '../../models/CreateUserDTO';
-import { AccountType } from '../../models/AccountType';
 import { PostgresService } from './PostgresService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -14,8 +13,8 @@ export class UserRepository {
   async createUser(dto: CreateUserDTO): Promise<string> {
     const userId = uuidv4();
     const result = await this.postgres.query(
-      'INSERT INTO users (id, email, account_type) VALUES ($1, $2, $3) RETURNING id',
-      [userId, dto.email, AccountType.Gmail]
+      'INSERT INTO users (id, email) VALUES ($1, $2) RETURNING id',
+      [userId, dto.email]
     );
     return result.rows[0].id;
   }
@@ -30,8 +29,7 @@ export class UserRepository {
     const row = result.rows[0];
     return {
       id: row.id,
-      email: row.email,
-      type: row.account_type as AccountType
+      email: row.email
     };
   }
 
@@ -39,17 +37,8 @@ export class UserRepository {
     const result = await this.postgres.query('SELECT * FROM users');
     return result.rows.map((row: any) => ({
       id: row.id,
-      email: row.email,
-      type: row.account_type as AccountType
+      email: row.email
     }));
   }
 
-  async createCsvUser(): Promise<string> {
-    const userId = uuidv4();
-    const result = await this.postgres.query(
-      'INSERT INTO users (id, email, account_type) VALUES ($1, $2, $3) RETURNING id',
-      [userId, 'csv-import@snacktrack.local', AccountType.Gmail]
-    );
-    return result.rows[0].id;
-  }
 }

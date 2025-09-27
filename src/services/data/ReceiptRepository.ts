@@ -1,4 +1,4 @@
-import { Receipt } from '../../models/Receipt';
+import { Receipt, DataSource } from '../../models/Receipt';
 import { PostgresService } from './PostgresService';
 
 /**
@@ -27,26 +27,17 @@ export class ReceiptRepository {
   async save(receipt: Receipt): Promise<void> {
     await this.postgres.query(`
       INSERT INTO receipts (
-        user_id, receipt_type, restaurant_name, order_date, 
-        amount_spent, subtotal, tax, tip, delivery_fee, service_fee,
-        items, email_from, email_to, email_subject, email_body
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        user_id, receipt_type, data_source, restaurant_name, order_date, 
+        amount_spent, items
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     `, [
       receipt.userId,
       receipt.receiptType,
+      receipt.dataSource,
       receipt.restaurantName,
       receipt.orderDate,
       receipt.amountSpent,
-      receipt.subtotal,
-      receipt.tax,
-      receipt.tip,
-      receipt.deliveryFee,
-      receipt.serviceFee,
-      receipt.items.length > 0 ? JSON.stringify(receipt.items) : null,
-      receipt.emailFrom,
-      receipt.emailTo,
-      receipt.emailSubject,
-      receipt.emailBody
+      receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]'
     ]);
   }
 
@@ -69,22 +60,18 @@ export class ReceiptRepository {
   }
 
   private mapRowToReceipt(row: any): Receipt {
-    return new Receipt(
+    const receipt = new Receipt(
       row.user_id,
       row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
       parseFloat(row.amount_spent),
       row.receipt_type,
       row.restaurant_name,
       row.order_date ? new Date(row.order_date) : undefined,
-      row.email_from,
-      row.email_to,
-      row.email_subject,
-      row.email_body,
-      row.subtotal ? parseFloat(row.subtotal) : undefined,
-      row.tax ? parseFloat(row.tax) : undefined,
-      row.tip ? parseFloat(row.tip) : undefined,
-      row.delivery_fee ? parseFloat(row.delivery_fee) : undefined,
-      row.service_fee ? parseFloat(row.service_fee) : undefined
+      row.data_source as DataSource || DataSource.CSV
     );
+    
+    // Set the ID for database responses
+    (receipt as any).id = row.id;
+    return receipt;
   }
 }
