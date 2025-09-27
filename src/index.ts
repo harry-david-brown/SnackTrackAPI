@@ -7,7 +7,7 @@ import usersRouter from './routes/users';
 import receiptsRouter from './routes/receipts';
 import csvRouter from './routes/csv';
 import validationRouter from './routes/validation';
-import { PostgresService } from './services/PostgresService';
+import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 
 dotenv.config();

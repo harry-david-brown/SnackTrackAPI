@@ -5,8 +5,8 @@
  * This is designed to be implemented when we have multiple data sources.
  */
 
-import { Receipt } from '../models/Receipt';
-import { DataSourcePriority, getDataSourcePriority, hasHigherPriority } from '../config/DataSourcePriority';
+import { Receipt } from '../../models/Receipt';
+import { DataSourcePriority, getDataSourcePriority, hasHigherPriority } from '../../config/DataSourcePriority';
 
 export interface DuplicateMatch {
   receipt1: Receipt;

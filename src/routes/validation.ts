@@ -1,11 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { PostgresService } from '../services/PostgresService';
-import { CsvImportService } from '../services/CsvImportService';
+import { container } from '../services/core/ServiceContainer';
 import { getChainName } from '../config/ChainConfig';
 
 const router = Router();
-const postgresService = new PostgresService();
-const csvImportService = new CsvImportService(postgresService);
+const postgresService = container.postgres;
+const csvImportService = container.csvImportService;
 
 // GET /validation/user/:userId/summary - Get comprehensive user data summary
 router.get('/user/:userId/summary', async (req: Request, res: Response) => {

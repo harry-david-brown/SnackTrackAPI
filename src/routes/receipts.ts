@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { ReceiptService, ReceiptFilters } from '../services/ReceiptService';
-import { PostgresService } from '../services/PostgresService';
+import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
+import { PostgresService } from '../services/data/PostgresService';
 import { ReceiptType } from '../models/Receipt';
 import { Email } from '../models/Email';
 

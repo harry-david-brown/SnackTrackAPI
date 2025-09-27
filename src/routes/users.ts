@@ -1,12 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { DatabaseService } from '../services/DatabaseService';
-import { LookupService } from '../services/LookupService';
-import { PostgresService } from '../services/PostgresService';
+import { container } from '../services/core/ServiceContainer';
 
 const router = Router();
-const postgresService = new PostgresService();
-const lookupService = new LookupService();
-const databaseService = new DatabaseService(lookupService, postgresService);
+const databaseService = container.databaseService;
 
 router.post('/create', async (req: Request, res: Response) => {
   try {
@@ -21,13 +17,7 @@ router.post('/create', async (req: Request, res: Response) => {
 // Create a user specifically for CSV import (no email required)
 router.post('/create-csv', async (req: Request, res: Response) => {
   try {
-    // Create user with minimal data for CSV import
-    const result = await postgresService.query(
-      'INSERT INTO users (email, account_type) VALUES ($1, $2) RETURNING id',
-      [`csv-user-${Date.now()}@snacktrack.local`, 'CSV']
-    );
-    
-    const userId = result.rows[0].id;
+    const userId = await databaseService.createCsvUser();
     res.json({ 
       id: userId,
       message: 'CSV user created successfully',
@@ -68,8 +58,8 @@ router.get('/:id/debug/emails', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    const emails = await lookupService.getUserEmails(user);
-    const receipts = emails.map(email => ({
+    const emails = await container.receiptLookupService.getUserEmails(user);
+    const receipts = emails.map((email: any) => ({
       from: email.from,
       to: email.to,
       body: email.body,

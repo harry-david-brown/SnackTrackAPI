@@ -1,5 +1,6 @@
 import { User } from '../../models/User';
 import { Email } from '../../models/Email';
+import { EmailClient } from './EmailClient';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/AppConfig';
@@ -10,7 +11,7 @@ function decodeBase64Gmail(str: string): string {
   return decoded;
 }
 
-export class GmailClient {
+export class GmailClient implements EmailClient {
   async getEmails(user: User): Promise<Email[]> {
     // Use centralized config to determine data source
     if (config.shouldUseMockData()) {

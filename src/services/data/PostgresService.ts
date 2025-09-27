@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from 'pg';
-import { config } from '../config/AppConfig';
+import { config } from '../../config/AppConfig';
 
 export class PostgresService {
   private pool: Pool;

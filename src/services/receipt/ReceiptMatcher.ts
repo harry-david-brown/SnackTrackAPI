@@ -5,7 +5,7 @@
  * This will be crucial for detecting duplicates when we have multiple sources.
  */
 
-import { Receipt } from '../models/Receipt';
+import { Receipt } from '../../models/Receipt';
 
 export interface MatchingCriteria {
   restaurantNameWeight: number;

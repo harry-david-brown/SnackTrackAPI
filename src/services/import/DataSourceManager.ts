@@ -5,11 +5,11 @@
  * This is the main orchestrator for managing multiple data sources.
  */
 
-import { Receipt } from '../models/Receipt';
-import { PostgresService } from './PostgresService';
+import { Receipt } from '../../models/Receipt';
+import { PostgresService } from '../data/PostgresService';
 import { DeduplicationService, CsvDeduplicationService } from './DeduplicationService';
-import { ReceiptMatcher } from './ReceiptMatcher';
-import { DataSourcePriority, getDataSourcePriority, hasHigherPriority, getHighestPrioritySource } from '../config/DataSourcePriority';
+import { ReceiptMatcher } from '../receipt/ReceiptMatcher';
+import { DataSourcePriority, getDataSourcePriority, hasHigherPriority, getHighestPrioritySource } from '../../config/DataSourcePriority';
 
 export interface DataSourceImportResult {
   source: string;

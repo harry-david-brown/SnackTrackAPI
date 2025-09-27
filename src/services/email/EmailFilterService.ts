@@ -1,5 +1,5 @@
-import { Email } from '../models/Email';
-import { config } from '../config/AppConfig';
+import { Email } from '../../models/Email';
+import { config } from '../../config/AppConfig';
 
 export interface EmailClassification {
   isReceipt: boolean;

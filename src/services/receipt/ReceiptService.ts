@@ -1,5 +1,5 @@
-import { Receipt, ReceiptType, ReceiptItem } from '../models/Receipt';
-import { PostgresService } from './PostgresService';
+import { Receipt, ReceiptType, ReceiptItem } from '../../models/Receipt';
+import { PostgresService } from '../data/PostgresService';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ReceiptFilters {

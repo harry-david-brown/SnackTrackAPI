@@ -1,11 +1,9 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { CsvImportService } from '../services/CsvImportService';
-import { PostgresService } from '../services/PostgresService';
+import { container } from '../services/core/ServiceContainer';
 
 const router = Router();
-const postgresService = new PostgresService();
-const csvImportService = new CsvImportService(postgresService);
+const csvImportService = container.csvImportService;
 
 // Configure multer for file uploads
 const upload = multer({
@@ -167,7 +165,7 @@ router.get('/status/:userId', async (req: Request, res: Response) => {
     const userId = req.params.userId;
     
     // Get receipt count and total amount for user
-    const result = await postgresService.query(`
+    const result = await container.postgres.query(`
       SELECT 
         COUNT(*) as receipt_count,
         COALESCE(SUM(amount_spent), 0) as total_amount,

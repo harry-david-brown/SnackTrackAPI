@@ -17,6 +17,7 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Dev/Prod flag** - Instant switching, collect scattered flags
 - [x] **Restaurant Chain Consolidation** - Group spending across multiple locations of major chains
 - [x] **Deduplication Scaffolding** - Abstract system for handling multiple data sources
+- [x] **Refactoring** - Project restructuring, decoupling, dependency injection, separation of concerns
 - [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)
@@ -54,34 +55,16 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 
 **That's it!** The API is now running on `http://localhost:3000`
 
-> **Note:** The system uses standard Docker bridge networking and should work out-of-the-box on any system with Docker installed.
 
 ## 🗄️ Database State After Cloning
 
 When you clone this project, you get a **fresh, empty database**:
-
-### ✅ **What You Get:**
-- **Empty database schema** (tables created automatically)
-- **All the code** (CSV import functionality ready to use)
-- **Docker setup** (ready to run immediately)
-- **Test CSV file** (`MockUberData/Uber Data/Eats/user_orders-0.csv`)
-
-### ❌ **What You DON'T Get:**
-- **No users** (database starts completely empty)
-- **No receipts** (no imported data)
-- **No personal data** (each person gets their own clean slate)
 
 ### 🔄 **Database Persistence:**
 - **Data persists** between container restarts (stored in Docker volume)
 - **Data is NOT shared** between different machines
 - **Perfect for privacy** - each person's data stays on their machine
 
-### 🎯 **Perfect Setup:**
-This clean slate approach is ideal because:
-1. **No conflicts** - no mixing of different people's data
-2. **Privacy** - each person's data stays on their machine
-3. **Easy setup** - just clone, run Docker, and import your own CSV
-4. **Fresh start** - everyone gets the same clean experience
 
 ## 📁 Test Data Structure
 
@@ -98,26 +81,6 @@ MockUberData/
 **For testing:** Use `MockUberData/Uber Data/Eats/user_orders-0.csv`  
 **For your own data:** Replace with your downloaded Uber CSV file
 
-## 🎯 What This Does
-
-Snack Track automatically tracks your food spending through multiple data sources:
-
-### 🥡 **Primary Method: Uber CSV Import**
-- Import your complete Uber Eats order history (6+ years of data!)
-- Download your data from Uber's privacy portal
-- Upload CSV file for instant analysis
-- **Most comprehensive** - includes every order ever made
-
-### 💳 **Secondary Method: Financial Aggregators**
-- Connect bank/credit card accounts via Plaid/TrueLayer
-- Real-time transaction fetching
-- **Quickest option** - no waiting required
-- Limited to last 1-2 years of transactions
-
-### 📧 **Fallback Method: Email Parsing**
-- Connects to your Gmail account
-- Finds receipt emails from food delivery services
-- **Backup option** - when other methods aren't available
 
 ## 🎭 Three Ways to Use It
 
@@ -136,8 +99,8 @@ curl -X POST http://localhost:3000/csv/import \
 # Check total spending
 curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
 
-# Verify data integrity
-curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
+# User summary
+curl http://localhost:3000/validation/user/YOUR_USER_ID/summary
 ```
 
 > **Note:** The example uses the included test CSV file. Replace the file path with your own Uber CSV file when you have it.
@@ -154,7 +117,7 @@ curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
 ### Option 3: Email Parsing (Fallback)
 **Use Gmail for receipt parsing**
 
-**Easiest:** Use the pre-configured test account `snacktracktest@gmail.com`
+Use the pre-configured test account `snacktracktest@gmail.com`
 
 1. **Create .env file**
    ```bash
@@ -187,22 +150,6 @@ curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
    curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
    ```
 
-## 🔧 Configuration
-
-The system automatically works in **development mode** (most plug-and-play):
-- Uses mock data when no Gmail credentials are provided
-- Uses real Gmail API when credentials are present
-- Includes helpful debug information
-- No SSL requirements for local database
-
-**To switch to production mode:**
-```bash
-# Change NODE_ENV in .env file
-NODE_ENV=production
-
-# Restart the server
-docker-compose down && docker-compose up --build -d
-```
 
 ## 📊 API Endpoints
 
@@ -333,5 +280,102 @@ curl http://localhost:3000/validation/database/health
 - **Testing**: Always test with API endpoints before committing
 - **Branch Names**: Use descriptive names like `add-outlook-support`
 - **Commit Messages**: Be clear about what you changed
+
+---
+
+## 📁 Project Structure
+
+```
+snack-track/
+├── src/
+│   ├── config/                          # Configuration management
+│   │   ├── AppConfig.ts                 # Centralized app configuration and environment settings
+│   │   ├── ChainConfig.ts               # Restaurant chain consolidation logic
+│   │   └── DataSourcePriority.ts       # Data source priority and deduplication rules
+│   │
+│   ├── models/                          # Data models and interfaces
+│   │   ├── AccountType.ts               # User account type enumeration
+│   │   ├── CreateUserDTO.ts             # User creation data transfer object
+│   │   ├── Email.ts                     # Email model with parsing and filtering logic
+│   │   └── Receipt.ts                   # Receipt model with financial breakdown
+│   │
+│   ├── routes/                          # API route handlers
+│   │   ├── csv.ts                       # CSV import/export endpoints
+│   │   ├── receipts.ts                  # Receipt management endpoints
+│   │   ├── users.ts                     # User management and spending analytics
+│   │   └── validation.ts                # Data validation and health check endpoints
+│   │
+│   ├── services/                        # Business logic and data access
+│   │   ├── core/                        # Core business orchestration
+│   │   │   ├── DatabaseService.ts       # Main business logic coordinator
+│   │   │   └── ServiceContainer.ts      # Dependency injection container
+│   │   │
+│   │   ├── data/                        # Data access layer
+│   │   │   ├── PostgresService.ts       # Database connection and query execution
+│   │   │   ├── ReceiptRepository.ts     # Receipt data access operations
+│   │   │   └── UserRepository.ts        # User data access operations
+│   │   │
+│   │   ├── email/                       # Email processing services
+│   │   │   ├── EmailClient.ts           # Email client interface and factory
+│   │   │   ├── EmailFilterService.ts    # Email filtering and classification
+│   │   │   ├── GmailClient.ts           # Gmail API integration with mock fallback
+│   │   │   └── OutlookClient.ts         # Outlook API integration (placeholder)
+│   │   │
+│   │   ├── import/                      # Data import and source management
+│   │   │   ├── CsvImportService.ts      # CSV parsing and import logic
+│   │   │   ├── DataSourceManager.ts     # Multi-source data coordination
+│   │   │   └── DeduplicationService.ts  # Duplicate detection and resolution
+│   │   │
+│   │   └── receipt/                     # Receipt processing services
+│   │       ├── ReceiptLookupService.ts  # Receipt fetching from various sources
+│   │       ├── ReceiptMatcher.ts        # Fuzzy matching for duplicate detection
+│   │       ├── ReceiptParserService.ts  # Email-to-receipt parsing logic
+│   │       └── ReceiptService.ts        # Receipt business logic and operations
+│   │
+│   └── index.ts                         # Application entry point and server setup
+│
+├── MockUberData/                        # Sample data for testing
+│   └── Uber Data/
+│       └── Eats/
+│           └── user_orders-0.csv        # Test CSV file with Uber Eats data
+│
+├── scripts/                             # Utility scripts
+│   ├── get-refresh-token.js             # OAuth token generation helper
+│   └── test-config.ts                   # Configuration testing utilities
+│
+├── docker-compose.yml                   # Development environment setup
+├── docker-compose.prod.yml              # Production environment setup
+├── Dockerfile                           # Production container configuration
+├── Dockerfile.dev                       # Development container configuration
+├── package.json                         # Node.js dependencies and scripts
+├── tsconfig.json                        # TypeScript configuration
+└── README.md                            # Project documentation
+```
+
+### 🏗️ Architecture Overview
+
+**Core Services** (`/core`): Main business logic and orchestration
+- `DatabaseService`: Coordinates user and receipt operations
+- `ServiceContainer`: Manages dependency injection
+
+**Data Services** (`/data`): Data access and persistence
+- `PostgresService`: Database connection and query execution
+- `UserRepository` & `ReceiptRepository`: Data access operations
+
+**Email Services** (`/email`): Email processing and client management
+- `EmailClient`: Interface for different email providers
+- `GmailClient`: Gmail API integration with mock data fallback
+- `EmailFilterService`: Email classification and filtering
+
+**Import Services** (`/import`): Data import and source management
+- `CsvImportService`: CSV parsing and import functionality
+- `DataSourceManager`: Multi-source data coordination
+- `DeduplicationService`: Duplicate detection and resolution
+
+**Receipt Services** (`/receipt`): Receipt-specific processing
+- `ReceiptLookupService`: Fetches receipts from various sources
+- `ReceiptParserService`: Converts emails to receipt objects
+- `ReceiptMatcher`: Handles fuzzy matching for duplicates
+- `ReceiptService`: Receipt business logic and operations
 
 ---
