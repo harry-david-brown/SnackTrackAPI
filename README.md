@@ -19,20 +19,20 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Deduplication Scaffolding** - Abstract system for handling multiple data sources
 - [x] **Refactoring** - Project restructuring, decoupling, dependency injection, separation of concerns
 - [x] **Database Management API** - Complete database viewing and management endpoints
-- [x] **API Streamlining & Cleanup** - Removed bloated fields, unified user creation, eliminated redundant endpoints
+- [x] **API Streamlining & Cleanup** - Remove unnecessary endpoints
 - [ ] **Financial Aggregator Integration** - Plaid/TrueLayer API integration
 
 ### Weekly Goals (1-2 Week Sprint)
 
-#### 🎯 **Complete API MVP** - Production-ready backend
+#### 🎯 **Complete API MVP** - Production-ready backend ✅
 - [x] Core user management (create, view, delete)
 - [x] Receipt import from CSV and email
 - [x] Database management endpoints
 - [x] Data validation and integrity checks
 - [x] API endpoint streamlining and cleanup
-- [ ] Error handling improvements
-- [ ] Rate limiting and security
-- [ ] API documentation (Swagger/OpenAPI)
+- [x] Comprehensive Swagger documentation
+- [x] Error handling improvements
+- [x] Rate limiting and security
 
 #### 🎨 **Frontend Planning** - Choose React Native vs. Expo
 - [ ] Technology stack decision
@@ -211,33 +211,25 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 **Base URL:** `http://localhost:3000`
 
 ### 🥡 CSV Import Endpoints
-- `POST /csv/upload` - Upload and parse CSV file
-- `POST /csv/preview` - Preview CSV data without importing
-- `POST /csv/import` - Import CSV data to database
-- `GET /csv/status/:userId` - Get import status for user
+- `POST /csv/import` - Import CSV file directly to database
 
 ### 👤 User Management Endpoints
 - `POST /users/create` - Create a new user (requires email)
-- `GET /users/:id/totalSpent` - Get total spending
+- `GET /users/:id/totalSpent` - Get total spending for user
 
-### 📧 Email Endpoints (Fallback)
-- `POST /users/:id/update-receipts` - Fetch and parse emails
-- `GET /users/:id/debug/emails` - See raw email data
+### 📊 Analytics & Validation Endpoints
+- `GET /validation/user/{userId}/summary` - Get comprehensive user analytics and validation
 
 ### 🗄️ Database Management Endpoints
-- `GET /database/users` - View all users with statistics
-- `GET /database/users/:id` - View specific user with all receipts
-- `GET /database/receipts` - View all receipts with filtering and pagination
-- `GET /database/receipts/:id` - View specific receipt details
-- `GET /database/stats` - Comprehensive database analytics
-- `DELETE /database/users/:id` - Delete user and all receipts (optional)
-- `DELETE /database/receipts/:id` - Delete specific receipt (optional)
+- `GET /database/users` - Get all users with statistics
+- `GET /database/stats` - Get database statistics and health information
+- `DELETE /database/users/{id}` - Delete user and associated receipts
 
-### 📊 Validation & Analytics Endpoints
-- `GET /validation/user/:userId/summary` - Complete user data summary with spending analytics
-- `GET /validation/user/:userId/receipts` - Detailed receipt breakdown with pagination
-- `GET /validation/user/:userId/verify-csv` - CSV data integrity verification
-- `GET /validation/database/health` - Database health and statistics
+### 🧾 Receipt Endpoints
+- `GET /receipts` - Get all receipts with filtering options
+
+### 🔧 System Endpoints
+- `GET /` - Health check
 
 ### Example Usage
 ```bash

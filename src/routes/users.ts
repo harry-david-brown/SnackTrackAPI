@@ -7,6 +7,44 @@ import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/se
 const router = Router();
 const databaseService = container.databaseService;
 
+/**
+ * @swagger
+ * /users/create:
+ *   post:
+ *     summary: Create a new user
+ *     description: Create a new user account with an email address
+ *     tags: [Users]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateUserRequest'
+ *           example:
+ *             email: "user@example.com"
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CreateUserResponse'
+ *             example:
+ *               id: "550e8400-e29b-41d4-a716-446655440000"
+ *               message: "User created successfully"
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         $ref: '#/components/responses/RateLimitExceeded'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // Create a new user (with rate limiting)
 router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -20,6 +58,50 @@ router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler
   }
 }));
 
+/**
+ * @swagger
+ * /users/{id}/totalSpent:
+ *   get:
+ *     summary: Get user's total spending
+ *     description: Retrieve the total amount spent by a user across all receipts
+ *     tags: [Users]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID
+ *         example: "550e8400-e29b-41d4-a716-446655440000"
+ *     responses:
+ *       200:
+ *         description: Total spending retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 total:
+ *                   type: number
+ *                   format: float
+ *                   description: Total amount spent
+ *                   example: 1250.75
+ *             example:
+ *               total: 1250.75
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // Get user's total spending
 router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {

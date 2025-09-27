@@ -11,6 +11,7 @@ import databaseRouter from './routes/database';
 import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
+import { setupSwagger } from './config/swagger';
 import { 
   securityHeaders, 
   corsConfig, 
@@ -44,6 +45,22 @@ app.use(express.urlencoded({ extended: true, limit: config.isProduction() ? '10m
 // Initialize database
 const postgresService = new PostgresService();
 
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: Health check
+ *     description: Simple health check endpoint to verify the API is running
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: API is healthy and running
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: "ALIVE"
+ */
 // Health check
 app.get('/', (req: Request, res: Response) => {
   res.send('ALIVE');
@@ -66,6 +83,9 @@ app.get('/auth/callback', (req: Request, res: Response) => {
     res.status(400).send('No authorization code received');
   }
 });
+
+// Setup Swagger documentation
+setupSwagger(app);
 
 // Mount routers
 app.use('/users', usersRouter);

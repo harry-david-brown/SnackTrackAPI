@@ -1,13 +1,107 @@
 import { Router, Request, Response } from 'express';
-import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
+import { container } from '../services/core/ServiceContainer';
+import { ReceiptFilters, ReceiptType } from '../models/Receipt';
 import { PostgresService } from '../services/data/PostgresService';
-import { ReceiptType } from '../models/Receipt';
-import { Email } from '../models/Email';
+import { ReceiptService } from '../services/receipt/ReceiptService';
 
 const router = Router();
-const postgresService = new PostgresService();
+const postgresService = container.postgres;
 const receiptService = new ReceiptService(postgresService);
 
+/**
+ * @swagger
+ * /receipts:
+ *   get:
+ *     summary: Get all receipts
+ *     description: Retrieve receipts with optional filtering and pagination
+ *     tags: [Receipts]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 1000
+ *           default: 50
+ *         description: Maximum number of receipts to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           default: 0
+ *         description: Number of receipts to skip
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Filter by user ID
+ *       - in: query
+ *         name: restaurantName
+ *         schema:
+ *           type: string
+ *         description: Filter by restaurant name
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter receipts from this date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter receipts until this date
+ *       - in: query
+ *         name: minAmount
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: Minimum amount filter
+ *       - in: query
+ *         name: maxAmount
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: Maximum amount filter
+ *     responses:
+ *       200:
+ *         description: Receipts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 receipts:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Receipt'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 15420
+ *                     limit:
+ *                       type: integer
+ *                       example: 50
+ *                     offset:
+ *                       type: integer
+ *                       example: 0
+ *                     hasMore:
+ *                       type: boolean
+ *                       example: true
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET /receipts - Get all receipts with optional filters
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -24,135 +118,11 @@ router.get('/', async (req: Request, res: Response) => {
     if (req.query.minAmount) filters.minAmount = parseFloat(req.query.minAmount as string);
     if (req.query.maxAmount) filters.maxAmount = parseFloat(req.query.maxAmount as string);
 
-    const receipts = await receiptService.getReceipts(filters, limit, offset);
-    res.json(receipts);
+    const result = await receiptService.getReceipts(filters, limit, offset);
+    res.json(result);
   } catch (err) {
     console.error('Error fetching receipts:', err);
     res.status(500).json({ error: 'Failed to fetch receipts' });
-  }
-});
-
-// GET /receipts/:id - Get a specific receipt
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
-    const receipt = await receiptService.getReceiptById(req.params.id);
-    
-    if (!receipt) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    res.json(receipt);
-  } catch (err) {
-    console.error('Error fetching receipt:', err);
-    res.status(500).json({ error: 'Failed to fetch receipt' });
-  }
-});
-
-// POST /receipts - Create a new receipt
-router.post('/', async (req: Request, res: Response) => {
-  try {
-    const receiptData = req.body;
-    
-    // Validate required fields
-    if (!receiptData.userId || !receiptData.amountSpent) {
-      return res.status(400).json({ 
-        error: 'userId and amountSpent are required' 
-      });
-    }
-
-    const receiptId = await receiptService.createReceipt(receiptData);
-    res.status(201).json({ id: receiptId, message: 'Receipt created successfully' });
-  } catch (err) {
-    console.error('Error creating receipt:', err);
-    res.status(500).json({ error: 'Failed to create receipt' });
-  }
-});
-
-// PUT /receipts/:id - Update a receipt
-router.put('/:id', async (req: Request, res: Response) => {
-  try {
-    const updates = req.body;
-    const success = await receiptService.updateReceipt(req.params.id, updates);
-    
-    if (!success) {
-      return res.status(404).json({ error: 'Receipt not found or no changes made' });
-    }
-
-    res.json({ message: 'Receipt updated successfully' });
-  } catch (err) {
-    console.error('Error updating receipt:', err);
-    res.status(500).json({ error: 'Failed to update receipt' });
-  }
-});
-
-// DELETE /receipts/:id - Delete a receipt
-router.delete('/:id', async (req: Request, res: Response) => {
-  try {
-    const success = await receiptService.deleteReceipt(req.params.id);
-    
-    if (!success) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    res.json({ message: 'Receipt deleted successfully' });
-  } catch (err) {
-    console.error('Error deleting receipt:', err);
-    res.status(500).json({ error: 'Failed to delete receipt' });
-  }
-});
-
-
-// POST /receipts/analyze - Email-only analysis endpoint (perfect for viral app!)
-router.post('/analyze', async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-
-    // This is where we'll integrate with the existing email parsing logic
-    // For now, return a mock response to show the structure
-    res.json({
-      message: 'Email analysis endpoint - ready for integration!',
-      email: email,
-      note: 'This will fetch and parse receipts from the provided email address'
-    });
-  } catch (err) {
-    console.error('Error analyzing email:', err);
-    res.status(500).json({ error: 'Failed to analyze email' });
-  }
-});
-
-// POST /receipts/test-filter - Test email filtering (debug endpoint)
-router.post('/test-filter', async (req: Request, res: Response) => {
-  try {
-    const { from, subject, body } = req.body;
-    
-    if (!from || !body) {
-      return res.status(400).json({ error: 'from and body are required' });
-    }
-
-    // Create a test email
-    const testEmail = new Email('test-user', from, 'test@example.com', body, subject);
-    
-    // Get classification
-    const classification = testEmail.getClassification();
-    const isReceipt = testEmail.isReceipt();
-    
-    res.json({
-      email: {
-        from,
-        subject,
-        bodyLength: body.length
-      },
-      classification,
-      isReceipt,
-      willBeStored: isReceipt && testEmail.toReceipt() !== null
-    });
-  } catch (err) {
-    console.error('Error testing email filter:', err);
-    res.status(500).json({ error: 'Failed to test email filter' });
   }
 });
 

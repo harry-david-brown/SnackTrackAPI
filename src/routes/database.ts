@@ -3,6 +3,72 @@ import { container } from '../services/core/ServiceContainer';
 
 const router = Router();
 
+/**
+ * @swagger
+ * /database/users:
+ *   get:
+ *     summary: Get all users
+ *     description: Retrieve all users in the database with their statistics
+ *     tags: [Database]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 1000
+ *           default: 50
+ *         description: Maximum number of users to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           default: 0
+ *         description: Number of users to skip
+ *     responses:
+ *       200:
+ *         description: List of users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/User'
+ *                       - type: object
+ *                         properties:
+ *                           receiptCount:
+ *                             type: integer
+ *                             example: 45
+ *                           totalSpent:
+ *                             type: number
+ *                             format: float
+ *                             example: 1250.75
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 1250
+ *                     limit:
+ *                       type: integer
+ *                       example: 50
+ *                     offset:
+ *                       type: integer
+ *                       example: 0
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET /database/users - Get all users in the database
 router.get('/users', async (req: Request, res: Response) => {
   try {
@@ -23,9 +89,17 @@ router.get('/users', async (req: Request, res: Response) => {
       })
     );
 
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+    
     res.json({
-      count: usersWithStats.length,
-      users: usersWithStats
+      users: usersWithStats.slice(offset, offset + limit),
+      pagination: {
+        total: usersWithStats.length,
+        limit,
+        offset,
+        hasMore: offset + limit < usersWithStats.length
+      }
     });
   } catch (err) {
     console.error('Error fetching users:', err);
@@ -36,196 +110,83 @@ router.get('/users', async (req: Request, res: Response) => {
   }
 });
 
-// GET /database/users/:id - Get specific user details
-router.get('/users/:id', async (req: Request, res: Response) => {
-  try {
-    const user = await container.userRepository.findById(req.params.id);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const totalSpent = await container.receiptRepository.getTotalSpentByUserId(user.id);
-    const userReceipts = await container.receiptRepository.findByUserId(user.id);
-    
-    res.json({
-      ...user,
-      receiptCount: userReceipts.length,
-      totalSpent,
-      receipts: userReceipts,
-      lastReceiptDate: userReceipts.length > 0 ? userReceipts[0].orderDate : null
-    });
-  } catch (err) {
-    console.error('Error fetching user:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch user', 
-      details: err instanceof Error ? err.message : 'Unknown error' 
-    });
-  }
-});
-
-// GET /database/receipts - Get all receipts with optional filters
-router.get('/receipts', async (req: Request, res: Response) => {
-  try {
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const userId = req.query.userId as string;
-    const receiptType = req.query.receiptType as string;
-    const restaurantName = req.query.restaurantName as string;
-
-    let query = `
-      SELECT r.*, u.email as user_email
-      FROM receipts r
-      LEFT JOIN users u ON r.user_id = u.id
-      WHERE 1=1
-    `;
-    const params: any[] = [];
-    let paramIndex = 1;
-
-    if (userId) {
-      query += ` AND r.user_id = $${paramIndex}`;
-      params.push(userId);
-      paramIndex++;
-    }
-
-    if (receiptType) {
-      query += ` AND r.receipt_type = $${paramIndex}`;
-      params.push(receiptType);
-      paramIndex++;
-    }
-
-    if (restaurantName) {
-      query += ` AND r.restaurant_name ILIKE $${paramIndex}`;
-      params.push(`%${restaurantName}%`);
-      paramIndex++;
-    }
-
-    query += ` ORDER BY r.order_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    params.push(limit, offset);
-
-    const result = await container.postgres.query(query, params);
-    
-    // Get total count for pagination
-    let countQuery = 'SELECT COUNT(*) FROM receipts r WHERE 1=1';
-    const countParams: any[] = [];
-    let countParamIndex = 1;
-
-    if (userId) {
-      countQuery += ` AND r.user_id = $${countParamIndex}`;
-      countParams.push(userId);
-      countParamIndex++;
-    }
-
-    if (receiptType) {
-      countQuery += ` AND r.receipt_type = $${countParamIndex}`;
-      countParams.push(receiptType);
-      countParamIndex++;
-    }
-
-    if (restaurantName) {
-      countQuery += ` AND r.restaurant_name ILIKE $${countParamIndex}`;
-      countParams.push(`%${restaurantName}%`);
-      countParamIndex++;
-    }
-
-    const countResult = await container.postgres.query(countQuery, countParams);
-    const totalCount = parseInt(countResult.rows[0].count);
-
-    // Clean up the receipt data for API response
-    const cleanReceipts = result.rows.map((row: any) => {
-      const cleanReceipt: any = {
-        id: row.id,
-        userId: row.user_id,
-        receiptType: row.receipt_type,
-        dataSource: row.data_source,
-        restaurantName: row.restaurant_name,
-        orderDate: row.order_date,
-        amountSpent: parseFloat(row.amount_spent),
-        items: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
-        userEmail: row.user_email,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-      };
-
-      // Only include email fields for email-based receipts
-      if (row.data_source === 'email') {
-        cleanReceipt.emailFrom = row.email_from;
-        cleanReceipt.emailTo = row.email_to;
-        cleanReceipt.emailSubject = row.email_subject;
-        cleanReceipt.emailBody = row.email_body;
-      }
-
-      return cleanReceipt;
-    });
-
-    res.json({
-      receipts: cleanReceipts,
-      pagination: {
-        total: totalCount,
-        limit,
-        offset,
-        hasMore: offset + limit < totalCount
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching receipts:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch receipts', 
-      details: err instanceof Error ? err.message : 'Unknown error' 
-    });
-  }
-});
-
-// GET /database/receipts/:id - Get specific receipt by ID
-router.get('/receipts/:id', async (req: Request, res: Response) => {
-  try {
-    const result = await container.postgres.query(`
-      SELECT r.*, u.email as user_email
-      FROM receipts r
-      LEFT JOIN users u ON r.user_id = u.id
-      WHERE r.id = $1
-    `, [req.params.id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    const row = result.rows[0];
-    
-    // Clean up the receipt data for API response
-    const cleanReceipt: any = {
-      id: row.id,
-      userId: row.user_id,
-      receiptType: row.receipt_type,
-      dataSource: row.data_source,
-      restaurantName: row.restaurant_name,
-      orderDate: row.order_date,
-      amountSpent: parseFloat(row.amount_spent),
-      items: row.items ? (typeof row.items === 'string' ? JSON.parse(row.items) : row.items) : [],
-      userEmail: row.user_email,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    };
-
-    // Only include email fields for email-based receipts
-    if (row.data_source === 'email') {
-      cleanReceipt.emailFrom = row.email_from;
-      cleanReceipt.emailTo = row.email_to;
-      cleanReceipt.emailSubject = row.email_subject;
-      cleanReceipt.emailBody = row.email_body;
-    }
-
-    res.json(cleanReceipt);
-  } catch (err) {
-    console.error('Error fetching receipt:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch receipt', 
-      details: err instanceof Error ? err.message : 'Unknown error' 
-    });
-  }
-});
-
-// GET /database/stats - Get database statistics
+/**
+ * @swagger
+ * /database/stats:
+ *   get:
+ *     summary: Get database statistics and health
+ *     description: Get comprehensive database statistics, analytics, and health information
+ *     tags: [Database]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Database statistics and health retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 database:
+ *                   type: object
+ *                   properties:
+ *                     totalUsers:
+ *                       type: integer
+ *                       example: 1250
+ *                     totalReceipts:
+ *                       type: integer
+ *                       example: 15420
+ *                     usersWithReceipts:
+ *                       type: integer
+ *                       example: 1180
+ *                     totalAmountAllUsers:
+ *                       type: number
+ *                       format: float
+ *                       example: 125000.75
+ *                     averageReceiptAmount:
+ *                       type: number
+ *                       format: float
+ *                       example: 8.12
+ *                 tableSizes:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       table:
+ *                         type: string
+ *                         example: "receipts"
+ *                       size:
+ *                         type: string
+ *                         example: "728 kB"
+ *                 recentActivity:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       table:
+ *                         type: string
+ *                         example: "users"
+ *                       recentCount:
+ *                         type: integer
+ *                         example: 7
+ *                 health:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: "HEALTHY"
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2025-09-27T05:40:09.876Z"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET /database/stats - Get comprehensive database statistics and health
 router.get('/stats', async (req: Request, res: Response) => {
   try {
     // Get user count
@@ -236,51 +197,63 @@ router.get('/stats', async (req: Request, res: Response) => {
     const receiptCountResult = await container.postgres.query('SELECT COUNT(*) as count FROM receipts');
     const receiptCount = parseInt(receiptCountResult.rows[0].count);
 
-    // Get total spending
-    const totalSpentResult = await container.postgres.query('SELECT COALESCE(SUM(amount_spent), 0) as total FROM receipts');
-    const totalSpent = parseFloat(totalSpentResult.rows[0].total);
+    // Get users with receipts count
+    const usersWithReceiptsResult = await container.postgres.query('SELECT COUNT(DISTINCT user_id) as count FROM receipts');
+    const usersWithReceipts = parseInt(usersWithReceiptsResult.rows[0].count);
 
-    // Get receipt types breakdown
-    const receiptTypesResult = await container.postgres.query(`
-      SELECT receipt_type, COUNT(*) as count, COALESCE(SUM(amount_spent), 0) as total
-      FROM receipts 
-      GROUP BY receipt_type 
-      ORDER BY count DESC
+    // Get total amount spent
+    const totalAmountResult = await container.postgres.query('SELECT SUM(amount_spent) as total FROM receipts');
+    const totalAmount = parseFloat(totalAmountResult.rows[0].total || '0');
+
+    // Get average receipt amount
+    const avgAmountResult = await container.postgres.query('SELECT AVG(amount_spent) as average FROM receipts');
+    const avgAmount = parseFloat(avgAmountResult.rows[0].average || '0');
+
+    // Get table sizes
+    const tableSizesResult = await container.postgres.query(`
+      SELECT 
+        schemaname,
+        tablename,
+        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+      FROM pg_tables 
+      WHERE schemaname = 'public'
+      ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
     `);
 
-    // Get top restaurants
-    const topRestaurantsResult = await container.postgres.query(`
-      SELECT restaurant_name, COUNT(*) as order_count, COALESCE(SUM(amount_spent), 0) as total_spent
-      FROM receipts 
-      WHERE restaurant_name IS NOT NULL 
-      GROUP BY restaurant_name 
-      ORDER BY total_spent DESC 
-      LIMIT 10
-    `);
-
-    // Get recent activity (last 7 days)
+    // Get recent activity (last 24 hours)
     const recentActivityResult = await container.postgres.query(`
-      SELECT DATE(order_date) as date, COUNT(*) as receipts, COALESCE(SUM(amount_spent), 0) as total
+      SELECT 
+        'users' as table_name,
+        COUNT(*) as recent_count
+      FROM users 
+      WHERE created_at > NOW() - INTERVAL '24 hours'
+      UNION ALL
+      SELECT 
+        'receipts' as table_name,
+        COUNT(*) as recent_count
       FROM receipts 
-      WHERE order_date >= NOW() - INTERVAL '7 days'
-      GROUP BY DATE(order_date)
-      ORDER BY date DESC
+      WHERE created_at > NOW() - INTERVAL '24 hours'
     `);
 
     res.json({
-      users: {
-        total: userCount
+      database: {
+        totalUsers: userCount,
+        totalReceipts: receiptCount,
+        usersWithReceipts: usersWithReceipts,
+        totalAmountAllUsers: totalAmount,
+        averageReceiptAmount: avgAmount
       },
-      receipts: {
-        total: receiptCount,
-        totalSpent,
-        breakdownByType: receiptTypesResult.rows
-      },
-      restaurants: {
-        top10: topRestaurantsResult.rows
-      },
-      recentActivity: {
-        last7Days: recentActivityResult.rows
+      tableSizes: tableSizesResult.rows.map((row: any) => ({
+        table: row.tablename,
+        size: row.size
+      })),
+      recentActivity: recentActivityResult.rows.map((row: any) => ({
+        table: row.table_name,
+        recentCount: parseInt(row.recent_count)
+      })),
+      health: {
+        status: 'HEALTHY',
+        timestamp: new Date().toISOString()
       }
     });
   } catch (err) {
@@ -292,48 +265,74 @@ router.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /database/users/:id - Delete user and all their receipts
+/**
+ * @swagger
+ * /database/users/{id}:
+ *   delete:
+ *     summary: Delete user
+ *     description: Delete a user and all their associated receipts
+ *     tags: [Database]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID to delete
+ *         example: "550e8400-e29b-41d4-a716-446655440000"
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "User and associated receipts deleted successfully"
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// DELETE /database/users/:id - Delete user and all receipts
 router.delete('/users/:id', async (req: Request, res: Response) => {
   try {
-    // Check if user exists
-    const user = await container.userRepository.findById(req.params.id);
+    const userId = req.params.id;
+    
+    // First check if user exists
+    const user = await container.userRepository.findById(userId);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        error: 'User not found',
+        statusCode: 404,
+        timestamp: new Date().toISOString(),
+        path: req.originalUrl,
+        method: req.method
+      });
     }
 
-    // Delete user (receipts will be cascade deleted due to foreign key constraint)
-    await container.postgres.query('DELETE FROM users WHERE id = $1', [req.params.id]);
-
+    // Delete all receipts for this user
+    await container.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
+    
+    // Delete the user
+    await container.postgres.query('DELETE FROM users WHERE id = $1', [userId]);
+    
     res.json({ 
-      message: 'User and all associated receipts deleted successfully',
-      deletedUserId: req.params.id
+      message: 'User and associated receipts deleted successfully' 
     });
   } catch (err) {
     console.error('Error deleting user:', err);
     res.status(500).json({ 
       error: 'Failed to delete user', 
-      details: err instanceof Error ? err.message : 'Unknown error' 
-    });
-  }
-});
-
-// DELETE /database/receipts/:id - Delete specific receipt
-router.delete('/receipts/:id', async (req: Request, res: Response) => {
-  try {
-    const result = await container.postgres.query('DELETE FROM receipts WHERE id = $1 RETURNING id', [req.params.id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    res.json({ 
-      message: 'Receipt deleted successfully',
-      deletedReceiptId: req.params.id
-    });
-  } catch (err) {
-    console.error('Error deleting receipt:', err);
-    res.status(500).json({ 
-      error: 'Failed to delete receipt', 
       details: err instanceof Error ? err.message : 'Unknown error' 
     });
   }
