@@ -32,7 +32,7 @@ const databaseService = container.databaseService;
  *             schema:
  *               $ref: '#/components/schemas/CreateUserResponse'
  *             example:
- *               id: "550e8400-e29b-41d4-a716-446655440000"
+ *               userId: "550e8400-e29b-41d4-a716-446655440000"
  *               message: "User created successfully"
  *       400:
  *         $ref: '#/components/responses/ValidationError'
@@ -48,9 +48,9 @@ const databaseService = container.databaseService;
 // Create a new user (with rate limiting)
 router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
   try {
-    const id = await databaseService.createUser(req.body);
+    const id = await databaseService.createUser(req.body.email);
     res.status(201).json({ 
-      id,
+      userId: id,
       message: 'User created successfully'
     });
   } catch (error) {
@@ -84,13 +84,13 @@ router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler
  *             schema:
  *               type: object
  *               properties:
- *                 total:
+ *                 totalSpent:
  *                   type: number
  *                   format: float
  *                   description: Total amount spent
  *                   example: 1250.75
  *             example:
- *               total: 1250.75
+ *               totalSpent: 1250.75
  *       400:
  *         $ref: '#/components/responses/ValidationError'
  *       404:
@@ -112,7 +112,7 @@ router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: 
     }
     
     const total = await databaseService.getUserTotalSpent(req.params.id);
-    res.json({ total });
+    res.json({ totalSpent: total });
   } catch (error) {
     if (error instanceof NotFoundError) throw error;
     throw new DatabaseError('Failed to get user total spent', error as Error);
