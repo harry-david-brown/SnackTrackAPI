@@ -32,6 +32,8 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] Comprehensive Swagger documentation
 - [x] Error handling improvements
 - [x] Rate limiting and security
+- [x] JWT Authentication system (Phase 1, Week 1)
+- [x] CI/CD pipeline with GitHub Actions
 
 #### 🎨 **Frontend Planning** - Choose React Native vs. Expo
 - [x] Technology stack decision (Expo + React Native + TypeScript)
@@ -107,6 +109,61 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 
 **That's it!** The API is now running on `http://localhost:3000`
 
+## 🔐 Authentication
+
+**As of Phase 1, Week 1**, the API now uses JWT authentication for all user-specific endpoints.
+
+### Quick Start with Auth
+```bash
+# 1. Register a new user
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "SecurePass123"}'
+# Returns: { userId, accessToken, refreshToken, user }
+
+# 2. Login (if already registered)
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "SecurePass123"}'
+
+# 3. Use token to access protected endpoints
+curl -X GET http://localhost:3000/users/{userId}/totalSpent \
+  -H "Authorization: Bearer {accessToken}"
+```
+
+### Password Requirements
+- Minimum 8 characters
+- At least 1 uppercase letter
+- At least 1 number
+
+### Token Management
+- **Access Token:** Expires in 15 minutes
+- **Refresh Token:** Expires in 7 days
+- Use `/auth/refresh` to get new tokens before expiry
+
+**See `FRONTEND_UPDATES.md` for complete integration guide.**
+
+## 🔄 CI/CD Pipeline
+
+The project now includes automated CI/CD with GitHub Actions:
+
+### Automated Checks
+- ✅ TypeScript compilation
+- ✅ Linting (if configured)
+- ✅ Docker builds (dev & prod)
+- ✅ Security audit
+- ✅ PostgreSQL integration testing
+
+### Running Locally
+```bash
+# Check TypeScript compilation
+npm run build
+
+# Run comprehensive auth tests
+./test-auth-comprehensive.sh
+```
+
+**Workflow file:** `.github/workflows/ci.yml`
 
 ## 🗄️ Database State After Cloning
 
@@ -140,21 +197,25 @@ MockUberData/
 **Import your complete Uber Eats history**
 
 ```bash
-# Create a user (requires email)
-curl -X POST http://localhost:3000/users/create \
+# Register a user (requires email and password)
+curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com"}'
+  -d '{"email": "user@example.com", "password": "YourPass123"}'
+# Save the accessToken from response
 
 # Upload your Uber CSV file (example uses the included test data)
 curl -X POST http://localhost:3000/csv/import \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "csvFile=@MockUberData/Uber Data/Eats/user_orders-0.csv" \
   -F "userId=YOUR_USER_ID"
 
 # Check total spending
-curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
+curl http://localhost:3000/users/YOUR_USER_ID/totalSpent \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # User summary
-curl http://localhost:3000/validation/user/YOUR_USER_ID/summary
+curl http://localhost:3000/validation/user/YOUR_USER_ID/summary \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 > **Note:** The example uses the included test CSV file. Replace the file path with your own Uber CSV file when you have it.

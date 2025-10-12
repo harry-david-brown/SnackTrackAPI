@@ -3,6 +3,7 @@
 // @ts-ignore
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
+import authRouter from './routes/auth';
 import usersRouter from './routes/users';
 import receiptsRouter from './routes/receipts';
 import csvRouter from './routes/csv';
@@ -88,6 +89,7 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 setupSwagger(app);
 
 // Mount routers
+app.use('/auth', authRouter);
 app.use('/users', usersRouter);
 app.use('/receipts', receiptsRouter);
 app.use('/csv', csvRouter);

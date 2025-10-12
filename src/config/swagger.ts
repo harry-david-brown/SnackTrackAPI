@@ -323,6 +323,12 @@ A comprehensive API for tracking food delivery spending and receipts.
         }
       },
       securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Enter your JWT access token'
+        },
         ApiKeyAuth: {
           type: 'apiKey',
           in: 'header',
@@ -392,6 +398,10 @@ A comprehensive API for tracking food delivery spending and receipts.
       }
     },
     tags: [
+      {
+        name: 'Authentication',
+        description: 'User authentication and authorization operations'
+      },
       {
         name: 'Users',
         description: 'User management operations'

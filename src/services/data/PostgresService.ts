@@ -99,6 +99,16 @@ export class PostgresService {
         CREATE INDEX IF NOT EXISTS idx_receipts_restaurant_name ON receipts(restaurant_name)
       `);
 
+      // Migration: Add password column to users table (for authentication)
+      try {
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255)
+        `);
+        console.log('✅ Password column migration completed');
+      } catch (error) {
+        console.log('Password column already exists or migration failed');
+      }
+
       console.log('✅ Database tables initialized successfully');
     } catch (error) {
       console.error('❌ Error initializing database tables:', error);

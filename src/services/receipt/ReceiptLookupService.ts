@@ -18,7 +18,8 @@ export class ReceiptLookupService {
   }
 
   async getUserEmails(user: User): Promise<Email[]> {
-    const emailClient = this.emailClientFactory.createClient(user.type);
+    // Default to gmail for now - user.type not implemented yet
+    const emailClient = this.emailClientFactory.createClient('gmail' as any);
     return await emailClient.getEmails(user);
   }
 } 

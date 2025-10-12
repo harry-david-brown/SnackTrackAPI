@@ -6,6 +6,7 @@ import { DatabaseService } from './DatabaseService';
 import { CsvImportService } from '../import/CsvImportService';
 import { ReceiptParserService } from '../receipt/ReceiptParserService';
 import { EmailFilterService } from '../email/EmailFilterService';
+import { AuthService } from '../AuthService';
 
 /**
  * Simple service container for dependency injection
@@ -36,6 +37,9 @@ export class ServiceContainer {
     // Repositories
     this.services.set('userRepository', new UserRepository(this.get('postgres')));
     this.services.set('receiptRepository', new ReceiptRepository(this.get('postgres')));
+    
+    // Authentication service
+    this.services.set('authService', new AuthService(this.get('userRepository')));
     
     // Business services
     this.services.set('receiptLookupService', new ReceiptLookupService());
@@ -90,6 +94,10 @@ export class ServiceContainer {
 
   get emailFilterService(): EmailFilterService {
     return this.get<EmailFilterService>('emailFilterService');
+  }
+
+  get authService(): AuthService {
+    return this.get<AuthService>('authService');
   }
 }
 

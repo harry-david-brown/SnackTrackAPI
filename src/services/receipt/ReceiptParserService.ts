@@ -1,4 +1,4 @@
-import { Receipt, ReceiptType, ReceiptItem } from '../../models/Receipt';
+import { Receipt, ReceiptType, ReceiptItem, DataSource } from '../../models/Receipt';
 import { Email } from '../email/Email';
 
 /**
@@ -155,15 +155,7 @@ export class ReceiptParserService {
       ReceiptType.UBER_EATS,
       restaurantName,
       orderDate,
-      email.from,
-      email.to,
-      email.subject,
-      email.body,
-      subtotal,
-      tax,
-      tip,
-      deliveryFee,
-      serviceFee
+      DataSource.EMAIL
     );
   }
 
@@ -204,10 +196,7 @@ export class ReceiptParserService {
       ReceiptType.UNKNOWN,
       undefined,
       undefined,
-      email.from,
-      email.to,
-      email.subject,
-      email.body
+      DataSource.EMAIL
     );
   }
 }

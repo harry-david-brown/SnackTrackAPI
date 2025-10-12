@@ -3,6 +3,7 @@ import { container } from '../services/core/ServiceContainer';
 import { asyncHandler, NotFoundError, DatabaseError } from '../middleware/errorHandler';
 import { validateUUIDParam, validateUserCreation } from '../middleware/validation';
 import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
+import { authenticateToken, validateOwnership } from '../middleware/auth';
 
 const router = Router();
 const databaseService = container.databaseService;
@@ -103,7 +104,7 @@ router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler
  *               $ref: '#/components/schemas/Error'
  */
 // Get user's total spending
-router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/totalSpent', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     // First check if user exists
     const user = await databaseService.getUser(req.params.id);
@@ -120,7 +121,7 @@ router.get('/:id/totalSpent', validateUUIDParam('id'), asyncHandler(async (req: 
 }));
 
 // Update user receipts from emails (with rate limiting)
-router.post('/:id/update-receipts', emailOperationRateLimit, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/update-receipts', authenticateToken, validateOwnership, emailOperationRateLimit, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     await databaseService.updateUserReceiptsForUser(req.params.id);
     const total = await databaseService.getUserTotalSpent(req.params.id);
@@ -134,7 +135,7 @@ router.post('/:id/update-receipts', emailOperationRateLimit, validateUUIDParam('
 }));
 
 // Debug endpoint to test email fetching and parsing
-router.get('/:id/debug/emails', validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/debug/emails', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const user = await databaseService.getUser(req.params.id);
     if (!user) {

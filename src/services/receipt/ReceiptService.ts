@@ -1,4 +1,4 @@
-import { Receipt, ReceiptType, ReceiptItem } from '../../models/Receipt';
+import { Receipt, ReceiptType, ReceiptItem, DataSource } from '../../models/Receipt';
 import { PostgresService } from '../data/PostgresService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -138,35 +138,37 @@ export class ReceiptService {
       values.push(updates.amountSpent);
     }
 
-    if (updates.subtotal !== undefined) {
-      paramCount++;
-      fields.push(`subtotal = $${paramCount}`);
-      values.push(updates.subtotal);
-    }
+    // Note: subtotal, tax, tip, deliveryFee, serviceFee removed from simplified model
+    // Uncomment if these fields are added back to Receipt model
+    // if ((updates as any).subtotal !== undefined) {
+    //   paramCount++;
+    //   fields.push(`subtotal = $${paramCount}`);
+    //   values.push((updates as any).subtotal);
+    // }
 
-    if (updates.tax !== undefined) {
-      paramCount++;
-      fields.push(`tax = $${paramCount}`);
-      values.push(updates.tax);
-    }
+    // if ((updates as any).tax !== undefined) {
+    //   paramCount++;
+    //   fields.push(`tax = $${paramCount}`);
+    //   values.push((updates as any).tax);
+    // }
 
-    if (updates.tip !== undefined) {
-      paramCount++;
-      fields.push(`tip = $${paramCount}`);
-      values.push(updates.tip);
-    }
+    // if ((updates as any).tip !== undefined) {
+    //   paramCount++;
+    //   fields.push(`tip = $${paramCount}`);
+    //   values.push((updates as any).tip);
+    // }
 
-    if (updates.deliveryFee !== undefined) {
-      paramCount++;
-      fields.push(`delivery_fee = $${paramCount}`);
-      values.push(updates.deliveryFee);
-    }
+    // if ((updates as any).deliveryFee !== undefined) {
+    //   paramCount++;
+    //   fields.push(`delivery_fee = $${paramCount}`);
+    //   values.push((updates as any).deliveryFee);
+    // }
 
-    if (updates.serviceFee !== undefined) {
-      paramCount++;
-      fields.push(`service_fee = $${paramCount}`);
-      values.push(updates.serviceFee);
-    }
+    // if ((updates as any).serviceFee !== undefined) {
+    //   paramCount++;
+    //   fields.push(`service_fee = $${paramCount}`);
+    //   values.push((updates as any).serviceFee);
+    // }
 
     if (updates.items !== undefined) {
       paramCount++;
@@ -320,15 +322,7 @@ export class ReceiptService {
       (row.receipt_type as ReceiptType) || ReceiptType.UNKNOWN,
       row.restaurant_name,
       row.order_date ? new Date(row.order_date) : undefined,
-      row.email_from,
-      row.email_to,
-      row.email_subject,
-      row.email_body,
-      row.subtotal ? parseFloat(row.subtotal) : undefined,
-      row.tax ? parseFloat(row.tax) : undefined,
-      row.tip ? parseFloat(row.tip) : undefined,
-      row.delivery_fee ? parseFloat(row.delivery_fee) : undefined,
-      row.service_fee ? parseFloat(row.service_fee) : undefined
+      (row.data_source as DataSource) || DataSource.CSV
     );
   }
 }

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
+import { authenticateToken, validateOwnership } from '../middleware/auth';
 
 const router = Router();
 
@@ -38,7 +39,7 @@ const router = Router();
  *               $ref: '#/components/schemas/Error'
  */
 // GET /validation/user/:userId/summary - Get user data summary and validation
-router.get('/user/:userId/summary', async (req: Request, res: Response) => {
+router.get('/user/:userId/summary', authenticateToken, validateOwnership, async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;
     

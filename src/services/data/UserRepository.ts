@@ -38,7 +38,7 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT * FROM users WHERE id = $1',
+      'SELECT id, email, created_at FROM users WHERE id = $1',
       [id]
     );
     if (result.rows.length === 0) return undefined;
@@ -46,7 +46,8 @@ export class UserRepository {
     const row = result.rows[0];
     return {
       id: row.id,
-      email: row.email
+      email: row.email,
+      createdAt: row.created_at
     };
   }
 
@@ -60,7 +61,7 @@ export class UserRepository {
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT * FROM users WHERE email = $1',
+      'SELECT id, email, created_at FROM users WHERE email = $1',
       [email]
     );
     if (result.rows.length === 0) return undefined;
@@ -68,8 +69,49 @@ export class UserRepository {
     const row = result.rows[0];
     return {
       id: row.id,
-      email: row.email
+      email: row.email,
+      createdAt: row.created_at
     };
+  }
+
+  async findByEmailWithPassword(email: string): Promise<User | undefined> {
+    const result = await this.postgres.query(
+      'SELECT id, email, password, created_at FROM users WHERE email = $1',
+      [email]
+    );
+    if (result.rows.length === 0) return undefined;
+    
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      email: row.email,
+      password: row.password,
+      createdAt: row.created_at
+    };
+  }
+
+  async createUserWithPassword(email: string, hashedPassword: string): Promise<string> {
+    // First check if user already exists
+    const existingUser = await this.findByEmail(email);
+    if (existingUser) {
+      throw new Error('User with this email already exists');
+    }
+
+    // Create new user with password
+    const userId = uuidv4();
+    try {
+      const result = await this.postgres.query(
+        'INSERT INTO users (id, email, password, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id',
+        [userId, email, hashedPassword]
+      );
+      return result.rows[0].id;
+    } catch (error: any) {
+      // If unique constraint violation, throw error
+      if (error.code === '23505') {
+        throw new Error('User with this email already exists');
+      }
+      throw error;
+    }
   }
 
 }
