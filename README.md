@@ -18,14 +18,14 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 
 ### 🚀 Production Readiness (In Progress)
 
-#### Phase 1: MVP Blockers (Weeks 1-3)
+#### Phase 1: MVP Blockers (Weeks 1-3) ✅
 - [x] **Authentication System** - JWT with bcrypt password hashing
 - [x] **ZIP File Upload** - Auto-extract Uber data exports
 - [x] **Route Protection** - All endpoints secured with ownership validation
 - [x] **Improved Rate Limiting** - Per-user limits for viral growth
-- [ ] **Sentry Integration** - Error tracking and monitoring
-- [ ] **Configuration Cleanup** - Remove hardcoded values
-- [ ] **Health Check Endpoint** - Detailed system health reporting
+- [x] **Sentry Integration** - Error tracking and monitoring (free tier ready)
+- [x] **Configuration Cleanup** - Removed hardcoded values
+- [x] **Health Check Endpoint** - Database connectivity monitoring
 
 #### Phase 2: Performance & Reliability (Weeks 4-5)
 - [ ] **Database Optimization** - Indexes and connection pooling
@@ -46,9 +46,9 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [ ] **Load Balancing** - Multi-instance support
 
 ### 📊 Current Status
-**Timeline:** Week 2 of 8-week production readiness plan  
-**MVP Launch Target:** Week 8 (Early December 2025)  
-**Next Milestone:** Sentry integration & configuration cleanup
+**Timeline:** Phase 1 Complete! Moving to Phase 2  
+**MVP Launch Target:** 6 weeks (Mid-November 2025)  
+**Next Milestone:** Database optimization & Redis caching
 
 ---
 
@@ -126,6 +126,41 @@ npm run build
 ```
 
 **Workflow file:** `.github/workflows/ci.yml`
+
+## 🚨 Error Tracking with Sentry
+
+The API includes Sentry integration for production error monitoring:
+
+### Configuration
+```bash
+# Optional - only needed for production error tracking
+SENTRY_DSN=your_sentry_dsn_here
+```
+
+### Features
+- **Automatic error capture** - All 5xx errors sent to Sentry
+- **User context** - Errors include user ID and email for debugging
+- **Sensitive data filtering** - Passwords and tokens automatically removed
+- **Performance monitoring** - Track slow endpoints and database queries
+- **Free tier compatible** - 5,000 errors/month, easy upgrade path
+
+### Usage
+- **Development:** Sentry disabled by default (no DSN required)
+- **Production:** Set `SENTRY_DSN` environment variable to enable
+- **Upgrade:** Change nothing - scales from free tier to paid seamlessly
+
+### Setup Timing
+⚠️ **Set up Sentry BEFORE deploying to production**
+
+1. Create free Sentry account at [sentry.io](https://sentry.io)
+2. Create a new project (select Node.js/Express)
+3. Copy your DSN
+4. Add `SENTRY_DSN` to your production environment variables
+5. Deploy - errors will immediately start being tracked
+
+**Why before deployment?** You want error tracking active from day 1 so you catch any deployment issues immediately.
+
+**Learn more:** [sentry.io](https://sentry.io)
 
 ## 🗄️ Database State After Cloning
 

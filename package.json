@@ -11,6 +11,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@sentry/node": "^10.19.0",
+    "@sentry/tracing": "^7.120.4",
     "@types/multer": "^2.0.0",
     "adm-zip": "^0.5.16",
     "bcryptjs": "^3.0.2",

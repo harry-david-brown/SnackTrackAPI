@@ -64,7 +64,7 @@ class ConfigManager {
         useRealApi: isProduction || this.hasGmailCredentials(),
         useMockData: isDevelopment && !this.hasGmailCredentials(),
         includeForwardedReceipts: isDevelopment,
-        forwardedReceiptEmail: 'nnamdi852@gmail.com'
+        forwardedReceiptEmail: process.env.FORWARDED_EMAIL || ''
       },
       
       database: {
@@ -74,7 +74,7 @@ class ConfigManager {
       
       emailFilter: {
         allowForwardedReceipts: isDevelopment,
-        forwardedReceiptSender: 'nnamdi852@gmail.com'
+        forwardedReceiptSender: process.env.FORWARDED_EMAIL || ''
       },
       
       server: {

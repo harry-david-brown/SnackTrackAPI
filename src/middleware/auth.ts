@@ -9,6 +9,7 @@ import { AuthService } from '../services/AuthService';
 import { container } from '../services/core/ServiceContainer';
 import { AuthenticationError, AuthorizationError } from './errorHandler';
 import { TokenPayload } from '../models/Token';
+import { sentryConfig } from '../config/sentry';
 
 // Extend Express Request type to include user
 declare global {
@@ -43,6 +44,9 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
 
     // Attach user to request
     req.user = decoded;
+
+    // Set user context in Sentry for error tracking
+    sentryConfig.setUserContext(decoded.userId, decoded.email);
 
     next();
   } catch (error) {

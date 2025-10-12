@@ -80,8 +80,8 @@ export const csvImportRateLimit = rateLimit({
     if (req.user?.userId) {
       return `upload_${req.user.userId}`;
     }
-    // Otherwise rate limit by IP
-    return req.ip || req.connection.remoteAddress || 'unknown';
+    // Use the default IP-based key generator (handles IPv6 properly)
+    return undefined as any; // Let express-rate-limit use default
   },
   handler: (req: Request, res: Response) => {
     res.status(429).json({
@@ -147,7 +147,7 @@ export const securityHeaders = helmet({
 // CORS configuration
 export const corsConfig = cors({
   origin: config.isProduction() 
-    ? ['https://yourdomain.com'] // Replace with your actual domain
+    ? (process.env.CORS_ORIGIN?.split(',') || ['https://snacktrack.app']) 
     : true, // Allow all origins in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

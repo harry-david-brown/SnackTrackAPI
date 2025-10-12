@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { sentryConfig } from '../config/sentry';
 
 // Custom error classes for different types of errors
 export class AppError extends Error {
@@ -64,6 +65,28 @@ export const logError = (error: Error, req?: Request) => {
    Error: ${error.message}
    Stack: ${error.stack}
 `);
+
+  // Send to Sentry for production monitoring
+  if (sentryConfig.isEnabled()) {
+    // Only send 5xx errors to Sentry (not validation errors)
+    if (error instanceof AppError && error.statusCode >= 500) {
+      sentryConfig.captureError(error, {
+        method,
+        url,
+        userAgent,
+        ip,
+        statusCode: (error as AppError).statusCode
+      });
+    } else if (!(error instanceof AppError)) {
+      // Unknown errors (not our custom AppError) - always send to Sentry
+      sentryConfig.captureError(error, {
+        method,
+        url,
+        userAgent,
+        ip
+      });
+    }
+  }
 };
 
 // Main error handling middleware

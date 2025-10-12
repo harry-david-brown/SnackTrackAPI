@@ -13,6 +13,7 @@ import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
+import { sentryConfig } from './config/sentry';
 import { 
   securityHeaders, 
   corsConfig, 
@@ -25,6 +26,9 @@ import {
 dotenv.config();
 
 const app = express();
+
+// Initialize Sentry (must be first, before any middleware)
+sentryConfig.initialize(app);
 
 // Trust proxy for accurate IP addresses (important for rate limiting)
 app.set('trust proxy', 1);
@@ -50,7 +54,7 @@ const postgresService = new PostgresService();
  * @swagger
  * /:
  *   get:
- *     summary: Health check
+ *     summary: Basic health check
  *     description: Simple health check endpoint to verify the API is running
  *     tags: [System]
  *     responses:
@@ -62,9 +66,55 @@ const postgresService = new PostgresService();
  *               type: string
  *               example: "ALIVE"
  */
-// Health check
+// Basic health check
 app.get('/', (req: Request, res: Response) => {
   res.send('ALIVE');
+});
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Detailed health check
+ *     description: Health check with database connectivity test
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *       503:
+ *         description: Service is degraded or down
+ */
+// Detailed health check
+app.get('/health', async (req: Request, res: Response) => {
+  try {
+    const startTime = Date.now();
+    await postgresService.query('SELECT 1');
+    const dbLatency = Date.now() - startTime;
+
+    if (dbLatency < 1000) {
+      return res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        database: {
+          status: 'connected',
+          latency: dbLatency
+        }
+      });
+    } else {
+      return res.status(503).json({
+        status: 'degraded',
+        timestamp: new Date().toISOString(),
+        message: 'Database responding slowly'
+      });
+    }
+  } catch (error) {
+    return res.status(503).json({
+      status: 'down',
+      timestamp: new Date().toISOString(),
+      message: 'Database connection failed'
+    });
+  }
 });
 
 // OAuth callback handler
@@ -97,6 +147,7 @@ app.use('/validation', validationRouter);
 app.use('/database', databaseRouter);
 
 // Error handling middleware (must be last)
+// Note: Sentry errors are captured via sentryConfig.captureError() in errorHandler
 app.use(errorHandler);
 
 const PORT = config.getServerPort();

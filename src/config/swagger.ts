@@ -400,6 +400,10 @@ A comprehensive API for tracking food delivery spending and receipts.
     },
     tags: [
       {
+        name: 'System',
+        description: 'System health and status endpoints'
+      },
+      {
         name: 'Authentication',
         description: 'User authentication and authorization operations'
       },
