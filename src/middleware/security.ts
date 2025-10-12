@@ -60,12 +60,47 @@ export const userCreationRateLimit = createRateLimit(
   'Too many user creation attempts. Please wait before creating another user.'
 );
 
-// Rate limiting for CSV imports (resource intensive but viral-friendly)
-export const csvImportRateLimit = createRateLimit(
-  60 * 60 * 1000, // 1 hour
-  config.isProduction() ? 100 : 10, // 100 imports per hour in prod, 10 in dev
-  'Too many CSV import attempts. Please wait before importing another file.'
-);
+// Rate limiting for CSV/ZIP imports (viral-friendly with retry support)
+// Per-user rate limiting to allow retries but prevent abuse
+export const csvImportRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minute window
+  max: config.isProduction() ? 20 : 100, // 20 uploads per 15min in prod (allows retries), 100 in dev
+  message: {
+    error: {
+      message: 'Too many upload attempts. Please wait a few minutes before trying again.',
+      statusCode: 429,
+      timestamp: new Date().toISOString()
+    }
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Use user ID from token for rate limiting if available, otherwise IP
+  keyGenerator: (req: Request) => {
+    // If user is authenticated, rate limit by userId (more fair)
+    if (req.user?.userId) {
+      return `upload_${req.user.userId}`;
+    }
+    // Otherwise rate limit by IP
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  },
+  handler: (req: Request, res: Response) => {
+    res.status(429).json({
+      error: {
+        message: 'Too many upload attempts. Please wait a few minutes and try again.',
+        statusCode: 429,
+        timestamp: new Date().toISOString(),
+        path: req.originalUrl,
+        method: req.method,
+        retryAfter: 900, // 15 minutes in seconds
+        hint: 'You can retry in 15 minutes. Make sure you\'re uploading a valid Uber data file.'
+      }
+    });
+  },
+  skip: (req: Request) => {
+    // Skip rate limiting for health checks
+    return req.path === '/' || req.path === '/health';
+  }
+});
 
 // Rate limiting for email operations (external API calls - most restrictive)
 export const emailOperationRateLimit = createRateLimit(

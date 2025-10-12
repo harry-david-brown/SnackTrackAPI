@@ -16,11 +16,12 @@ const options = {
 A comprehensive API for tracking food delivery spending and receipts.
 
 ## 🚀 Features
-- **User Management**: Create and manage users
-- **Receipt Import**: Import receipts from CSV files
+- **User Management**: Create and manage users with JWT authentication
+- **Receipt Import**: Import receipts from CSV or ZIP files (Uber Eats data export)
 - **Email Integration**: Parse receipts from email receipts
 - **Spending Analytics**: Track spending patterns and insights
 - **Data Validation**: Comprehensive data integrity checks
+- **Security**: JWT authentication, password hashing, rate limiting
 
       `,
       contact: {
@@ -412,7 +413,7 @@ A comprehensive API for tracking food delivery spending and receipts.
       },
       {
         name: 'CSV Import',
-        description: 'CSV file import operations'
+        description: 'CSV and ZIP file import operations. Upload Uber Eats data as CSV or ZIP archive.'
       },
       {
         name: 'Database',

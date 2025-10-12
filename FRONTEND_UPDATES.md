@@ -6,6 +6,54 @@
 
 ---
 
+## 🟢 NEW FEATURE - ZIP File Upload Support
+
+### ZIP File Upload - Now Supported!
+
+**What Changed:**
+- `POST /csv/import` now accepts both `.csv` and `.zip` files
+- ZIP files are automatically extracted to find `user_orders-0.csv`
+- No changes to request format - just upload ZIP instead of CSV
+
+**Frontend Changes:**
+- [ ] Update file picker to allow `.zip` MIME type: `application/zip`
+- [ ] Update upload UI text: "Upload your Uber CSV or ZIP file"
+- [ ] Update tutorial slides to mention ZIP support
+- [ ] Handle ZIP-specific error messages
+
+**Error Messages to Handle:**
+```json
+{
+  "error": "Could not find Uber Eats CSV in ZIP file",
+  "hint": "Make sure you uploaded the complete Uber data export ZIP file"
+}
+
+{
+  "error": "ZIP file is corrupted or invalid"
+}
+
+{
+  "error": "File size (52.3MB) exceeds maximum allowed size (50MB)"
+}
+```
+
+**Response Format (Updated):**
+```json
+{
+  "message": "ZIP file processed and receipts imported successfully",
+  "importedCount": 202,
+  "totalAmount": 1543.25,
+  "fileType": "zip"  // or "csv"
+}
+```
+
+**Backward Compatibility:**
+- ✅ Direct CSV uploads still work exactly as before
+- ✅ No frontend changes required (ZIP support is optional enhancement)
+- ✅ Same response format for both file types
+
+---
+
 ## 🔴 BREAKING CHANGES - Required for App to Function
 
 ### 1. User Registration - Password Field Required
