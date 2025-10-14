@@ -132,10 +132,17 @@ The project now includes automated CI/CD with GitHub Actions:
 # Check TypeScript compilation
 npm run build
 
-# Run comprehensive auth tests
-./test-auth-comprehensive.sh
+# Run full test suite (14 tests)
+cd tests && ./test-full-suite.sh
+
+# Or run individual test suites
+cd tests
+./test-auth-comprehensive.sh    # Authentication only
+./test-cache-performance.sh     # Redis caching
+./test-cache-invalidation.sh    # Cache invalidation
 ```
 
+**Test Documentation:** See [`tests/README.md`](tests/README.md) for details  
 **Workflow file:** `.github/workflows/ci.yml`
 
 ## 🚨 Error Tracking with Sentry
