@@ -26,6 +26,30 @@ cd tests
 
 ---
 
+### `load-test-simple.sh` 🔥 (Performance)
+**Load testing with concurrent users**
+
+Tests:
+- 100 concurrent users
+- 500 total requests
+- Success rate validation (> 99%)
+- Response time thresholds (p95 < 2s, p99 < 5s)
+- Throughput measurement
+
+**Usage:**
+```bash
+cd tests
+./load-test-simple.sh
+```
+
+**Expected Results:**
+- 99%+ success rate
+- p95 latency < 2000ms
+- p99 latency < 5000ms
+- Throughput: 100+ req/s
+
+---
+
 ### `test-auth-comprehensive.sh`
 **Authentication system validation**
 

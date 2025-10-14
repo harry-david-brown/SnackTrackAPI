@@ -4,7 +4,7 @@
 # Tests all critical functionality end-to-end
 
 API_URL="http://localhost:3000"
-UBER_ZIP="./MockUberData/Uber Data Request B18832D3.zip"
+UBER_ZIP="../MockUberData/Uber Data Request B18832D3.zip"
 
 # Colors for output
 GREEN='\033[0;32m'

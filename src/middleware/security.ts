@@ -47,24 +47,27 @@ const createSlowDown = (windowMs: number, delayAfter: number, delayMs: number) =
 };
 
 // General API rate limiting (viral app friendly)
+// Using production-level limits for realistic testing and deployment
 export const apiRateLimit = createRateLimit(
-  config.isProduction() ? 5 * 60 * 1000 : 60 * 1000, // 5 minutes in prod, 1 minute in dev
-  config.isProduction() ? 10000 : 1000, // 10,000 requests per 5 minutes in prod, 1000 in dev
+  5 * 60 * 1000, // 5 minutes
+  10000, // 10,000 requests per 5 minutes (production-ready)
   'API rate limit exceeded. Please slow down your requests.'
 );
 
 // Rate limiting for user creation (viral app friendly)
+// Using production-level limits
 export const userCreationRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
-  config.isProduction() ? 1000 : 50, // 1000 user creations per 5 minutes in prod, 50 in dev
+  1000, // 1000 user creations per 5 minutes (production-ready)
   'Too many user creation attempts. Please wait before creating another user.'
 );
 
 // Rate limiting for CSV/ZIP imports (viral-friendly with retry support)
 // Per-user rate limiting to allow retries but prevent abuse
+// Using production-level limits
 export const csvImportRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minute window
-  max: config.isProduction() ? 20 : 100, // 20 uploads per 15min in prod (allows retries), 100 in dev
+  max: 20, // 20 uploads per 15min (allows retries, prevents abuse)
   message: {
     error: {
       message: 'Too many upload attempts. Please wait a few minutes before trying again.',
@@ -103,9 +106,10 @@ export const csvImportRateLimit = rateLimit({
 });
 
 // Rate limiting for email operations (external API calls - most restrictive)
+// Using production-level limits
 export const emailOperationRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
-  config.isProduction() ? 500 : 100, // 500 email operations per 5 minutes in prod, 100 in dev
+  500, // 500 email operations per 5 minutes (production-ready)
   'Too many email operations. Please wait before trying again.'
 );
 
