@@ -1,8 +1,41 @@
 # Frontend Updates Required - Authentication Implementation
 
 **Date:** October 12, 2025  
-**Backend Branch:** `feature/phase-1-authentication`  
-**Status:** Backend complete, frontend updates required
+**Backend Status:** ✅ Complete and deployed to main  
+**Backend Version:** 1.0.0  
+**Frontend Status:** ⏳ Awaiting implementation
+
+---
+
+## 🌐 API Configuration
+
+### API Base URL
+```typescript
+// Development
+const API_URL = 'http://localhost:3000';
+
+// Production (update when deployed)
+const API_URL = 'https://api.snacktrack.app';  // or your production URL
+```
+
+### Environment Variables
+```bash
+# Frontend .env
+EXPO_PUBLIC_API_URL=http://localhost:3000  # Development
+# EXPO_PUBLIC_API_URL=https://api.snacktrack.app  # Production
+```
+
+### Rate Limiting
+- **Upload limit:** 20 uploads per 15 minutes (per user)
+- **Registration:** 1,000 per 5 minutes
+- **General API:** 10,000 requests per 5 minutes
+- Rate limits are per-user when authenticated, per-IP when not
+- Frontend should handle 429 errors with retry guidance
+
+### Health Check
+- **Endpoint:** `GET /health` (no auth required)
+- **Use for:** App startup validation, network connectivity check
+- **Response:** `{ status: 'ok', uptime: 123, database: { status: 'connected' } }`
 
 ---
 
@@ -494,7 +527,46 @@ Contact: Backend team or refer to API documentation at `/docs`
 
 ---
 
+---
+
+## 📚 Quick Reference - All Endpoints
+
+### Authentication Endpoints (No Auth Required)
+```
+POST /auth/register     - Create new user
+POST /auth/login        - Login existing user  
+POST /auth/refresh      - Refresh access token
+POST /auth/logout       - Logout user
+```
+
+### User Endpoints (Auth Required)
+```
+GET /users/:id/totalSpent              - Get total spending
+GET /validation/user/:userId/summary   - Get analytics summary
+```
+
+### Upload Endpoints (Auth Required)
+```
+POST /csv/import  - Upload CSV or ZIP file
+```
+
+### System Endpoints (No Auth)
+```
+GET /              - Basic alive check
+GET /health        - Detailed health check
+GET /docs          - Swagger API documentation
+```
+
+### Response Time Targets
+- Registration/Login: < 1 second
+- Analytics query: < 2 seconds
+- CSV/ZIP import: < 30 seconds (or async)
+- Health check: < 100ms
+
+---
+
 **Last Updated:** October 12, 2025  
-**Backend Status:** ✅ Complete and tested  
-**Frontend Status:** ⏳ Awaiting implementation
+**Backend Status:** ✅ Complete and deployed to main  
+**Backend Version:** 1.0.0  
+**Frontend Status:** ⏳ Ready for integration
 
