@@ -10,11 +10,13 @@ services:
       - /usr/src/app/node_modules
     environment:
       - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_dev
+      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
     command: npm run dev
     depends_on:
       - postgres
+      - redis
 
   postgres:
     image: postgres:15-alpine
@@ -27,5 +29,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
 volumes:
-  postgres_data: 
+  postgres_data:
+  redis_data: 

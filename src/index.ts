@@ -14,6 +14,7 @@ import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
 import { sentryConfig } from './config/sentry';
+import { redisConfig } from './config/redis';
 import { 
   securityHeaders, 
   corsConfig, 
@@ -158,12 +159,43 @@ async function startServer() {
     // Initialize database tables
     await postgresService.initializeTables();
     
+    // Initialize Redis cache (optional, won't fail if unavailable)
+    await redisConfig.initialize();
+    
     // Start the server
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Database connected and initialized`);
       console.log(config.getEnvironmentInfo());
     });
+
+    // Graceful shutdown handling
+    const gracefulShutdown = async (signal: string) => {
+      console.log(`\n📴 ${signal} received, starting graceful shutdown...`);
+      
+      server.close(async () => {
+        console.log('🔌 HTTP server closed');
+        
+        // Close database connections
+        await postgresService.close();
+        
+        // Close Redis connection
+        await redisConfig.close();
+        
+        console.log('✅ Graceful shutdown complete');
+        process.exit(0);
+      });
+
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        console.error('❌ Forced shutdown after timeout');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

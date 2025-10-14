@@ -5,6 +5,7 @@ import { csvImportRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
 import { ZipExtractor } from '../services/import/ZipExtractor';
 import { ValidationError } from '../middleware/errorHandler';
+import { cacheService } from '../services/core/CacheService';
 
 const router = Router();
 const csvImportService = container.csvImportService;
@@ -173,6 +174,9 @@ router.post('/import', authenticateToken, validateOwnership, csvImportRateLimit,
     
     if (importResult.success && importResult.receipts.length > 0) {
       await csvImportService.importReceipts(importResult.receipts, userId);
+      
+      // Invalidate cached analytics since user data changed
+      await cacheService.invalidateAllUserCaches(userId);
       
       console.log(`✅ Imported ${importResult.totalReceipts} receipts for user ${userId}`);
     }

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
+import { cacheService } from '../services/core/CacheService';
 
 const router = Router();
 
@@ -42,6 +43,12 @@ const router = Router();
 router.get('/user/:userId/summary', authenticateToken, validateOwnership, async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;
+    
+    // Check cache first
+    const cachedSummary = await cacheService.getUserSummary(userId);
+    if (cachedSummary) {
+      return res.json(cachedSummary);
+    }
     
     // Get user details
     const user = await container.userRepository.findById(userId);
@@ -110,7 +117,7 @@ router.get('/user/:userId/summary', authenticateToken, validateOwnership, async 
       .sort((a, b) => (b.orderDate?.getTime() || 0) - (a.orderDate?.getTime() || 0))
       .slice(0, 5);
 
-    res.json({
+    const summary = {
       user: {
         id: user.id,
         email: user.email,
@@ -135,7 +142,12 @@ router.get('/user/:userId/summary', authenticateToken, validateOwnership, async 
         orderDate: receipt.orderDate,
         dataSource: receipt.dataSource
       }))
-    });
+    };
+
+    // Cache the summary for future requests
+    await cacheService.cacheUserSummary(userId, summary);
+
+    res.json(summary);
   } catch (err) {
     console.error('Error fetching user summary:', err);
     res.status(500).json({ 
