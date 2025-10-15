@@ -156,12 +156,17 @@ EXPO_PUBLIC_API_URL=http://localhost:3000  # Dev
 ### GET /validation/user/:userId/summary
 **Get comprehensive user analytics**
 
+Optionally includes **Spotify Wrapped-style analytics** with `?includeWrapped=true`
+
 **Headers Required:**
 ```
 Authorization: Bearer {accessToken}
 ```
 
-**Response (200):**
+**Query Parameters:**
+- `includeWrapped` (optional, boolean): Include Wrapped Analytics (default: false)
+
+**Response (200) - Basic:**
 ```json
 {
   "user": {
@@ -190,9 +195,134 @@ Authorization: Bearer {accessToken}
 }
 ```
 
+**Response (200) - With Wrapped Analytics:**
+```json
+{
+  "user": { ... },
+  "statistics": { ... },
+  "validation": { ... },
+  "recentReceipts": [ ... ],
+  "wrappedAnalytics": {
+    "shame": {
+      "lateNightOrders": {
+        "count": 22,
+        "totalSpent": 554.35,
+        "latestOrder": "5:21 AM",
+        "worstOffender": {
+          "restaurant": "3 Brothers Pizza",
+          "time": "2:14 AM",
+          "amount": 86.85,
+          "items": ["Pizza", "Wings"]
+        }
+      },
+      "laziestDay": {
+        "date": "2022-01-19",
+        "dayOfWeek": "Wednesday",
+        "orderCount": 3,
+        "totalSpent": 118.56,
+        "restaurants": ["McDonald's", "Starbucks", "Chipotle"],
+        "message": "3 orders in one day? Go outside."
+      },
+      "longestStreak": {
+        "days": 5,
+        "startDate": "2022-01-29",
+        "endDate": "2022-02-02",
+        "totalSpent": 107.01,
+        "message": "5 days straight without cooking"
+      },
+      "singleItemOrders": {
+        "count": 35,
+        "totalSpent": 449.44,
+        "averageAmount": 12.84,
+        "message": "35 times you couldn't just go get it",
+        "mostCommon": "Coffee (12 times)"
+      },
+      "chainDependency": {
+        "worstOffender": "McDonald's",
+        "orderCount": 24,
+        "totalSpent": 543.94,
+        "percentage": 12,
+        "message": "12% of your orders were McDonald's",
+        "allChains": [...]
+      }
+    },
+    "flex": {
+      "mostExpensiveOrder": {
+        "amount": 115.72,
+        "restaurant": "Food Basics",
+        "date": "2023-03-05",
+        "items": [...],
+        "message": "You once spent $115.72 on a single order"
+      },
+      "coffeeAddiction": {
+        "orderCount": 23,
+        "totalSpent": 608.92,
+        "averagePrice": 26.47,
+        "mostOrdered": "Caffè Latte (28 times)",
+        "message": "You spent $608.92 on coffee"
+      },
+      "nightOwl": {
+        "percentage": 11,
+        "count": 22,
+        "totalSpent": 554.35,
+        "latestOrder": "11:50 PM",
+        "message": "11% of your orders were after 10pm"
+      }
+    },
+    "comparative": {
+      "couldHaveBought": {
+        "totalSpent": 5136.23,
+        "comparisons": [
+          { "item": "...", "quantity": 4, "message": "4 iphone 15 pro max" }
+        ]
+      },
+      "missedInvestment": {
+        "amountSpent": 5136.23,
+        "firstOrderDate": "2016-05-15",
+        "daysElapsed": 2468,
+        "sp500Return": 10,
+        "wouldBeWorth": 9784.24,
+        "missedGains": 4648.01,
+        "message": "If you'd invested this in the S&P 500, you'd have an extra $4648.01"
+      },
+      "costPerMeal": {
+        "deliveryAverage": 25.43,
+        "groceryEstimate": 7.50,
+        "difference": 17.93,
+        "annualWaste": 3625.06,
+        "message": "You paid $17.93 extra per meal for convenience"
+      }
+    },
+    "patterns": {
+      "peakHungerHour": {
+        "hour": 19,
+        "hourDisplay": "7:00 PM",
+        "orderCount": 18,
+        "percentageOfTotal": 9,
+        "message": "You're hungriest at 7:00 PM"
+      },
+      "weekendWarrior": {
+        "weekendOrders": 66,
+        "weekdayOrders": 136,
+        "weekendSpending": 1771.09,
+        "weekdaySpending": 3365.14,
+        "ratio": 0.53,
+        "message": "You spend more on weekdays (cooking challenged all week)"
+      }
+    }
+  }
+}
+```
+
+**Wrapped Analytics Categories:**
+- **Shame** (5): 3am orders, laziest day, streaks, single items, chain dependency
+- **Flex** (3): Most expensive order, coffee addiction, night owl badge
+- **Comparative** (3): Could have bought, missed investment, cost per meal
+- **Patterns** (2): Peak hunger hour, weekend warrior
+
 **Performance:**
-- First request: 11-19ms (cache MISS)
-- Cached request: 11-12ms (cache HIT)
+- Basic summary: 11-19ms (cache MISS), 11-12ms (cache HIT)
+- With wrapped analytics: ~28ms (cache MISS), ~12ms (cache HIT - 57% faster!)
 - Cache TTL: 5 minutes
 - Auto-invalidates on data upload
 

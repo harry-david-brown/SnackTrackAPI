@@ -52,6 +52,14 @@ export class PostgresService {
     }
   }
 
+  /**
+   * Get the underlying connection pool
+   * Used by services that need direct pool access (e.g., analytics)
+   */
+  getPool(): Pool {
+    return this.pool;
+  }
+
   async getClient(): Promise<PoolClient> {
     return await this.pool.connect();
   }

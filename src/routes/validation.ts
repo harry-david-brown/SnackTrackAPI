@@ -10,10 +10,10 @@ const router = Router();
  * /validation/user/{userId}/summary:
  *   get:
  *     summary: Get user data summary and validation
- *     description: Get comprehensive summary of user data including validation insights and analytics
+ *     description: Get comprehensive summary of user data including validation insights and analytics. Optionally include Spotify Wrapped-style analytics.
  *     tags: [Validation & Analytics]
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -23,6 +23,14 @@ const router = Router();
  *           format: uuid
  *         description: User ID to get summary for
  *         example: "550e8400-e29b-41d4-a716-446655440000"
+ *       - in: query
+ *         name: includeWrapped
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Include Spotify Wrapped-style analytics (shame, flex, comparative, patterns)
+ *         example: true
  *     responses:
  *       200:
  *         description: User summary retrieved successfully
@@ -30,6 +38,10 @@ const router = Router();
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/UserSummary'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
  *         $ref: '#/components/responses/NotFound'
  *       500:
@@ -43,9 +55,11 @@ const router = Router();
 router.get('/user/:userId/summary', authenticateToken, validateOwnership, async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId;
+    const includeWrapped = req.query.includeWrapped === 'true';
     
-    // Check cache first
-    const cachedSummary = await cacheService.getUserSummary(userId);
+    // Check cache first (different cache key if wrapped analytics requested)
+    const cacheKey = includeWrapped ? `${userId}-wrapped` : userId;
+    const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
       return res.json(cachedSummary);
     }
@@ -117,7 +131,7 @@ router.get('/user/:userId/summary', authenticateToken, validateOwnership, async 
       .sort((a, b) => (b.orderDate?.getTime() || 0) - (a.orderDate?.getTime() || 0))
       .slice(0, 5);
 
-    const summary = {
+    const summary: any = {
       user: {
         id: user.id,
         email: user.email,
@@ -144,8 +158,20 @@ router.get('/user/:userId/summary', authenticateToken, validateOwnership, async 
       }))
     };
 
+    // Optionally include Spotify Wrapped-style analytics
+    if (includeWrapped) {
+      try {
+        const wrappedAnalytics = await container.wrappedAnalyticsService.calculateWrappedAnalytics(userId);
+        summary.wrappedAnalytics = wrappedAnalytics;
+      } catch (error) {
+        console.error('Error calculating wrapped analytics:', error);
+        // Continue without wrapped analytics if there's an error
+        summary.wrappedAnalytics = null;
+      }
+    }
+
     // Cache the summary for future requests
-    await cacheService.cacheUserSummary(userId, summary);
+    await cacheService.cacheUserSummary(cacheKey, summary);
 
     res.json(summary);
   } catch (err) {

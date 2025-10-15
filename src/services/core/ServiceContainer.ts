@@ -7,6 +7,7 @@ import { CsvImportService } from '../import/CsvImportService';
 import { ReceiptParserService } from '../receipt/ReceiptParserService';
 import { EmailFilterService } from '../email/EmailFilterService';
 import { AuthService } from '../AuthService';
+import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
 
 /**
  * Simple service container for dependency injection
@@ -53,6 +54,9 @@ export class ServiceContainer {
     this.services.set('csvImportService', new CsvImportService(this.get('postgres')));
     this.services.set('receiptParserService', new ReceiptParserService());
     this.services.set('emailFilterService', new EmailFilterService());
+    
+    // Analytics services
+    this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
   }
 
   get<T>(serviceName: string): T {
@@ -98,6 +102,10 @@ export class ServiceContainer {
 
   get authService(): AuthService {
     return this.get<AuthService>('authService');
+  }
+
+  get wrappedAnalyticsService(): WrappedAnalyticsService {
+    return this.get<WrappedAnalyticsService>('wrappedAnalyticsService');
   }
 }
 
