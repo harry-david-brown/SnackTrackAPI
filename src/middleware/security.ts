@@ -39,7 +39,7 @@ const createSlowDown = (windowMs: number, delayAfter: number, delayMs: number) =
   return slowDown({
     windowMs,
     delayAfter,
-    delayMs,
+    delayMs: () => delayMs, // express-slow-down v3 requires a function
     maxDelayMs: 5000, // Maximum delay of 5 seconds
     skipSuccessfulRequests: true, // Don't slow down successful requests
     skipFailedRequests: false // Do slow down failed requests
