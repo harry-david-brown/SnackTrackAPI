@@ -109,6 +109,14 @@ export class EmailSenderService implements EmailSender {
           subject,
           text,
           html,
+          // Add categories for tracking and filtering
+          categories: ['transactional', 'snacktrack'],
+          // Mark as important (helps with deliverability)
+          headers: {
+            'X-Entity-Ref-ID': 'snacktrack-transactional',
+            'List-Unsubscribe': '<mailto:noreply@getsnacktrack.com>',
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+          }
         });
         console.log(`✅ Email sent to ${to} via SendGrid`);
       } else {
@@ -152,6 +160,8 @@ export class EmailSenderService implements EmailSender {
       <p>If you didn't create a Snack Track account, you can safely ignore this email.</p>
       <div class="footer">
         <p>Snack Track Team</p>
+        <p>This is an automated message from Snack Track. Please do not reply to this email.</p>
+        <p>© ${new Date().getFullYear()} Snack Track - getsnacktrack.com</p>
       </div>
     </div>
   </body>
@@ -181,6 +191,8 @@ export class EmailSenderService implements EmailSender {
       <p>If you didn't request a password reset, you can safely ignore this email.</p>
       <div class="footer">
         <p>Snack Track Team</p>
+        <p>This is an automated message from Snack Track. Please do not reply to this email.</p>
+        <p>© ${new Date().getFullYear()} Snack Track - getsnacktrack.com</p>
       </div>
     </div>
   </body>
