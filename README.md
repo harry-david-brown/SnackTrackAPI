@@ -13,6 +13,8 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Email Integration** - Parse receipts from Gmail
 - [x] **Restaurant Chain Consolidation** - Smart grouping across locations
 - [x] **JWT Authentication** - Secure user authentication and authorization
+- [x] **Password Reset** - OTP-based password recovery with email delivery
+- [x] **Email Verification** - Secure email verification with 6-digit OTP codes
 - [x] **Rate Limiting** - Viral-app-friendly per-user limits
 - [x] **API Documentation** - Complete Swagger/OpenAPI docs
 - [x] **CI/CD Pipeline** - Automated testing with GitHub Actions
@@ -116,7 +118,38 @@ curl -X GET http://localhost:3000/users/{userId}/totalSpent \
 - **Refresh Token:** Expires in 7 days
 - Use `/auth/refresh` to get new tokens before expiry
 
-**See `FRONTEND_UPDATES.md` for complete integration guide.**
+### Password Reset Flow
+```bash
+# 1. Request password reset code
+curl -X POST http://localhost:3000/auth/password/reset/request \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+# 2. Verify the code (optional - checks if code is valid)
+curl -X POST http://localhost:3000/auth/password/reset/verify \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "code": "123456"}'
+
+# 3. Complete password reset with new password
+curl -X POST http://localhost:3000/auth/password/reset/complete \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "code": "123456", "newPassword": "NewPassword123"}'
+```
+
+### Email Verification Flow
+```bash
+# 1. Send verification code (triggered after registration or login with unverified email)
+curl -X POST http://localhost:3000/auth/email/verify/send \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+# 2. Confirm email verification with code
+curl -X POST http://localhost:3000/auth/email/verify/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "code": "123456"}'
+```
+
+**Note:** OTP codes expire in 15 minutes. Rate limiting applies to prevent abuse.
 
 ## 🔄 CI/CD Pipeline
 
@@ -286,6 +319,17 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 ## 📊 API Endpoints
 
 **Base URL:** `http://localhost:3000`
+
+### 🔐 Authentication Endpoints
+- `POST /auth/register` - Register a new user with email and password
+- `POST /auth/login` - Login with email and password
+- `POST /auth/refresh` - Refresh access token using refresh token
+- `POST /auth/logout` - Logout (invalidate refresh token)
+- `POST /auth/password/reset/request` - Request password reset code (OTP sent to email)
+- `POST /auth/password/reset/verify` - Verify password reset code (validates code)
+- `POST /auth/password/reset/complete` - Complete password reset with new password
+- `POST /auth/email/verify/send` - Send email verification code
+- `POST /auth/email/verify/confirm` - Confirm email verification with code
 
 ### 🥡 CSV Import Endpoints
 - `POST /csv/import` - Import CSV file directly to database

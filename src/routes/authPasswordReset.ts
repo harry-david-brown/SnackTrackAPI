@@ -17,8 +17,51 @@ import {
 const router = Router();
 
 /**
- * POST /auth/password/reset/request
- * Request a password reset code
+ * @swagger
+ * /auth/password/reset/request:
+ *   post:
+ *     summary: Request password reset code
+ *     description: Send a 6-digit OTP code to user's email for password reset. Always returns 200 OK for security (prevents email enumeration).
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *     responses:
+ *       200:
+ *         description: Password reset code sent (always returns success for security)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Password reset code sent to your email
+ *                 expiresIn:
+ *                   type: integer
+ *                   description: Cooldown in seconds before resend is allowed
+ *                   example: 60
+ *                 attemptLimit:
+ *                   type: integer
+ *                   description: Maximum verification attempts allowed
+ *                   example: 5
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       429:
+ *         $ref: '#/components/responses/RateLimitExceeded'
  */
 router.post(
   '/request',
@@ -69,8 +112,56 @@ router.post(
 );
 
 /**
- * POST /auth/password/reset/verify
- * Verify the password reset OTP code
+ * @swagger
+ * /auth/password/reset/verify:
+ *   post:
+ *     summary: Verify password reset code
+ *     description: Verify the 6-digit OTP code received via email. Does not mark code as used yet (complete endpoint does that).
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: 6-digit numeric code
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Code verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Code verified successfully
+ *                 expiresIn:
+ *                   type: integer
+ *                   example: 60
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         description: Invalid or expired code
+ *       404:
+ *         description: No pending reset request found
+ *       429:
+ *         $ref: '#/components/responses/RateLimitExceeded'
  */
 router.post(
   '/verify',
@@ -111,8 +202,57 @@ router.post(
 );
 
 /**
- * POST /auth/password/reset/complete
- * Complete password reset with new password
+ * @swagger
+ * /auth/password/reset/complete:
+ *   post:
+ *     summary: Complete password reset
+ *     description: Set new password after code verification. Code must be valid and not expired. Invalidates code after successful reset.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: 6-digit numeric code from email
+ *                 example: "123456"
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 description: New password (min 8 chars, 1 uppercase, 1 number)
+ *                 example: NewPassword123
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Password reset successfully
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         description: Invalid or expired code
+ *       404:
+ *         description: User not found
  */
 router.post(
   '/complete',

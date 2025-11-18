@@ -17,6 +17,8 @@ A comprehensive API for tracking food delivery spending and receipts with viral-
 
 ## 🚀 Features
 - **JWT Authentication**: Secure user authentication with bcrypt password hashing
+- **Password Reset**: OTP-based password recovery flow with email verification
+- **Email Verification**: Secure email verification with 6-digit OTP codes
 - **Receipt Import**: Import from CSV or ZIP files (Uber Eats data export auto-extraction)
 - **Wrapped Analytics**: Spotify-style shareable insights (13 viral categories)
 - **Performance**: Redis caching (36.8% faster), database optimizations
@@ -65,6 +67,11 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
               format: 'email',
               description: 'User email address',
               example: 'user@example.com'
+            },
+            emailVerified: {
+              type: 'boolean',
+              description: 'Email verification status',
+              example: false
             },
             createdAt: {
               type: 'string',

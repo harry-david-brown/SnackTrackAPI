@@ -16,8 +16,49 @@ import {
 const router = Router();
 
 /**
- * POST /auth/email/verify/send
- * Send email verification code
+ * @swagger
+ * /auth/email/verify/send:
+ *   post:
+ *     summary: Send email verification code
+ *     description: Send a 6-digit OTP code to user's email for verification. Triggered after registration or login with unverified email.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *     responses:
+ *       200:
+ *         description: Verification code sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 expiresIn:
+ *                   type: integer
+ *                   description: Cooldown in seconds before resend is allowed
+ *                   example: 60
+ *                 message:
+ *                   type: string
+ *                   example: Verification code sent to your email
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       404:
+ *         description: Email not found
+ *       429:
+ *         $ref: '#/components/responses/RateLimitExceeded'
  */
 router.post(
   '/send',
@@ -70,8 +111,53 @@ router.post(
 );
 
 /**
- * POST /auth/email/verify/confirm
- * Verify email with OTP code
+ * @swagger
+ * /auth/email/verify/confirm:
+ *   post:
+ *     summary: Confirm email verification
+ *     description: Verify email address with 6-digit OTP code. Updates user's emailVerified status to true.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: user@example.com
+ *               code:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: 6-digit numeric code from email
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Email verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Email verified successfully
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         description: Invalid or expired code
+ *       404:
+ *         description: No pending verification request found
+ *       429:
+ *         $ref: '#/components/responses/RateLimitExceeded'
  */
 router.post(
   '/confirm',
