@@ -170,6 +170,47 @@ export class PostgresService {
         console.log('Password column already exists or migration failed');
       }
 
+      // Migration: Add email_verified column to users table
+      try {
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE NOT NULL
+        `);
+        await this.query(`
+          CREATE INDEX IF NOT EXISTS idx_users_email_verified ON users(email_verified)
+        `);
+        console.log('✅ Email verified column migration completed');
+      } catch (error) {
+        console.log('Email verified column already exists or migration failed');
+      }
+
+      // Create verification_codes table
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS verification_codes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email VARCHAR(255) NOT NULL,
+          code_hash VARCHAR(255) NOT NULL,
+          code_type VARCHAR(50) NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          attempts INTEGER DEFAULT 0,
+          max_attempts INTEGER DEFAULT 5,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          used_at TIMESTAMP NULL
+        )
+      `);
+
+      // Create indexes for verification_codes
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_verification_email_type 
+        ON verification_codes(email, code_type)
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_verification_expires 
+        ON verification_codes(expires_at)
+      `);
+
+      console.log('✅ Verification codes table initialized');
+
       // Phase 2: Performance Optimization Indexes
       console.log('📊 Adding performance optimization indexes...');
       

@@ -5,6 +5,7 @@ export interface User {
   id: string;
   email: string;
   password?: string; // Optional - not returned in API responses
+  emailVerified?: boolean; // Email verification status
   createdAt?: string;
 }
 

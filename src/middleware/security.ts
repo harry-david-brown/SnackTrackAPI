@@ -113,6 +113,58 @@ export const emailOperationRateLimit = createRateLimit(
   'Too many email operations. Please wait before trying again.'
 );
 
+// Rate limiting for password reset requests
+// 3 per hour per email, 10 per hour per IP
+export const passwordResetRequestRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // 3 requests per window
+  keyGenerator: (req: Request) => {
+    // Rate limit by email if provided, otherwise by IP
+    return req.body?.email ? `pwreset:${req.body.email.toLowerCase().trim()}` : undefined as any;
+  },
+  message: {
+    error: {
+      message: 'Too many password reset requests. Please try again later.',
+      statusCode: 429
+    }
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// IP-based rate limit for password reset (10 per hour per IP)
+export const passwordResetIPRateLimit = createRateLimit(
+  60 * 60 * 1000, // 1 hour
+  10, // 10 requests per hour per IP
+  'Too many password reset requests from your IP. Please try again later.'
+);
+
+// Rate limiting for email verification send
+// 3 per hour per email
+export const emailVerificationSendRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // 3 requests per window
+  keyGenerator: (req: Request) => {
+    return req.body?.email ? `emailverify:${req.body.email.toLowerCase().trim()}` : undefined as any;
+  },
+  message: {
+    error: {
+      message: 'Too many verification requests. Please try again later.',
+      statusCode: 429
+    }
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Rate limiting for OTP verification attempts (max 5 per code)
+// This is handled in the OTP service, but we can add IP-based rate limiting here too
+export const otpVerificationRateLimit = createRateLimit(
+  15 * 60 * 1000, // 15 minutes
+  10, // 10 verification attempts per 15 minutes per IP
+  'Too many verification attempts. Please try again later.'
+);
+
 // Progressive slow down for repeated failed requests
 export const progressiveSlowDown = createSlowDown(
   15 * 60 * 1000, // 15 minutes

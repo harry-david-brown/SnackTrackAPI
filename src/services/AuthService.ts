@@ -137,6 +137,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        emailVerified: false, // Always false for new registrations
         createdAt: user.createdAt || new Date().toISOString()
       }
     };
@@ -172,9 +173,27 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        emailVerified: user.emailVerified || false,
         createdAt: user.createdAt || new Date().toISOString()
       }
     };
+  }
+
+  /**
+   * Reset password using email and code
+   */
+  async resetPassword(email: string, code: string, newPassword: string): Promise<void> {
+    // Validate password strength
+    const passwordValidation = UserModel.validatePassword(newPassword);
+    if (!passwordValidation.valid) {
+      throw new ValidationError(passwordValidation.errors.join('; '), 'password');
+    }
+
+    // Hash new password
+    const hashedPassword = await UserModel.hashPassword(newPassword);
+
+    // Update password
+    await this.userRepository.updatePassword(email.toLowerCase().trim(), hashedPassword);
   }
 
   /**

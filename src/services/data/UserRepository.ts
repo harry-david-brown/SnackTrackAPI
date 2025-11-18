@@ -38,7 +38,7 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, created_at FROM users WHERE id = $1',
+      'SELECT id, email, email_verified, created_at FROM users WHERE id = $1',
       [id]
     );
     if (result.rows.length === 0) return undefined;
@@ -47,21 +47,24 @@ export class UserRepository {
     return {
       id: row.id,
       email: row.email,
+      emailVerified: row.email_verified || false,
       createdAt: row.created_at
     };
   }
 
   async findAll(): Promise<User[]> {
-    const result = await this.postgres.query('SELECT * FROM users');
+    const result = await this.postgres.query('SELECT id, email, email_verified, created_at FROM users');
     return result.rows.map((row: any) => ({
       id: row.id,
-      email: row.email
+      email: row.email,
+      emailVerified: row.email_verified || false,
+      createdAt: row.created_at
     }));
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, created_at FROM users WHERE email = $1',
+      'SELECT id, email, email_verified, created_at FROM users WHERE email = $1',
       [email]
     );
     if (result.rows.length === 0) return undefined;
@@ -70,13 +73,14 @@ export class UserRepository {
     return {
       id: row.id,
       email: row.email,
+      emailVerified: row.email_verified || false,
       createdAt: row.created_at
     };
   }
 
   async findByEmailWithPassword(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, password, created_at FROM users WHERE email = $1',
+      'SELECT id, email, password, email_verified, created_at FROM users WHERE email = $1',
       [email]
     );
     if (result.rows.length === 0) return undefined;
@@ -86,6 +90,7 @@ export class UserRepository {
       id: row.id,
       email: row.email,
       password: row.password,
+      emailVerified: row.email_verified || false,
       createdAt: row.created_at
     };
   }
@@ -97,11 +102,11 @@ export class UserRepository {
       throw new Error('User with this email already exists');
     }
 
-    // Create new user with password
+    // Create new user with password (email_verified defaults to false)
     const userId = uuidv4();
     try {
       const result = await this.postgres.query(
-        'INSERT INTO users (id, email, password, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id',
+        'INSERT INTO users (id, email, password, email_verified, created_at) VALUES ($1, $2, $3, FALSE, NOW()) RETURNING id',
         [userId, email, hashedPassword]
       );
       return result.rows[0].id;
@@ -112,6 +117,20 @@ export class UserRepository {
       }
       throw error;
     }
+  }
+
+  async updateEmailVerified(email: string, verified: boolean): Promise<void> {
+    await this.postgres.query(
+      'UPDATE users SET email_verified = $1, updated_at = NOW() WHERE email = $2',
+      [verified, email]
+    );
+  }
+
+  async updatePassword(email: string, hashedPassword: string): Promise<void> {
+    await this.postgres.query(
+      'UPDATE users SET password = $1, updated_at = NOW() WHERE email = $2',
+      [hashedPassword, email]
+    );
   }
 
 }

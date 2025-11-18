@@ -8,6 +8,8 @@ import { ReceiptParserService } from '../receipt/ReceiptParserService';
 import { EmailFilterService } from '../email/EmailFilterService';
 import { AuthService } from '../AuthService';
 import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
+import { OtpService } from '../OtpService';
+import { EmailSenderService } from '../email/EmailSender';
 
 /**
  * Simple service container for dependency injection
@@ -57,6 +59,10 @@ export class ServiceContainer {
     
     // Analytics services
     this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
+    
+    // OTP and Email services
+    this.services.set('otpService', new OtpService(this.get('postgres')));
+    this.services.set('emailSender', new EmailSenderService());
   }
 
   get<T>(serviceName: string): T {
@@ -106,6 +112,14 @@ export class ServiceContainer {
 
   get wrappedAnalyticsService(): WrappedAnalyticsService {
     return this.get<WrappedAnalyticsService>('wrappedAnalyticsService');
+  }
+
+  get otpService(): OtpService {
+    return this.get<OtpService>('otpService');
+  }
+
+  get emailSender(): EmailSenderService {
+    return this.get<EmailSenderService>('emailSender');
   }
 }
 

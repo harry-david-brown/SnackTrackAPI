@@ -4,6 +4,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import authRouter from './routes/auth';
+import authPasswordResetRouter from './routes/authPasswordReset';
+import authEmailVerificationRouter from './routes/authEmailVerification';
 import usersRouter from './routes/users';
 import receiptsRouter from './routes/receipts';
 import csvRouter from './routes/csv';
@@ -141,6 +143,8 @@ setupSwagger(app);
 
 // Mount routers
 app.use('/auth', authRouter);
+app.use('/auth/password/reset', authPasswordResetRouter);
+app.use('/auth/email/verify', authEmailVerificationRouter);
 app.use('/users', usersRouter);
 app.use('/receipts', receiptsRouter);
 app.use('/csv', csvRouter);
