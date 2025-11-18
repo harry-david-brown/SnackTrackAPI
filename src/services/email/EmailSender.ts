@@ -11,13 +11,19 @@ export interface EmailSender {
 }
 
 /**
- * Simple email sender using nodemailer (SMTP)
- * For production, consider SendGrid or AWS SES
+ * Email sender using SendGrid REST API (preferred) or SMTP (nodemailer) as fallback
+ * SendGrid REST API is more reliable on cloud platforms like Railway
  */
 import nodemailer, { Transporter } from 'nodemailer';
+import sgMail from '@sendgrid/mail';
+
+interface SendGridTransporter {
+  type: 'sendgrid';
+  sgMail: typeof sgMail;
+}
 
 export class EmailSenderService implements EmailSender {
-  private transporter: Transporter | null = null;
+  private transporter: Transporter | SendGridTransporter | null = null;
   private enabled: boolean = false;
 
   constructor() {
@@ -25,28 +31,35 @@ export class EmailSenderService implements EmailSender {
   }
 
   private initialize(): void {
+    // Check for SendGrid API key (preferred) or SMTP credentials
+    const sendGridApiKey = process.env.SENDGRID_API_KEY;
     const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587');
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASS;
-    const smtpSecure = process.env.SMTP_SECURE === 'true';
 
-    // Only initialize if SMTP is configured
-    if (smtpHost && smtpUser && smtpPass) {
+    if (sendGridApiKey) {
+      // Use SendGrid REST API (more reliable on cloud platforms)
+      sgMail.setApiKey(sendGridApiKey);
+      this.transporter = { type: 'sendgrid', sgMail };
+      this.enabled = true;
+      console.log('✅ Email sender service initialized (SendGrid REST API)');
+    } else if (smtpHost && smtpUser && smtpPass) {
+      // Fallback to SMTP if SendGrid API key not available
+      const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+      const smtpSecure = process.env.SMTP_SECURE === 'true';
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: smtpSecure, // true for 465, false for other ports
+        secure: smtpSecure,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
       });
-
       this.enabled = true;
-      console.log('✅ Email sender service initialized');
+      console.log('✅ Email sender service initialized (SMTP)');
     } else {
-      console.warn('⚠️  SMTP not configured. Email sending disabled. Set SMTP_HOST, SMTP_USER, SMTP_PASS to enable.');
+      console.warn('⚠️  Email service not configured. Set SENDGRID_API_KEY or SMTP variables to enable.');
       this.enabled = false;
     }
   }
@@ -82,18 +95,34 @@ export class EmailSenderService implements EmailSender {
         console.log(`   Code: ${text.split(': ')[1]}`);
         return;
       }
-      throw new Error('Email service not configured. Set SMTP environment variables.');
+      throw new Error('Email service not configured. Set SENDGRID_API_KEY or SMTP environment variables.');
     }
 
     try {
-      await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || '"Snack Track" <noreply@snacktrack.com>',
-        to,
-        subject,
-        text,
-        html,
-      });
-      console.log(`✅ Email sent to ${to}`);
+      const fromEmail = process.env.SMTP_FROM || process.env.SENDGRID_FROM || '"Snack Track" <noreply@getsnacktrack.com>';
+
+      // Use SendGrid REST API if available
+      if (this.transporter && 'type' in this.transporter && this.transporter.type === 'sendgrid') {
+        await this.transporter.sgMail.send({
+          to,
+          from: fromEmail,
+          subject,
+          text,
+          html,
+        });
+        console.log(`✅ Email sent to ${to} via SendGrid`);
+      } else {
+        // Fallback to SMTP (nodemailer)
+        const smtpTransporter = this.transporter as Transporter;
+        await smtpTransporter.sendMail({
+          from: fromEmail,
+          to,
+          subject,
+          text,
+          html,
+        });
+        console.log(`✅ Email sent to ${to} via SMTP`);
+      }
     } catch (error) {
       console.error(`❌ Failed to send email to ${to}:`, error);
       throw new Error('Failed to send email');
