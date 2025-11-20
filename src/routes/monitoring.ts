@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { asyncHandler } from '../middleware/errorHandler';
 import { getLogLevel, setLogLevel, getRecentLogs } from '../config/logger';
+import { cacheService } from '../services/core/CacheService';
 
 const router = Router();
 
@@ -184,6 +185,29 @@ router.get('/logs', asyncHandler(async (req: Request, res: Response) => {
     count: logs.length,
     maxBufferSize: 1000,
     note: 'This is an in-memory buffer. For long-term storage and search, use Better Stack/Logtail (set LOGTAIL_TOKEN)'
+  });
+}));
+
+/**
+ * @swagger
+ * /monitoring/cache:
+ *   get:
+ *     summary: Get Redis cache statistics and performance metrics
+ *     description: Returns cache status, hit/miss rates, and performance impact
+ *     tags: [Monitoring]
+ *     responses:
+ *       200:
+ *         description: Cache statistics
+ */
+router.get('/cache', asyncHandler(async (req: Request, res: Response) => {
+  const cacheStats = await cacheService.getStats();
+  
+  res.json({
+    enabled: cacheStats.enabled,
+    stats: cacheStats.stats,
+    note: cacheStats.enabled 
+      ? 'Cache is active. Check response times: cached requests should be faster (<50ms vs 100-500ms uncached)'
+      : 'Cache is disabled. Set REDIS_URL to enable caching for better performance.'
   });
 }));
 
