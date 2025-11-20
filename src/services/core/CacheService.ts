@@ -59,10 +59,13 @@ export class CacheService {
 
   /**
    * Invalidate all caches for a user
+   * This includes both regular and wrapped analytics cache keys
    */
   async invalidateAllUserCaches(userId: string): Promise<void> {
+    // Use patterns to match both base cache and wrapped cache keys
+    // user_summary:userId* matches: user_summary:userId and user_summary:userId-wrapped
     const patterns = [
-      `${this.USER_SUMMARY_PREFIX}${userId}`,
+      `${this.USER_SUMMARY_PREFIX}${userId}*`, // Pattern to catch both base and -wrapped keys
       `${this.ANALYTICS_PREFIX}${userId}*`
     ];
 
