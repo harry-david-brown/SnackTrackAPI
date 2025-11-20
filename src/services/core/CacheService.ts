@@ -70,13 +70,34 @@ export class CacheService {
     ];
 
     let totalDeleted = 0;
+    const allDeletedKeys: string[] = [];
+    
     for (const pattern of patterns) {
+      // Get keys that match pattern before deletion (for debugging)
+      if (redisConfig.isAvailable()) {
+        try {
+          const client = redisConfig.getClient();
+          if (client) {
+            const matchingKeys = await client.keys(pattern);
+            allDeletedKeys.push(...matchingKeys);
+          }
+        } catch (e) {
+          // Ignore errors in debug lookup
+        }
+      }
+      
       const deleted = await redisConfig.delPattern(pattern);
       totalDeleted += deleted;
     }
 
     if (totalDeleted > 0) {
-      console.log(`🗑️  Invalidated ${totalDeleted} cache entries for user: ${userId}`);
+      // Show which keys were deleted (without the prefix for readability)
+      const keyNames = allDeletedKeys.map(k => {
+        const parts = k.split(':');
+        return parts.length > 1 ? parts.slice(1).join(':') : k;
+      }).join(', ');
+      const keyInfo = keyNames ? ` (${keyNames})` : '';
+      console.log(`🗑️  Invalidated ${totalDeleted} cache entries for user: ${userId}${keyInfo}`);
     }
   }
 
