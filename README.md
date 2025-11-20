@@ -45,11 +45,15 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Pattern Analytics** - Peak hours, weekend patterns
 - [x] **API Integration** - Optional `?includeWrapped=true` parameter (backward compatible)
 
-#### Phase 3: Monitoring & Operations (Week 6)
-- [ ] **Structured Logging** - Winston with log aggregation
-- [ ] **APM Integration** - Application performance monitoring
-- [ ] **Database Backups** - Automated daily backups
-- [ ] **Alerting** - Error rate and performance alerts
+#### Phase 3: Monitoring & Operations (Week 6) ✅
+- [x] **Centralized Logging** - Winston logger with dynamic log levels (no restart required)
+- [x] **Zoom Capability** - Switch to debug mode via API for detailed troubleshooting
+- [x] **In-Memory Log Buffer** - Last 1000 logs queryable via API
+- [x] **Better Stack Integration** - Optional cloud aggregation for 30+ day retention
+- [x] **Sentry Integration** - Complete error tracking and APM with performance monitoring
+- [x] **APM Integration** - Application performance monitoring via Sentry
+- [x] **Database Backups** - Automated daily backups with retention policy
+- [x] **Alerting** - Error rate and performance alerts with health monitoring
 
 #### Phase 4: Scale Preparation (Weeks 7-8)
 - [ ] **Async Job Queue** - Background CSV processing
@@ -58,10 +62,11 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [ ] **Load Balancing** - Multi-instance support
 
 ### 📊 Current Status
-**Timeline:** Phase 1 ✅ | Phase 2 ✅ | Wrapped Analytics ✅ | MVP Ready! 🚀  
+**Timeline:** Phase 1 ✅ | Phase 2 ✅ | Wrapped Analytics ✅ | Phase 3 ✅ | Production Ready! 🚀  
 **Load Tested:** 100% success (sustained: 50 users, spike: 1000 users)  
 **Performance:** p95: 630ms, p99: 648ms, wrapped: <30ms  
 **Features:** 13 viral-worthy analytics (shame, flex, comparative, patterns)  
+**Monitoring:** Structured logging, Sentry APM, automated backups, alerting  
 **Deployment:** Validated for Railway/Render (500-1000+ users)  
 **Next:** Frontend integration & polish → Production launch
 
@@ -180,26 +185,296 @@ cd tests
 **Test Documentation:** See [`tests/README.md`](tests/README.md) for details  
 **Workflow file:** `.github/workflows/ci.yml`
 
-## 🚨 Error Tracking with Sentry
+## 📊 Phase 3: Monitoring & Operations
 
-The API includes Sentry integration for production error monitoring:
+### Centralized Logging System
+
+All application logs are centralized through Winston logger with dynamic log levels and accessible storage.
+
+**Features:**
+- ✅ **Centralized logging** - All logs through Winston logger
+- ✅ **Dynamic log levels** - Change at runtime via API (no restart required)
+- ✅ **Zoom capability** - Switch to debug mode for detailed troubleshooting
+- ✅ **In-memory buffer** - Last 1000 logs queryable via API
+- ✅ **Better Stack integration** - Optional cloud aggregation for 30+ day retention
+
+### Quick How-To Guide
+
+#### Viewing Logs
+
+**Railway Dashboard (Real-time):**
+```bash
+# View logs in Railway dashboard → Service → Logs tab
+# Logs are automatically captured from stdout/stderr
+# Human-readable format for easy scanning
+```
+
+**Via API (Recent Logs):**
+```bash
+# Get recent logs (last 100 entries)
+curl https://snacktrackapi-production.up.railway.app/monitoring/logs
+
+# Filter by log level
+curl https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=50
+
+# Get logs since specific time
+curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?since=2025-11-20T10:00:00Z"
+```
+
+#### Zooming In on Issues (Dynamic Log Level)
+
+**No restart required** - change log level at runtime:
+
+```bash
+# 1. Check current log level
+curl https://snacktrackapi-production.up.railway.app/monitoring/log-level
+# Returns: { "level": "info", "availableLevels": ["error", "warn", "info", "debug"] }
+
+# 2. Change to debug mode (immediate effect, no restart)
+curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
+  -H "Content-Type: application/json" \
+  -d '{"level": "debug"}'
+# Returns: { "success": true, "oldLevel": "info", "newLevel": "debug" }
+
+# 3. Get detailed logs with full context
+curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=100"
+```
+
+**Log Levels:**
+- `error` - Errors only
+- `warn` - Warnings and errors
+- `info` - Normal operation (default) - clean, scannable logs
+- `debug` - Full details - IP addresses, user agents, stack traces, all metadata
+
+#### Long-Term Storage (30+ Days)
+
+**Option 1: Better Stack/Logtail (Recommended)**
+```bash
+# Set in Railway environment variables
+LOGTAIL_TOKEN=your_token_here
+
+# Benefits:
+# - 30+ day retention (configurable)
+# - Advanced search and filtering
+# - Alerts and notifications
+# - Free tier: 1GB/month
+```
+
+**Option 2: In-Memory Buffer (Recent Logs Only)**
+```bash
+# Last 1000 logs available via API
+curl https://snacktrackapi-production.up.railway.app/monitoring/logs?limit=1000
+```
+
+### Log Format
+
+**Info Level (Default) - Clean & Scannable:**
+```
+20:31:04  GET    200  /health     1ms
+20:31:04  POST   400  /auth/register     7ms
+20:31:04  ✗  Error occurred  |  method=POST url=/auth/register
+```
+
+**Debug Level - Full Details:**
+```
+20:31:04  GET    200  /health     1ms  |  ip=::ffff:172.18.0.1 ua=curl/8.17.0
+20:31:04  ✗  Error occurred  |  method=POST url=/auth/register ip=::ffff:172.18.0.1
+  SyntaxError: Unexpected token...
+    at JSON.parse (<anonymous>)
+    at parse (/usr/src/app/node_modules/body-parser/...)
+```
+
+### Helpful Commands
+
+```bash
+# Check current log level
+curl https://snacktrackapi-production.up.railway.app/monitoring/log-level
+
+# Change to debug (no restart)
+curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
+  -H "Content-Type: application/json" -d '{"level": "debug"}'
+
+# Get recent errors
+curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=50"
+
+# Get logs since specific time
+curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?since=2025-11-20T10:00:00Z&limit=100"
+
+# Change back to info
+curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
+  -H "Content-Type: application/json" -d '{"level": "info"}'
+```
+
+### Configuration
+
+**Environment Variables:**
+```bash
+# Log level (default: 'info')
+LOG_LEVEL=info
+
+# Better Stack/Logtail token (optional, for long-term storage)
+LOGTAIL_TOKEN=your_token_here
+```
+
+### Complete Sentry Integration
+
+Sentry is now fully integrated with enhanced features:
+
+**Features:**
+- ✅ **Error Tracking** - Automatic 5xx error capture
+- ✅ **Performance Monitoring (APM)** - HTTP request tracing, custom transactions
+- ✅ **User Context** - Automatic user tracking in error reports
+- ✅ **Breadcrumbs** - Request and operation breadcrumbs for debugging
+- ✅ **Custom Transactions** - Performance tracking for critical operations
+- ✅ **Sensitive Data Filtering** - Automatic password/token removal
+
+**APM Features:**
+- HTTP request tracing (10% sampling in prod, 100% in dev)
+- Custom transaction tracking
+- Performance span measurements
+- Database query latency tracking
+
+**Usage in Code:**
+```typescript
+import { sentryConfig } from './config/sentry';
+
+// Add breadcrumb
+sentryConfig.addBreadcrumb('Operation started', 'custom', { data: 'value' });
+
+// Start custom transaction
+const transaction = sentryConfig.startTransaction('Import CSV', 'task');
+// ... do work ...
+transaction?.finish();
+
+// Add performance span
+const span = sentryConfig.addSpan('Database Query', 'Query users');
+// ... do query ...
+span?.finish();
+```
+
+### Database Backups
+
+Automated database backup system with retention policy:
+
+**Features:**
+- **Automated backups** - Compressed SQL dumps
+- **Retention policy** - Keeps last 30 days (configurable)
+- **Timestamped files** - Easy to identify backup dates
+- **Error handling** - Comprehensive logging and error reporting
+
+**Usage:**
+```bash
+# Manual backup
+./scripts/backup-database.sh
+
+# Automated daily backup (add to crontab)
+0 2 * * * /path/to/scripts/backup-database.sh
+```
+
+**Configuration (Environment Variables):**
+```bash
+BACKUP_DIR=./backups          # Backup directory
+RETENTION_DAYS=30              # Days to retain backups
+DB_HOST=localhost              # Database host
+DB_PORT=5432                   # Database port
+DB_NAME=snacktrack_dev        # Database name
+DB_USER=snacktrack            # Database user
+DB_PASSWORD=password           # Database password
+```
+
+**Backup Files:**
+- Format: `snacktrack_backup_YYYYMMDD_HHMMSS.sql.gz`
+- Location: `./backups/` (or `BACKUP_DIR`)
+- Logs: `./backups/backup.log`
+
+### Alerting System
+
+Comprehensive alerting system for error rates and performance:
+
+**Features:**
+- **Error Rate Monitoring** - Tracks errors per minute
+- **Performance Monitoring** - p95 response time tracking
+- **Database Health** - Database latency monitoring
+- **Automatic Alerts** - Sentry integration for alert notifications
+- **Health Status API** - Real-time health status endpoint
+
+**Alert Thresholds (Configurable):**
+- Error rate: 10 errors/minute
+- Response time: 2000ms p95
+- Database latency: 1000ms
+- Error count: 50 errors in 5-minute window
+
+**Monitoring Endpoints:**
+```bash
+# Get system health status (public)
+GET /monitoring/health
+
+# Get alert status (public)
+GET /monitoring/alerts
+
+# Get current log level (public)
+GET /monitoring/log-level
+
+# Change log level dynamically (public, no restart required)
+POST /monitoring/log-level
+Content-Type: application/json
+{ "level": "debug" }
+
+# Get recent logs from in-memory buffer (public)
+GET /monitoring/logs?level=error&limit=50&since=2025-11-20T10:00:00Z
+```
+
+**Response Example:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "metrics": {
+    "errorCount": 2,
+    "requestCount": 150,
+    "errorRate": 0.4,
+    "avgResponseTime": 245,
+    "p95ResponseTime": 630
+  },
+  "thresholds": {
+    "errorRate": 10,
+    "responseTime": 2000,
+    "databaseLatency": 1000,
+    "errorCount": 50
+  }
+}
+```
+
+## 🚨 Error Tracking with Sentry (Phase 3 Enhanced)
+
+The API includes **complete Sentry integration** with error tracking and APM:
 
 ### Configuration
 ```bash
-# Optional - only needed for production error tracking
+# Required for production error tracking and APM
 SENTRY_DSN=your_sentry_dsn_here
+SENTRY_RELEASE=1.0.0  # Optional: version tracking
 ```
 
-### Features
-- **Automatic error capture** - All 5xx errors sent to Sentry
-- **User context** - Errors include user ID and email for debugging
-- **Sensitive data filtering** - Passwords and tokens automatically removed
-- **Performance monitoring** - Track slow endpoints and database queries
-- **Free tier compatible** - 5,000 errors/month, easy upgrade path
+### Enhanced Features (Phase 3)
+- ✅ **Automatic error capture** - All 5xx errors sent to Sentry
+- ✅ **Performance Monitoring (APM)** - HTTP request tracing (10% sampling in prod)
+- ✅ **User context** - Automatic user tracking in error reports
+- ✅ **Breadcrumbs** - Request and operation breadcrumbs for debugging
+- ✅ **Custom transactions** - Performance tracking for critical operations
+- ✅ **Sensitive data filtering** - Passwords and tokens automatically removed
+- ✅ **Free tier compatible** - 5,000 errors/month, 10k transactions/month
+
+### APM Features
+- HTTP request tracing with response times
+- Custom transaction tracking for background jobs
+- Performance span measurements
+- Database query latency tracking (via breadcrumbs)
 
 ### Usage
 - **Development:** Sentry disabled by default (no DSN required)
 - **Production:** Set `SENTRY_DSN` environment variable to enable
+- **Sampling:** 100% errors, 10% performance in prod (configurable)
 - **Upgrade:** Change nothing - scales from free tier to paid seamlessly
 
 ### Setup Timing
@@ -209,7 +484,7 @@ SENTRY_DSN=your_sentry_dsn_here
 2. Create a new project (select Node.js/Express)
 3. Copy your DSN
 4. Add `SENTRY_DSN` to your production environment variables
-5. Deploy - errors will immediately start being tracked
+5. Deploy - errors and performance data will immediately start being tracked
 
 **Why before deployment?** You want error tracking active from day 1 so you catch any deployment issues immediately.
 
@@ -349,8 +624,13 @@ Use the pre-configured test account `snacktracktest@gmail.com`
 ### 🧾 Receipt Endpoints
 - `GET /receipts` - Get all receipts with filtering options
 
+### 📊 Monitoring Endpoints
+- `GET /monitoring/health` - Get detailed system health status with metrics
+- `GET /monitoring/alerts` - Get current alerting status and thresholds
+
 ### 🔧 System Endpoints
 - `GET /` - Health check
+- `GET /health` - Detailed health check with database connectivity
 
 ### Example Usage
 ```bash

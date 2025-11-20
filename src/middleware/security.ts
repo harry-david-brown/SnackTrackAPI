@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/AppConfig';
+import { logger } from '../config/logger';
 
 // Rate limiting configurations
 const createRateLimit = (windowMs: number, max: number, message?: string) => {
@@ -297,24 +298,30 @@ export const securityLogger = (req: Request, res: Response, next: NextFunction) 
   const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(requestString));
   
   if (isSuspicious) {
-    console.warn(`
-🚨 SUSPICIOUS REQUEST DETECTED
-   IP: ${clientIP}
-   Method: ${req.method}
-   URL: ${req.originalUrl}
-   User-Agent: ${userAgent}
-   Body: ${JSON.stringify(req.body)}
-   Time: ${new Date().toISOString()}
-`);
+    logger.warn('Suspicious request detected', {
+      ip: clientIP,
+      method: req.method,
+      url: req.originalUrl || req.url,
+      userAgent,
+      body: req.body,
+      pattern: suspiciousPatterns.find(p => p.test(requestString))?.toString()
+    });
   }
   
-  // Log response time
+  // Log response time for slow or failed requests (consolidated with main request logger)
   res.on('finish', () => {
     const duration = Date.now() - start;
     const statusCode = res.statusCode;
     
-    if (statusCode >= 400 || duration > 5000) {
-      console.log(`📊 ${req.method} ${req.originalUrl} - ${statusCode} - ${duration}ms - IP: ${clientIP}`);
+    // Only log if it's a security concern (very slow or error)
+    if (statusCode >= 500 || duration > 5000) {
+      logger.warn('Security event', {
+        method: req.method,
+        url: req.originalUrl || req.url,
+        statusCode,
+        responseTime: duration,
+        ip: clientIP
+      });
     }
   });
   

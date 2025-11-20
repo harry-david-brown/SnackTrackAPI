@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { sentryConfig } from '../config/sentry';
+import { logger, logError } from '../config/logger';
 
 // Custom error classes for different types of errors
 export class AppError extends Error {
@@ -49,22 +50,24 @@ export class AuthorizationError extends AppError {
 }
 
 // Error logging utility
-export const logError = (error: Error, req?: Request) => {
-  const timestamp = new Date().toISOString();
+export const logErrorToSentry = (error: Error, req?: Request) => {
   const method = req?.method || 'UNKNOWN';
   const url = req?.originalUrl || 'UNKNOWN';
   const userAgent = req?.get('User-Agent') || 'UNKNOWN';
   const ip = req?.ip || req?.connection?.remoteAddress || 'UNKNOWN';
 
-  console.error(`
-🚨 ERROR [${timestamp}]
-   Method: ${method}
-   URL: ${url}
-   IP: ${ip}
-   User-Agent: ${userAgent}
-   Error: ${error.message}
-   Stack: ${error.stack}
-`);
+  // Log using Winston logger (only include userId if it exists)
+  const logMetadata: any = {
+    method,
+    url,
+    ip,
+    userAgent
+  };
+  const userId = (req as any)?.user?.userId;
+  if (userId) {
+    logMetadata.userId = userId;
+  }
+  logError(error, logMetadata);
 
   // Send to Sentry for production monitoring
   if (sentryConfig.isEnabled()) {
@@ -97,7 +100,7 @@ export const errorHandler = (
   next: NextFunction
 ) => {
   // Log the error
-  logError(error, req);
+  logErrorToSentry(error, req);
 
   // Handle known error types
   if (error instanceof AppError) {

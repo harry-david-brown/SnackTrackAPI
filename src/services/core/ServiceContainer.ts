@@ -10,6 +10,7 @@ import { AuthService } from '../AuthService';
 import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
 import { OtpService } from '../OtpService';
 import { EmailSenderService } from '../email/EmailSender';
+import { AlertingService } from '../monitoring/AlertingService';
 
 /**
  * Simple service container for dependency injection
@@ -63,6 +64,9 @@ export class ServiceContainer {
     // OTP and Email services
     this.services.set('otpService', new OtpService(this.get('postgres')));
     this.services.set('emailSender', new EmailSenderService());
+    
+    // Monitoring services
+    this.services.set('alertingService', new AlertingService(this.get('postgres')));
   }
 
   get<T>(serviceName: string): T {
@@ -120,6 +124,10 @@ export class ServiceContainer {
 
   get emailSender(): EmailSenderService {
     return this.get<EmailSenderService>('emailSender');
+  }
+
+  get alertingService(): AlertingService {
+    return this.get<AlertingService>('alertingService');
   }
 }
 
