@@ -456,11 +456,23 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     if (!planObj) {
       throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
     }
-    const indexUsed = planObj?.['Node Type'] === 'Index Scan' || 
-                      planObj?.['Node Type'] === 'Bitmap Index Scan' ||
-                      (planObj?.['Plans'] || []).some((p: any) => 
-                        p['Node Type'] === 'Index Scan' || p['Node Type'] === 'Bitmap Index Scan'
-                      );
+    
+    // Check for index usage - can be at top level or in Plans array
+    // PostgreSQL uses "Node Type" (with space) in JSON format
+    const checkIndexUsage = (node: any): boolean => {
+      if (!node) return false;
+      const nodeType = node['Node Type'] || node['Node_Type'];
+      if (nodeType === 'Index Scan' || nodeType === 'Bitmap Index Scan' || nodeType === 'Bitmap Heap Scan') {
+        return true;
+      }
+      // Recursively check Plans array
+      if (node['Plans'] && Array.isArray(node['Plans'])) {
+        return node['Plans'].some((p: any) => checkIndexUsage(p));
+      }
+      return false;
+    };
+    
+    const indexUsed = checkIndexUsage(planObj);
 
     results.tests.push({
       name: 'Get all receipts for user (ORDER BY order_date DESC)',
@@ -517,8 +529,18 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     if (!planObj) {
       throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
     }
-    const indexUsed = planObj?.['Node Type'] === 'Index Scan' || 
-                      planObj?.['Node Type'] === 'Bitmap Index Scan';
+    const checkIndexUsage = (node: any): boolean => {
+      if (!node) return false;
+      const nodeType = node['Node Type'] || node['Node_Type'];
+      if (nodeType === 'Index Scan' || nodeType === 'Bitmap Index Scan' || nodeType === 'Bitmap Heap Scan') {
+        return true;
+      }
+      if (node['Plans'] && Array.isArray(node['Plans'])) {
+        return node['Plans'].some((p: any) => checkIndexUsage(p));
+      }
+      return false;
+    };
+    const indexUsed = checkIndexUsage(planObj);
 
     results.tests.push({
       name: 'Sum total spent (aggregation)',
@@ -529,8 +551,22 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
       rowsReturned: planObj?.['Actual Rows'] || 0,
       indexUsed,
-      nodeType: planObj?.['Node Type'],
-      indexName: planObj?.['Index Name'] || 'N/A',
+      nodeType: planObj?.['Node Type'] || planObj?.['Node_Type'],
+      indexName: (() => {
+        const findIndexName = (node: any): string | null => {
+          if (!node) return null;
+          const idxName = node['Index Name'] || node['Index_Name'];
+          if (idxName) return idxName;
+          if (node['Plans'] && Array.isArray(node['Plans'])) {
+            for (const p of node['Plans']) {
+              const found = findIndexName(p);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+        return findIndexName(planObj) || 'N/A';
+      })(),
       queryPlan: planObj
     });
   } catch (error: any) {
@@ -640,10 +676,16 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     if (!planObj) {
       throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
     }
-    const ginIndexUsed = planObj?.['Index Name']?.includes('items_gin') ||
-                        (planObj?.['Plans'] || []).some((p: any) => 
-                          p['Index Name']?.includes('items_gin')
-                        );
+    const findGINIndex = (node: any): boolean => {
+      if (!node) return false;
+      const idxName = node['Index Name'] || node['Index_Name'];
+      if (idxName && idxName.includes('items_gin')) return true;
+      if (node['Plans'] && Array.isArray(node['Plans'])) {
+        return node['Plans'].some((p: any) => findGINIndex(p));
+      }
+      return false;
+    };
+    const ginIndexUsed = findGINIndex(planObj);
 
     results.tests.push({
       name: 'JSONB items search (GIN index test)',
