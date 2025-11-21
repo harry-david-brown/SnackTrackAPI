@@ -19,6 +19,7 @@ import { setupSwagger } from './config/swagger';
 import { sentryConfig } from './config/sentry';
 import { redisConfig } from './config/redis';
 import { logger, logRequest } from './config/logger';
+import * as Sentry from '@sentry/node';
 
 // Helper to get log level (for conditional logging)
 const getLogLevel = (): string => {
@@ -176,7 +177,8 @@ app.use('/database', databaseRouter);
 app.use('/monitoring', monitoringRouter);
 
 // Error handling middleware (must be last)
-// Note: Sentry errors are captured via sentryConfig.captureError() in errorHandler
+// Note: Sentry error capture is handled automatically by expressIntegration
+// Our custom error handler (logs to Winston and handles response formatting)
 app.use(errorHandler);
 
 const PORT = config.getServerPort();

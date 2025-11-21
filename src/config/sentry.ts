@@ -83,6 +83,8 @@ class SentryConfigManager {
       integrations: [
         Sentry.httpIntegration(),
         Sentry.expressIntegration(),
+        // Note: PostgreSQL query tracing is handled automatically via httpIntegration
+        // when using the pg library with connection pooling
       ],
 
       // Don't send sensitive data
