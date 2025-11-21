@@ -38,17 +38,6 @@ class SentryConfigManager {
     const release = process.env.SENTRY_RELEASE || this.getVersion();
 
     const enabled = !!dsn && environment !== 'test';
-    
-    // Log Sentry configuration status with detailed debugging
-    logger.info('Sentry configuration check', {
-      hasDSN: !!dsn,
-      dsnLength: dsn.length,
-      dsnPreview: dsn ? `${dsn.substring(0, 20)}...` : 'empty',
-      environment,
-      release,
-      enabled,
-      reason: !dsn ? 'No SENTRY_DSN environment variable' : environment === 'test' ? 'Test environment' : enabled ? 'Enabled' : 'Unknown reason'
-    });
 
     return {
       dsn,
@@ -77,12 +66,7 @@ class SentryConfigManager {
    */
   initialize(app: Express): void {
     if (!this.config.enabled) {
-      logger.warn('Sentry disabled - not initializing', {
-        hasDSN: !!this.config.dsn,
-        dsnLength: this.config.dsn.length,
-        environment: this.config.environment,
-        reason: !this.config.dsn ? 'SENTRY_DSN environment variable not set' : this.config.environment === 'test' ? 'Test environment' : 'Unknown'
-      });
+      logger.info('Sentry disabled (SENTRY_DSN not configured)');
       return;
     }
 
@@ -178,12 +162,9 @@ class SentryConfigManager {
       });
       
       const eventId = Sentry.captureException(error);
-      logger.info('Error sent to Sentry', {
+      logger.debug('Error sent to Sentry', {
         errorMessage: error.message,
-        eventId,
-        hasContext: !!context,
-        sentryEnabled: this.config.enabled,
-        hasDSN: !!this.config.dsn
+        eventId
       });
       
       // Flush in background (don't await - let it send asynchronously)

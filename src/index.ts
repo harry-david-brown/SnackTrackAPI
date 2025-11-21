@@ -165,23 +165,6 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 // Setup Swagger documentation
 setupSwagger(app);
 
-// Sentry request handler (must be before routes for tracing)
-if (sentryConfig.isEnabled()) {
-  // In Sentry v10, expressIntegration handles this, but we add request handler explicitly
-  // to ensure request context is captured
-  app.use((req, res, next) => {
-    Sentry.setContext('http', {
-      method: req.method,
-      url: req.url,
-      headers: {
-        'user-agent': req.get('user-agent'),
-        'referer': req.get('referer')
-      }
-    });
-    next();
-  });
-}
-
 // Mount routers
 app.use('/auth', authRouter);
 app.use('/auth/password/reset', authPasswordResetRouter);

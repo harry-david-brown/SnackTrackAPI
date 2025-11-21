@@ -90,13 +90,6 @@ export const logErrorToSentry = (error: Error, req?: Request) => {
         ip
       });
     }
-  } else {
-    // Log when Sentry is disabled for debugging
-    logger.warn('Sentry is disabled, error not sent', {
-      errorMessage: error.message,
-      hasDSN: !!process.env.SENTRY_DSN,
-      nodeEnv: process.env.NODE_ENV
-    });
   }
 };
 
