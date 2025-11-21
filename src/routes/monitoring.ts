@@ -422,7 +422,28 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     `, [userId]);
     const executionTime = Date.now() - start;
     
-    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    // EXPLAIN with FORMAT JSON returns the plan in a specific structure
+    // The column name is typically 'QUERY PLAN' (case-sensitive in pg)
+    const planData = explainResult.rows[0];
+    let plan: any;
+    
+    // Try different possible column names
+    if (planData['QUERY PLAN']) {
+      const queryPlan = planData['QUERY PLAN'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else if (planData['query plan']) {
+      const queryPlan = planData['query plan'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else {
+      // Fallback: get first value
+      const firstKey = Object.keys(planData)[0];
+      const firstValue = planData[firstKey];
+      plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
+    }
+    
+    if (!plan || !plan.Plan) {
+      throw new Error('Invalid query plan structure');
+    }
     const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
                       plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
                       (plan['Plan']?.['Plans'] || []).some((p: any) => 
@@ -462,7 +483,24 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     `, [userId]);
     const executionTime = Date.now() - start;
     
-    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const planData = explainResult.rows[0];
+    let plan: any;
+    
+    if (planData['QUERY PLAN']) {
+      const queryPlan = planData['QUERY PLAN'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else if (planData['query plan']) {
+      const queryPlan = planData['query plan'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else {
+      const firstKey = Object.keys(planData)[0];
+      const firstValue = planData[firstKey];
+      plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
+    }
+    
+    if (!plan || !plan.Plan) {
+      throw new Error('Invalid query plan structure');
+    }
     const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
                       plan['Plan']?.['Node Type'] === 'Bitmap Index Scan';
 
@@ -502,7 +540,24 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     `, [userId, startDate, endDate]);
     const executionTime = Date.now() - start;
     
-    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const planData = explainResult.rows[0];
+    let plan: any;
+    
+    if (planData['QUERY PLAN']) {
+      const queryPlan = planData['QUERY PLAN'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else if (planData['query plan']) {
+      const queryPlan = planData['query plan'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else {
+      const firstKey = Object.keys(planData)[0];
+      const firstValue = planData[firstKey];
+      plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
+    }
+    
+    if (!plan || !plan.Plan) {
+      throw new Error('Invalid query plan structure');
+    }
     const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
                       plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
                       (plan['Plan']?.['Plans'] || []).some((p: any) => 
@@ -543,7 +598,24 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
     `, [userId]);
     const executionTime = Date.now() - start;
     
-    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const planData = explainResult.rows[0];
+    let plan: any;
+    
+    if (planData['QUERY PLAN']) {
+      const queryPlan = planData['QUERY PLAN'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else if (planData['query plan']) {
+      const queryPlan = planData['query plan'];
+      plan = Array.isArray(queryPlan) ? queryPlan[0] : queryPlan;
+    } else {
+      const firstKey = Object.keys(planData)[0];
+      const firstValue = planData[firstKey];
+      plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
+    }
+    
+    if (!plan || !plan.Plan) {
+      throw new Error('Invalid query plan structure');
+    }
     const ginIndexUsed = plan['Plan']?.['Index Name']?.includes('items_gin') ||
                         (plan['Plan']?.['Plans'] || []).some((p: any) => 
                           p['Index Name']?.includes('items_gin')
