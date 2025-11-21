@@ -386,7 +386,6 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
         SELECT DISTINCT user_id 
         FROM receipts 
         WHERE user_id IS NOT NULL 
-        ORDER BY created_at DESC 
         LIMIT 1
       `);
       
