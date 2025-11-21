@@ -357,5 +357,238 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
   });
 }));
 
+/**
+ * @swagger
+ * /monitoring/query-performance:
+ *   get:
+ *     summary: Test database query performance (bypasses Redis cache)
+ *     description: Runs EXPLAIN ANALYZE on common queries to verify index usage and performance
+ *     tags: [Monitoring]
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User ID to test queries for
+ *     responses:
+ *       200:
+ *         description: Query performance analysis
+ */
+router.get('/query-performance', asyncHandler(async (req: Request, res: Response) => {
+  let { userId } = req.query;
+  const postgres = container.postgres;
+
+  // If no userId provided, find a user with receipts
+  if (!userId || typeof userId !== 'string') {
+    const userWithReceipts = await postgres.query(`
+      SELECT DISTINCT user_id 
+      FROM receipts 
+      WHERE user_id IS NOT NULL 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `);
+    
+    if (userWithReceipts.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'No users with receipts found. Please provide a userId query parameter.' 
+      });
+    }
+    
+    userId = userWithReceipts.rows[0].user_id;
+  }
+
+  // Verify user exists
+  const userCheck = await postgres.query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (userCheck.rows.length === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const results: any = {
+    userId,
+    timestamp: new Date().toISOString(),
+    note: 'These queries bypass Redis cache and show raw database performance. If no userId was provided, a user with receipts was automatically selected.',
+    tests: []
+  };
+
+  // Test 1: Get all receipts for user (most common query)
+  try {
+    const start = Date.now();
+    const explainResult = await postgres.query(`
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+      SELECT * FROM receipts 
+      WHERE user_id = $1 
+      ORDER BY order_date DESC
+    `, [userId]);
+    const executionTime = Date.now() - start;
+    
+    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
+                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
+                      (plan['Plan']?.['Plans'] || []).some((p: any) => 
+                        p['Node Type'] === 'Index Scan' || p['Node Type'] === 'Bitmap Index Scan'
+                      );
+
+    results.tests.push({
+      name: 'Get all receipts for user (ORDER BY order_date DESC)',
+      query: 'SELECT * FROM receipts WHERE user_id = $1 ORDER BY order_date DESC',
+      executionTimeMs: executionTime,
+      planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
+      planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
+      totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
+      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      indexUsed,
+      nodeType: plan['Plan']?.['Node Type'],
+      indexName: plan['Plan']?.['Index Name'] || 
+                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+                 'N/A',
+      queryPlan: plan['Plan']
+    });
+  } catch (error: any) {
+    results.tests.push({
+      name: 'Get all receipts for user',
+      error: error.message
+    });
+  }
+
+  // Test 2: Sum total spent (aggregation query)
+  try {
+    const start = Date.now();
+    const explainResult = await postgres.query(`
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+      SELECT COALESCE(SUM(amount_spent), 0) as total 
+      FROM receipts 
+      WHERE user_id = $1
+    `, [userId]);
+    const executionTime = Date.now() - start;
+    
+    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
+                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan';
+
+    results.tests.push({
+      name: 'Sum total spent (aggregation)',
+      query: 'SELECT COALESCE(SUM(amount_spent), 0) FROM receipts WHERE user_id = $1',
+      executionTimeMs: executionTime,
+      planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
+      planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
+      totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
+      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      indexUsed,
+      nodeType: plan['Plan']?.['Node Type'],
+      indexName: plan['Plan']?.['Index Name'] || 'N/A',
+      queryPlan: plan['Plan']
+    });
+  } catch (error: any) {
+    results.tests.push({
+      name: 'Sum total spent',
+      error: error.message
+    });
+  }
+
+  // Test 3: Date range query (last 30 days)
+  try {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+
+    const start = Date.now();
+    const explainResult = await postgres.query(`
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+      SELECT * FROM receipts 
+      WHERE user_id = $1 
+      AND order_date BETWEEN $2 AND $3 
+      ORDER BY order_date DESC
+    `, [userId, startDate, endDate]);
+    const executionTime = Date.now() - start;
+    
+    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
+                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
+                      (plan['Plan']?.['Plans'] || []).some((p: any) => 
+                        p['Node Type'] === 'Index Scan' || p['Node Type'] === 'Bitmap Index Scan'
+                      );
+
+    results.tests.push({
+      name: 'Date range query (last 30 days)',
+      query: 'SELECT * FROM receipts WHERE user_id = $1 AND order_date BETWEEN $2 AND $3 ORDER BY order_date DESC',
+      executionTimeMs: executionTime,
+      planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
+      planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
+      totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
+      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      indexUsed,
+      nodeType: plan['Plan']?.['Node Type'],
+      indexName: plan['Plan']?.['Index Name'] || 
+                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+                 'N/A',
+      queryPlan: plan['Plan']
+    });
+  } catch (error: any) {
+    results.tests.push({
+      name: 'Date range query',
+      error: error.message
+    });
+  }
+
+  // Test 4: JSONB search (using GIN index)
+  try {
+    const start = Date.now();
+    const explainResult = await postgres.query(`
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+      SELECT * FROM receipts 
+      WHERE user_id = $1 
+      AND items @> '[{"name": "test"}]'::jsonb
+      LIMIT 10
+    `, [userId]);
+    const executionTime = Date.now() - start;
+    
+    const plan = explainResult.rows[0]['QUERY PLAN'][0];
+    const ginIndexUsed = plan['Plan']?.['Index Name']?.includes('items_gin') ||
+                        (plan['Plan']?.['Plans'] || []).some((p: any) => 
+                          p['Index Name']?.includes('items_gin')
+                        );
+
+    results.tests.push({
+      name: 'JSONB items search (GIN index test)',
+      query: 'SELECT * FROM receipts WHERE user_id = $1 AND items @> \'[{"name": "test"}]\'::jsonb',
+      executionTimeMs: executionTime,
+      planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
+      planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
+      totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
+      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      ginIndexUsed,
+      nodeType: plan['Plan']?.['Node Type'],
+      indexName: plan['Plan']?.['Index Name'] || 
+                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+                 'N/A',
+      queryPlan: plan['Plan']
+    });
+  } catch (error: any) {
+    results.tests.push({
+      name: 'JSONB items search',
+      error: error.message
+    });
+  }
+
+  // Summary
+  results.summary = {
+    totalTests: results.tests.length,
+    testsWithIndexes: results.tests.filter((t: any) => t.indexUsed || t.ginIndexUsed).length,
+    averageExecutionTime: results.tests
+      .filter((t: any) => t.executionTimeMs)
+      .reduce((sum: number, t: any) => sum + t.executionTimeMs, 0) / 
+      results.tests.filter((t: any) => t.executionTimeMs).length || 0,
+    fastestQuery: results.tests
+      .filter((t: any) => t.executionTimeMs)
+      .sort((a: any, b: any) => a.executionTimeMs - b.executionTimeMs)[0]?.name || 'N/A',
+    slowestQuery: results.tests
+      .filter((t: any) => t.executionTimeMs)
+      .sort((a: any, b: any) => b.executionTimeMs - a.executionTimeMs)[0]?.name || 'N/A'
+  };
+
+  res.json(results);
+}));
+
 export default router;
 

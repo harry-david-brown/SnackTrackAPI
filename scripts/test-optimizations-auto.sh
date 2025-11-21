@@ -124,7 +124,13 @@ echo ""
 
 # Test 5: Check Year Column
 echo -e "${BLUE}📅 Test 5: Year Column${NC}"
-YEAR_COLUMN=$(echo "$OPT_STATUS" | grep -o '"yearColumn":[^,]*' | grep -o 'true\|false' || echo "false")
+# Use jq if available, otherwise use a more specific grep pattern
+if command -v jq > /dev/null 2>&1; then
+  YEAR_COLUMN=$(echo "$OPT_STATUS" | jq -r '.optimizations.yearColumn // false' 2>/dev/null || echo "false")
+else
+  # Extract the optimizations object and then check yearColumn within it
+  YEAR_COLUMN=$(echo "$OPT_STATUS" | sed -n 's/.*"optimizations":{\([^}]*\)}.*/\1/p' | grep -o '"yearColumn":[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+fi
 
 if [ "$YEAR_COLUMN" = "true" ]; then
   echo -e "  ${GREEN}✅ Year column exists${NC}"
