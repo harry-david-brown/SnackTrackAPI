@@ -177,7 +177,12 @@ app.use('/database', databaseRouter);
 app.use('/monitoring', monitoringRouter);
 
 // Error handling middleware (must be last)
-// Note: Sentry error capture is handled automatically by expressIntegration
+// Sentry error handler must come before our custom error handler
+// This ensures Sentry captures the error before we format the response
+if (sentryConfig.isEnabled()) {
+  // Use Sentry's setupExpressErrorHandler for v10+
+  Sentry.setupExpressErrorHandler(app);
+}
 // Our custom error handler (logs to Winston and handles response formatting)
 app.use(errorHandler);
 

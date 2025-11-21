@@ -37,6 +37,23 @@ class SentryConfigManager {
     const environment = process.env.NODE_ENV || 'development';
     const release = process.env.SENTRY_RELEASE || this.getVersion();
 
+    const enabled = !!dsn && environment !== 'test';
+    
+    // Log Sentry configuration status
+    if (enabled) {
+      logger.info('Sentry configuration loaded', {
+        hasDSN: !!dsn,
+        environment,
+        release
+      });
+    } else {
+      logger.info('Sentry disabled', {
+        hasDSN: !!dsn,
+        environment,
+        reason: !dsn ? 'No SENTRY_DSN' : environment === 'test' ? 'Test environment' : 'Unknown'
+      });
+    }
+
     return {
       dsn,
       environment,
@@ -46,7 +63,7 @@ class SentryConfigManager {
       // Performance monitoring: Free tier gets 10k transactions/month
       // Sample less in prod to stay under free tier limits
       tracesSampleRate: environment === 'production' ? 0.1 : 1.0, // 10% in prod, 100% in dev
-      enabled: !!dsn && environment !== 'test'
+      enabled
     };
   }
 
@@ -139,22 +156,34 @@ class SentryConfigManager {
    */
   captureError(error: Error, context?: Record<string, any>): void {
     if (!this.config.enabled) {
+      logger.debug('Sentry captureError called but Sentry is disabled');
       return;
     }
 
-    if (context) {
-      Sentry.setContext('additional', context);
+    try {
+      if (context) {
+        Sentry.setContext('additional', context);
+      }
+      
+      // Add breadcrumb for error context
+      Sentry.addBreadcrumb({
+        message: `Error: ${error.message}`,
+        level: 'error',
+        category: 'error',
+        data: context
+      });
+      
+      Sentry.captureException(error);
+      logger.debug('Error sent to Sentry', {
+        errorMessage: error.message,
+        hasContext: !!context
+      });
+    } catch (sentryError) {
+      logger.error('Failed to send error to Sentry', {
+        originalError: error.message,
+        sentryError: sentryError instanceof Error ? sentryError.message : String(sentryError)
+      });
     }
-    
-    // Add breadcrumb for error context
-    Sentry.addBreadcrumb({
-      message: `Error: ${error.message}`,
-      level: 'error',
-      category: 'error',
-      data: context
-    });
-    
-    Sentry.captureException(error);
   }
 
   /**
