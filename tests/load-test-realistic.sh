@@ -4,13 +4,15 @@
 # Simulates real-world scenario with many different users
 # Each user makes reasonable number of requests
 
-API_URL="http://localhost:3000"
+API_URL="${API_URL:-http://localhost:3000}"
 NUM_USERS=50  # Simulate 50 different users
 REQUESTS_PER_USER=20  # Each user makes 20 requests
 TOTAL_REQUESTS=$((NUM_USERS * REQUESTS_PER_USER))
 
 echo "🔥 Realistic Load Test - Multiple Users"
 echo "========================================"
+echo ""
+echo "Testing against: $API_URL"
 echo ""
 echo "Configuration:"
 echo "  - Number of users: $NUM_USERS"

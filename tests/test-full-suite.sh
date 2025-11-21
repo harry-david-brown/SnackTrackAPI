@@ -3,8 +3,17 @@
 # Comprehensive Test Suite - Phase 2 Validation
 # Tests all critical functionality end-to-end
 
-API_URL="http://localhost:3000"
-UBER_ZIP="../MockUberData/Uber Data Request B18832D3.zip"
+API_URL="${API_URL:-http://localhost:3000}"
+# Try multiple possible paths for the Uber ZIP file
+if [ -f "../MockUberData/Uber Data Request B18832D3.zip" ]; then
+  UBER_ZIP="${UBER_ZIP:-../MockUberData/Uber Data Request B18832D3.zip}"
+elif [ -f "./MockUberData/Uber Data Request B18832D3.zip" ]; then
+  UBER_ZIP="${UBER_ZIP:-./MockUberData/Uber Data Request B18832D3.zip}"
+elif [ -f "MockUberData/Uber Data Request B18832D3.zip" ]; then
+  UBER_ZIP="${UBER_ZIP:-MockUberData/Uber Data Request B18832D3.zip}"
+else
+  UBER_ZIP="${UBER_ZIP:-}"
+fi
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -14,6 +23,8 @@ NC='\033[0m' # No Color
 
 echo "🧪 Full System Test Suite - Phase 2 Validation"
 echo "=============================================="
+echo ""
+echo "Testing against: $API_URL"
 echo ""
 
 # Test counter

@@ -4,11 +4,13 @@
 # All users make 1 request simultaneously
 # Tests maximum burst capacity
 
-API_URL="http://localhost:3000"
+API_URL="${API_URL:-http://localhost:3000}"
 CONCURRENT_USERS=1000
 
 echo "💥 Spike Test - 1000 Concurrent Users"
 echo "======================================"
+echo ""
+echo "Testing against: $API_URL"
 echo ""
 echo "Configuration:"
 echo "  - Concurrent users: $CONCURRENT_USERS"

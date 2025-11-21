@@ -4,13 +4,15 @@
 # Tests API under load without requiring k6 installation
 # Simulates 100 concurrent users making requests
 
-API_URL="http://localhost:3000"
+API_URL="${API_URL:-http://localhost:3000}"
 CONCURRENT_USERS=1000
 REQUESTS_PER_USER=5
 TOTAL_REQUESTS=$((CONCURRENT_USERS * REQUESTS_PER_USER))
 
 echo "🔥 Load Test - Concurrent User Simulation"
 echo "=========================================="
+echo ""
+echo "Testing against: $API_URL"
 echo ""
 echo "Configuration:"
 echo "  - Concurrent users: $CONCURRENT_USERS"
