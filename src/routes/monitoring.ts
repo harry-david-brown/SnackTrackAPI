@@ -211,5 +211,21 @@ router.get('/cache', asyncHandler(async (req: Request, res: Response) => {
   });
 }));
 
+/**
+ * @swagger
+ * /monitoring/test-sentry:
+ *   get:
+ *     summary: Test Sentry error capture
+ *     description: Intentionally triggers an error to test Sentry integration
+ *     tags: [Monitoring]
+ *     responses:
+ *       500:
+ *         description: Test error (this is expected)
+ */
+router.get('/test-sentry', asyncHandler(async (req: Request, res: Response) => {
+  // Intentionally throw an error to test Sentry
+  throw new Error('Sentry test error - This is intentional to verify error tracking is working');
+}));
+
 export default router;
 
