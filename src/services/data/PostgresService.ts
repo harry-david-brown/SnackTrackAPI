@@ -245,10 +245,100 @@ export class PostgresService {
       `);
 
       console.log('✅ Performance indexes created');
+
+      // Phase 3: Additional Optimizations
+      console.log('🔧 Applying additional database optimizations...');
+      await this.applyAdditionalOptimizations();
+
       console.log('✅ Database tables initialized successfully');
     } catch (error) {
       console.error('❌ Error initializing database tables:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Apply additional optimizations for scalability
+   */
+  private async applyAdditionalOptimizations(): Promise<void> {
+    try {
+      // 1. Add GIN index on JSONB items column for item searches
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_items_gin 
+        ON receipts USING GIN (items)
+      `);
+
+      // 2. Add partial indexes for common query patterns
+      // Index for receipts with order_date (most queries filter by date)
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_has_date 
+        ON receipts(user_id, order_date DESC) 
+        WHERE order_date IS NOT NULL
+      `);
+
+      // Index for recent receipts (last 2 years) - most common query
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_recent 
+        ON receipts(user_id, order_date DESC) 
+        WHERE order_date >= NOW() - INTERVAL '2 years'
+      `);
+
+      // Index for receipts with restaurant names (for analytics)
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_has_restaurant 
+        ON receipts(user_id, restaurant_name) 
+        WHERE restaurant_name IS NOT NULL
+      `);
+
+      // 3. Add year column for easier partitioning/archiving
+      await this.query(`
+        ALTER TABLE receipts 
+        ADD COLUMN IF NOT EXISTS year INTEGER
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_year 
+        ON receipts(year, user_id)
+      `);
+
+      // Populate year column for existing rows
+      await this.query(`
+        UPDATE receipts 
+        SET year = EXTRACT(YEAR FROM order_date)::INTEGER 
+        WHERE year IS NULL AND order_date IS NOT NULL
+      `);
+
+      // Create trigger to auto-populate year on insert/update
+      await this.query(`
+        CREATE OR REPLACE FUNCTION update_receipt_year()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          IF NEW.order_date IS NOT NULL THEN
+            NEW.year := EXTRACT(YEAR FROM NEW.order_date)::INTEGER;
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+
+      await this.query(`
+        DROP TRIGGER IF EXISTS trigger_update_receipt_year ON receipts;
+        CREATE TRIGGER trigger_update_receipt_year
+        BEFORE INSERT OR UPDATE OF order_date ON receipts
+        FOR EACH ROW
+        EXECUTE FUNCTION update_receipt_year();
+      `);
+
+      // 4. Update table statistics for better query planning
+      await this.query('ANALYZE receipts');
+      await this.query('ANALYZE users');
+
+      console.log('✅ Additional optimizations applied');
+    } catch (error: any) {
+      // Some optimizations might fail if they already exist, that's okay
+      if (error.code !== '42P07' && error.code !== '42701') {
+        console.warn('⚠️  Some optimizations may have been skipped:', error.message);
+      }
     }
   }
 }

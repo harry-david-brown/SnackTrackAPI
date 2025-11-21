@@ -227,5 +227,136 @@ router.get('/test-sentry', asyncHandler(async (req: Request, res: Response) => {
   throw new Error('Sentry test error - This is intentional to verify error tracking is working');
 }));
 
+/**
+ * @swagger
+ * /monitoring/database-optimizations:
+ *   get:
+ *     summary: Get database optimization status
+ *     description: Returns information about database indexes, table sizes, and optimization status
+ *     tags: [Monitoring]
+ *     responses:
+ *       200:
+ *         description: Database optimization status
+ */
+router.get('/database-optimizations', asyncHandler(async (req: Request, res: Response) => {
+  const postgres = container.postgres;
+
+  // Get table sizes
+  const tableSizes = await postgres.query(`
+    SELECT 
+      schemaname,
+      tablename,
+      pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
+      pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
+      pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as indexes_size,
+      pg_stat_get_live_tuples(c.oid)::bigint as row_count
+    FROM pg_tables t
+    JOIN pg_class c ON c.relname = t.tablename
+    WHERE schemaname = 'public'
+    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+  `);
+
+  // Get all indexes on receipts table
+  const receiptsIndexes = await postgres.query(`
+    SELECT 
+      indexname,
+      indexdef,
+      idx_scan as index_scans,
+      idx_tup_read as tuples_read,
+      idx_tup_fetch as tuples_fetched
+    FROM pg_indexes
+    LEFT JOIN pg_stat_user_indexes ON pg_indexes.indexname = pg_stat_user_indexes.indexname
+    WHERE schemaname = 'public' AND tablename = 'receipts'
+    ORDER BY indexname
+  `);
+
+  // Check for specific optimization indexes
+  const optimizationChecks = await postgres.query(`
+    SELECT 
+      indexname,
+      CASE 
+        WHEN indexname LIKE '%items_gin%' THEN 'GIN index on JSONB items'
+        WHEN indexname LIKE '%has_date%' THEN 'Partial index for receipts with dates'
+        WHEN indexname LIKE '%recent%' THEN 'Partial index for recent receipts'
+        WHEN indexname LIKE '%has_restaurant%' THEN 'Partial index for receipts with restaurants'
+        WHEN indexname LIKE '%year%' THEN 'Year column index'
+        ELSE 'Other index'
+      END as optimization_type
+    FROM pg_indexes
+    WHERE schemaname = 'public' AND tablename = 'receipts'
+    AND (
+      indexname LIKE '%items_gin%' OR
+      indexname LIKE '%has_date%' OR
+      indexname LIKE '%recent%' OR
+      indexname LIKE '%has_restaurant%' OR
+      indexname LIKE '%year%'
+    )
+  `);
+
+  // Check if year column exists
+  const yearColumnCheck = await postgres.query(`
+    SELECT column_name, data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public' 
+    AND table_name = 'receipts' 
+    AND column_name = 'year'
+  `);
+
+  // Get index usage statistics
+  const indexUsage = await postgres.query(`
+    SELECT 
+      schemaname,
+      tablename,
+      indexname,
+      idx_scan as index_scans,
+      idx_tup_read as tuples_read,
+      idx_tup_fetch as tuples_fetched,
+      pg_size_pretty(pg_relation_size(indexrelid)) as index_size
+    FROM pg_stat_user_indexes
+    WHERE schemaname = 'public' AND tablename = 'receipts'
+    ORDER BY idx_scan DESC
+  `);
+
+  res.json({
+    tables: tableSizes.rows.map((row: any) => ({
+      name: row.tablename,
+      totalSize: row.total_size,
+      tableSize: row.table_size,
+      indexesSize: row.indexes_size,
+      rowCount: parseInt(row.row_count) || 0
+    })),
+    receiptsIndexes: receiptsIndexes.rows.map((row: any) => ({
+      name: row.indexname,
+      definition: row.indexdef,
+      scans: parseInt(row.index_scans) || 0,
+      tuplesRead: parseInt(row.tuples_read) || 0,
+      tuplesFetched: parseInt(row.tuples_fetched) || 0
+    })),
+    optimizations: {
+      applied: optimizationChecks.rows.map((row: any) => ({
+        index: row.indexname,
+        type: row.optimization_type
+      })),
+      yearColumn: yearColumnCheck.rows.length > 0,
+      status: {
+        ginIndex: optimizationChecks.rows.some((r: any) => r.indexname.includes('items_gin')),
+        partialIndexes: optimizationChecks.rows.some((r: any) => r.indexname.includes('has_date') || r.indexname.includes('recent')),
+        yearColumn: yearColumnCheck.rows.length > 0
+      }
+    },
+    indexUsage: indexUsage.rows.map((row: any) => ({
+      name: row.indexname,
+      scans: parseInt(row.index_scans) || 0,
+      tuplesRead: parseInt(row.tuples_read) || 0,
+      size: row.index_size
+    })),
+    _note: {
+      ginIndex: "GIN index enables fast searches within JSONB items column",
+      partialIndexes: "Partial indexes are smaller and faster for filtered queries",
+      yearColumn: "Year column enables future partitioning and archiving strategies"
+    }
+  });
+}));
+
 export default router;
 
