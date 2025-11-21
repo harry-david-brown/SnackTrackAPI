@@ -39,20 +39,16 @@ class SentryConfigManager {
 
     const enabled = !!dsn && environment !== 'test';
     
-    // Log Sentry configuration status
-    if (enabled) {
-      logger.info('Sentry configuration loaded', {
-        hasDSN: !!dsn,
-        environment,
-        release
-      });
-    } else {
-      logger.info('Sentry disabled', {
-        hasDSN: !!dsn,
-        environment,
-        reason: !dsn ? 'No SENTRY_DSN' : environment === 'test' ? 'Test environment' : 'Unknown'
-      });
-    }
+    // Log Sentry configuration status with detailed debugging
+    logger.info('Sentry configuration check', {
+      hasDSN: !!dsn,
+      dsnLength: dsn.length,
+      dsnPreview: dsn ? `${dsn.substring(0, 20)}...` : 'empty',
+      environment,
+      release,
+      enabled,
+      reason: !dsn ? 'No SENTRY_DSN environment variable' : environment === 'test' ? 'Test environment' : enabled ? 'Enabled' : 'Unknown reason'
+    });
 
     return {
       dsn,
@@ -81,7 +77,12 @@ class SentryConfigManager {
    */
   initialize(app: Express): void {
     if (!this.config.enabled) {
-      logger.info('Sentry disabled (SENTRY_DSN not configured)');
+      logger.warn('Sentry disabled - not initializing', {
+        hasDSN: !!this.config.dsn,
+        dsnLength: this.config.dsn.length,
+        environment: this.config.environment,
+        reason: !this.config.dsn ? 'SENTRY_DSN environment variable not set' : this.config.environment === 'test' ? 'Test environment' : 'Unknown'
+      });
       return;
     }
 
