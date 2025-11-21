@@ -249,9 +249,8 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
       pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as indexes_size,
-      pg_stat_get_live_tuples(c.oid)::bigint as row_count
+      (SELECT n_live_tup FROM pg_stat_user_tables WHERE schemaname = t.schemaname AND relname = t.tablename) as row_count
     FROM pg_tables t
-    JOIN pg_class c ON c.relname = t.tablename
     WHERE schemaname = 'public'
     ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
   `);
@@ -259,15 +258,15 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
   // Get all indexes on receipts table
   const receiptsIndexes = await postgres.query(`
     SELECT 
-      indexname,
-      indexdef,
-      idx_scan as index_scans,
-      idx_tup_read as tuples_read,
-      idx_tup_fetch as tuples_fetched
+      pg_indexes.indexname,
+      pg_indexes.indexdef,
+      COALESCE(pg_stat_user_indexes.idx_scan, 0) as index_scans,
+      COALESCE(pg_stat_user_indexes.idx_tup_read, 0) as tuples_read,
+      COALESCE(pg_stat_user_indexes.idx_tup_fetch, 0) as tuples_fetched
     FROM pg_indexes
-    LEFT JOIN pg_stat_user_indexes ON pg_indexes.indexname = pg_stat_user_indexes.indexname
-    WHERE schemaname = 'public' AND tablename = 'receipts'
-    ORDER BY indexname
+    LEFT JOIN pg_stat_user_indexes ON pg_indexes.indexname = pg_stat_user_indexes.indexrelname::text
+    WHERE pg_indexes.schemaname = 'public' AND pg_indexes.tablename = 'receipts'
+    ORDER BY pg_indexes.indexname
   `);
 
   // Check for specific optimization indexes
@@ -306,14 +305,14 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
   const indexUsage = await postgres.query(`
     SELECT 
       schemaname,
-      tablename,
-      indexname,
+      relname as tablename,
+      indexrelname as indexname,
       idx_scan as index_scans,
       idx_tup_read as tuples_read,
       idx_tup_fetch as tuples_fetched,
       pg_size_pretty(pg_relation_size(indexrelid)) as index_size
     FROM pg_stat_user_indexes
-    WHERE schemaname = 'public' AND tablename = 'receipts'
+    WHERE schemaname = 'public' AND relname = 'receipts'
     ORDER BY idx_scan DESC
   `);
 
