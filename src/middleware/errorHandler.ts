@@ -92,9 +92,10 @@ export const logErrorToSentry = (error: Error, req?: Request) => {
     }
   } else {
     // Log when Sentry is disabled for debugging
-    logger.debug('Sentry is disabled, error not sent', {
+    logger.warn('Sentry is disabled, error not sent', {
       errorMessage: error.message,
-      hasDSN: !!process.env.SENTRY_DSN
+      hasDSN: !!process.env.SENTRY_DSN,
+      nodeEnv: process.env.NODE_ENV
     });
   }
 };

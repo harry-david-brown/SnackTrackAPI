@@ -165,6 +165,23 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 // Setup Swagger documentation
 setupSwagger(app);
 
+// Sentry request handler (must be before routes for tracing)
+if (sentryConfig.isEnabled()) {
+  // In Sentry v10, expressIntegration handles this, but we add request handler explicitly
+  // to ensure request context is captured
+  app.use((req, res, next) => {
+    Sentry.setContext('http', {
+      method: req.method,
+      url: req.url,
+      headers: {
+        'user-agent': req.get('user-agent'),
+        'referer': req.get('referer')
+      }
+    });
+    next();
+  });
+}
+
 // Mount routers
 app.use('/auth', authRouter);
 app.use('/auth/password/reset', authPasswordResetRouter);
@@ -177,13 +194,8 @@ app.use('/database', databaseRouter);
 app.use('/monitoring', monitoringRouter);
 
 // Error handling middleware (must be last)
-// Sentry error handler must come before our custom error handler
-// This ensures Sentry captures the error before we format the response
-if (sentryConfig.isEnabled()) {
-  // Use Sentry's setupExpressErrorHandler for v10+
-  Sentry.setupExpressErrorHandler(app);
-}
 // Our custom error handler (logs to Winston and handles response formatting)
+// Note: Sentry error capture happens in errorHandler via sentryConfig.captureError()
 app.use(errorHandler);
 
 const PORT = config.getServerPort();

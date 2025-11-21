@@ -90,6 +90,9 @@ class SentryConfigManager {
       environment: this.config.environment,
       release: this.config.release,
       
+      // Enable debug mode to see what's happening
+      debug: this.config.environment === 'development',
+      
       // Error sampling
       sampleRate: this.config.sampleRate,
       
@@ -173,10 +176,18 @@ class SentryConfigManager {
         data: context
       });
       
-      Sentry.captureException(error);
-      logger.debug('Error sent to Sentry', {
+      const eventId = Sentry.captureException(error);
+      logger.info('Error sent to Sentry', {
         errorMessage: error.message,
-        hasContext: !!context
+        eventId,
+        hasContext: !!context,
+        sentryEnabled: this.config.enabled,
+        hasDSN: !!this.config.dsn
+      });
+      
+      // Flush in background (don't await - let it send asynchronously)
+      Sentry.flush(2000).catch((flushError) => {
+        logger.warn('Sentry flush failed', { error: flushError });
       });
     } catch (sentryError) {
       logger.error('Failed to send error to Sentry', {
