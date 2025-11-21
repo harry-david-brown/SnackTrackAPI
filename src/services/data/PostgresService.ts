@@ -261,54 +261,101 @@ export class PostgresService {
    * Apply additional optimizations for scalability
    */
   private async applyAdditionalOptimizations(): Promise<void> {
+    // 1. Add GIN index on JSONB items column for item searches
     try {
-      // 1. Add GIN index on JSONB items column for item searches
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_items_gin 
         ON receipts USING GIN (items)
       `);
+    } catch (error: any) {
+      if (error.code !== '42P07') {
+        console.warn('⚠️  GIN index creation warning:', error.message);
+      }
+    }
 
-      // 2. Add partial indexes for common query patterns
-      // Index for receipts with order_date (most queries filter by date)
+    // 2. Add partial indexes for common query patterns
+    // Index for receipts with order_date (most queries filter by date)
+    try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_has_date 
         ON receipts(user_id, order_date DESC) 
         WHERE order_date IS NOT NULL
       `);
+    } catch (error: any) {
+      if (error.code !== '42P07') {
+        console.warn('⚠️  Partial index (has_date) creation warning:', error.message);
+      }
+    }
 
-      // Index for recent receipts (last 2 years) - most common query
+    // Index for recent receipts (last 2 years) - most common query
+    try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_recent 
         ON receipts(user_id, order_date DESC) 
         WHERE order_date >= NOW() - INTERVAL '2 years'
       `);
+    } catch (error: any) {
+      if (error.code !== '42P07') {
+        console.warn('⚠️  Partial index (recent) creation warning:', error.message);
+      }
+    }
 
-      // Index for receipts with restaurant names (for analytics)
+    // Index for receipts with restaurant names (for analytics)
+    try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_has_restaurant 
         ON receipts(user_id, restaurant_name) 
         WHERE restaurant_name IS NOT NULL
       `);
+    } catch (error: any) {
+      if (error.code !== '42P07') {
+        console.warn('⚠️  Partial index (has_restaurant) creation warning:', error.message);
+      }
+    }
 
-      // 3. Add year column for easier partitioning/archiving
+    // 3. Add year column for easier partitioning/archiving
+    // This is critical, so we'll try multiple times if needed
+    try {
       await this.query(`
         ALTER TABLE receipts 
         ADD COLUMN IF NOT EXISTS year INTEGER
       `);
+      console.log('✅ Year column added (or already exists)');
+    } catch (error: any) {
+      if (error.code !== '42701') { // 42701 = duplicate_column
+        console.error('❌ Year column migration failed:', error.message);
+        throw error; // Re-throw critical errors
+      }
+    }
 
+    try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_year 
         ON receipts(year, user_id)
       `);
+      console.log('✅ Year column index created (or already exists)');
+    } catch (error: any) {
+      if (error.code !== '42P07') {
+        console.warn('⚠️  Year index creation warning:', error.message);
+      }
+    }
 
-      // Populate year column for existing rows
-      await this.query(`
+    // Populate year column for existing rows
+    try {
+      const updateResult = await this.query(`
         UPDATE receipts 
         SET year = EXTRACT(YEAR FROM order_date)::INTEGER 
         WHERE year IS NULL AND order_date IS NOT NULL
       `);
+      if (updateResult.rowCount && updateResult.rowCount > 0) {
+        console.log(`✅ Populated year column for ${updateResult.rowCount} existing rows`);
+      }
+    } catch (error: any) {
+      console.warn('⚠️  Year column backfill warning:', error.message);
+    }
 
-      // Create trigger to auto-populate year on insert/update
+    // Create trigger to auto-populate year on insert/update
+    try {
       await this.query(`
         CREATE OR REPLACE FUNCTION update_receipt_year()
         RETURNS TRIGGER AS $$
@@ -328,17 +375,19 @@ export class PostgresService {
         FOR EACH ROW
         EXECUTE FUNCTION update_receipt_year();
       `);
+      console.log('✅ Year column trigger created');
+    } catch (error: any) {
+      console.warn('⚠️  Year trigger creation warning:', error.message);
+    }
 
-      // 4. Update table statistics for better query planning
+    // 4. Update table statistics for better query planning
+    try {
       await this.query('ANALYZE receipts');
       await this.query('ANALYZE users');
-
-      console.log('✅ Additional optimizations applied');
     } catch (error: any) {
-      // Some optimizations might fail if they already exist, that's okay
-      if (error.code !== '42P07' && error.code !== '42701') {
-        console.warn('⚠️  Some optimizations may have been skipped:', error.message);
-      }
+      console.warn('⚠️  Statistics update warning:', error.message);
     }
+
+    console.log('✅ Additional optimizations applied');
   }
 }
