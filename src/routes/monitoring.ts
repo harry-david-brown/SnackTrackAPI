@@ -379,29 +379,36 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
   let { userId } = req.query;
   const postgres = container.postgres;
 
-  // If no userId provided, find a user with receipts
-  if (!userId || typeof userId !== 'string') {
-    const userWithReceipts = await postgres.query(`
-      SELECT DISTINCT user_id 
-      FROM receipts 
-      WHERE user_id IS NOT NULL 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `);
-    
-    if (userWithReceipts.rows.length === 0) {
-      return res.status(404).json({ 
-        error: 'No users with receipts found. Please provide a userId query parameter.' 
-      });
+  try {
+    // If no userId provided, find a user with receipts
+    if (!userId || typeof userId !== 'string') {
+      const userWithReceipts = await postgres.query(`
+        SELECT DISTINCT user_id 
+        FROM receipts 
+        WHERE user_id IS NOT NULL 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `);
+      
+      if (userWithReceipts.rows.length === 0) {
+        return res.status(404).json({ 
+          error: 'No users with receipts found. Please provide a userId query parameter.' 
+        });
+      }
+      
+      userId = userWithReceipts.rows[0].user_id;
     }
-    
-    userId = userWithReceipts.rows[0].user_id;
-  }
 
-  // Verify user exists
-  const userCheck = await postgres.query('SELECT id FROM users WHERE id = $1', [userId]);
-  if (userCheck.rows.length === 0) {
-    return res.status(404).json({ error: 'User not found' });
+    // Verify user exists
+    const userCheck = await postgres.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ 
+      error: 'Error finding user', 
+      details: error.message 
+    });
   }
 
   const results: any = {
@@ -441,12 +448,18 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
     }
     
-    if (!plan || !plan.Plan) {
-      throw new Error('Invalid query plan structure');
+    if (!plan) {
+      throw new Error(`Invalid query plan structure. Keys: ${Object.keys(planData).join(', ')}`);
     }
-    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
-                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
-                      (plan['Plan']?.['Plans'] || []).some((p: any) => 
+    
+    // Access Plan property (case-sensitive)
+    const planObj = plan.Plan || plan['Plan'];
+    if (!planObj) {
+      throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
+    }
+    const indexUsed = planObj?.['Node Type'] === 'Index Scan' || 
+                      planObj?.['Node Type'] === 'Bitmap Index Scan' ||
+                      (planObj?.['Plans'] || []).some((p: any) => 
                         p['Node Type'] === 'Index Scan' || p['Node Type'] === 'Bitmap Index Scan'
                       );
 
@@ -457,13 +470,13 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
       planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
       totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
-      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      rowsReturned: planObj?.['Actual Rows'] || 0,
       indexUsed,
-      nodeType: plan['Plan']?.['Node Type'],
-      indexName: plan['Plan']?.['Index Name'] || 
-                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+      nodeType: planObj?.['Node Type'],
+      indexName: planObj?.['Index Name'] || 
+                 (planObj?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
                  'N/A',
-      queryPlan: plan['Plan']
+      queryPlan: planObj
     });
   } catch (error: any) {
     results.tests.push({
@@ -498,11 +511,15 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
     }
     
-    if (!plan || !plan.Plan) {
+    if (!plan) {
       throw new Error('Invalid query plan structure');
     }
-    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
-                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan';
+    const planObj = plan.Plan || plan['Plan'];
+    if (!planObj) {
+      throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
+    }
+    const indexUsed = planObj?.['Node Type'] === 'Index Scan' || 
+                      planObj?.['Node Type'] === 'Bitmap Index Scan';
 
     results.tests.push({
       name: 'Sum total spent (aggregation)',
@@ -511,11 +528,11 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
       planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
       totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
-      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      rowsReturned: planObj?.['Actual Rows'] || 0,
       indexUsed,
-      nodeType: plan['Plan']?.['Node Type'],
-      indexName: plan['Plan']?.['Index Name'] || 'N/A',
-      queryPlan: plan['Plan']
+      nodeType: planObj?.['Node Type'],
+      indexName: planObj?.['Index Name'] || 'N/A',
+      queryPlan: planObj
     });
   } catch (error: any) {
     results.tests.push({
@@ -555,12 +572,16 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
     }
     
-    if (!plan || !plan.Plan) {
+    if (!plan) {
       throw new Error('Invalid query plan structure');
     }
-    const indexUsed = plan['Plan']?.['Node Type'] === 'Index Scan' || 
-                      plan['Plan']?.['Node Type'] === 'Bitmap Index Scan' ||
-                      (plan['Plan']?.['Plans'] || []).some((p: any) => 
+    const planObj = plan.Plan || plan['Plan'];
+    if (!planObj) {
+      throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
+    }
+    const indexUsed = planObj?.['Node Type'] === 'Index Scan' || 
+                      planObj?.['Node Type'] === 'Bitmap Index Scan' ||
+                      (planObj?.['Plans'] || []).some((p: any) => 
                         p['Node Type'] === 'Index Scan' || p['Node Type'] === 'Bitmap Index Scan'
                       );
 
@@ -571,13 +592,13 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
       planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
       totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
-      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      rowsReturned: planObj?.['Actual Rows'] || 0,
       indexUsed,
-      nodeType: plan['Plan']?.['Node Type'],
-      indexName: plan['Plan']?.['Index Name'] || 
-                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+      nodeType: planObj?.['Node Type'],
+      indexName: planObj?.['Index Name'] || 
+                 (planObj?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
                  'N/A',
-      queryPlan: plan['Plan']
+      queryPlan: planObj
     });
   } catch (error: any) {
     results.tests.push({
@@ -613,11 +634,15 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       plan = Array.isArray(firstValue) ? firstValue[0] : firstValue;
     }
     
-    if (!plan || !plan.Plan) {
+    if (!plan) {
       throw new Error('Invalid query plan structure');
     }
-    const ginIndexUsed = plan['Plan']?.['Index Name']?.includes('items_gin') ||
-                        (plan['Plan']?.['Plans'] || []).some((p: any) => 
+    const planObj = plan.Plan || plan['Plan'];
+    if (!planObj) {
+      throw new Error(`Plan object missing Plan property. Plan keys: ${Object.keys(plan).join(', ')}`);
+    }
+    const ginIndexUsed = planObj?.['Index Name']?.includes('items_gin') ||
+                        (planObj?.['Plans'] || []).some((p: any) => 
                           p['Index Name']?.includes('items_gin')
                         );
 
@@ -628,13 +653,13 @@ router.get('/query-performance', asyncHandler(async (req: Request, res: Response
       planExecutionTimeMs: parseFloat(plan['Execution Time'] || '0'),
       planningTimeMs: parseFloat(plan['Planning Time'] || '0'),
       totalTimeMs: parseFloat(plan['Execution Time'] || '0') + parseFloat(plan['Planning Time'] || '0'),
-      rowsReturned: plan['Plan']?.['Actual Rows'] || 0,
+      rowsReturned: planObj?.['Actual Rows'] || 0,
       ginIndexUsed,
-      nodeType: plan['Plan']?.['Node Type'],
-      indexName: plan['Plan']?.['Index Name'] || 
-                 (plan['Plan']?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
+      nodeType: planObj?.['Node Type'],
+      indexName: planObj?.['Index Name'] || 
+                 (planObj?.['Plans'] || []).find((p: any) => p['Index Name'])?.['Index Name'] ||
                  'N/A',
-      queryPlan: plan['Plan']
+      queryPlan: planObj
     });
   } catch (error: any) {
     results.tests.push({
