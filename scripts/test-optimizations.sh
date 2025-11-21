@@ -37,3 +37,4 @@ export API_URL="http://localhost:3000"
 "$SCRIPT_DIR/test-optimizations-auto.sh"
 exit $?
 
+
