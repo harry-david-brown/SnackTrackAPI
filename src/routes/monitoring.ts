@@ -213,6 +213,33 @@ router.get('/cache', asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * @swagger
+ * /monitoring/sentry-status:
+ *   get:
+ *     summary: Check Sentry configuration status
+ *     description: Returns Sentry configuration and status for debugging
+ *     tags: [Monitoring]
+ *     responses:
+ *       200:
+ *         description: Sentry status information
+ */
+router.get('/sentry-status', asyncHandler(async (req: Request, res: Response) => {
+  const { sentryConfig } = require('../config/sentry');
+  const hasDSN = !!process.env.SENTRY_DSN;
+  const dsnLength = process.env.SENTRY_DSN?.length || 0;
+  const dsnPreview = process.env.SENTRY_DSN ? `${process.env.SENTRY_DSN.substring(0, 30)}...` : 'not set';
+  
+  res.json({
+    enabled: sentryConfig.isEnabled(),
+    hasDSN,
+    dsnLength,
+    dsnPreview,
+    environment: process.env.NODE_ENV || 'not set',
+    reason: !hasDSN ? 'SENTRY_DSN environment variable not set' : sentryConfig.isEnabled() ? 'Enabled' : 'Disabled for unknown reason'
+  });
+}));
+
+/**
+ * @swagger
  * /monitoring/test-sentry:
  *   get:
  *     summary: Test Sentry error capture
