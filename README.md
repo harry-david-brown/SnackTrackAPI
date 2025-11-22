@@ -57,7 +57,6 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Load Balancing Support** - Stateless design, shared Redis cache, graceful shutdown, health checks
 - [x] **Pagination for receipts (Doesn't do anything right now, future feature)** - Handle large datasets efficiently
 
-
 ### 📊 Current Status
 **Timeline:** Phase 1 ✅ | Phase 2 ✅ | Wrapped Analytics ✅ | Phase 3 ✅ | Production Ready! 🚀  
 **Load Tested:** 100% success (production: 50 users/1000 req, spike: 1000 users)  
@@ -71,44 +70,82 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 
 ## 🚀 Quick Start
 
-**Prerequisites:** Docker and Docker Compose
+**All examples below use `http://localhost:3000` for local development.**
 
-1. **Clone and start**
-   ```bash
-   git clone https://github.com/harry-david-brown/SnackTrackAPI
-   cd SnackTrackAPI
-   docker-compose up --build -d
-   ```
+### Prerequisites
+- Docker and Docker Compose
+- Git
 
-2. **Test it works**
-   ```bash
-   curl http://localhost:3000/
-   # Should return: ALIVE
-   ```
+### 1. Clone and Start
+```bash
+git clone https://github.com/harry-david-brown/SnackTrackAPI
+cd SnackTrackAPI
+docker-compose up --build -d
+```
+
+This automatically sets up:
+- **Local PostgreSQL** database (no Railway connection needed)
+- **Local Redis** cache (no Railway connection needed)
+- **Server on `http://localhost:3000`** (development mode)
+
+**Note:** The service runs completely locally by default. It will NOT connect to Railway production services unless you explicitly configure environment variables to do so.
+
+### 2. Verify It's Running
+```bash
+curl http://localhost:3000/
+# Should return: ALIVE
+```
 
 **That's it!** The API is now running on `http://localhost:3000`
 
-## 🔐 Authentication
-
-**As of Phase 1, Week 1**, the API now uses JWT authentication for all user-specific endpoints.
-
-### Quick Start with Auth
+### 3. Create Your First User
 ```bash
-# 1. Register a new user
 curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "password": "SecurePass123"}'
-# Returns: { userId, accessToken, refreshToken, user }
-
-# 2. Login (if already registered)
-curl -X POST http://localhost:3000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "SecurePass123"}'
-
-# 3. Use token to access protected endpoints
-curl -X GET http://localhost:3000/users/{userId}/totalSpent \
-  -H "Authorization: Bearer {accessToken}"
 ```
+
+**Response:**
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "user": { "id": "...", "email": "user@example.com" }
+}
+```
+
+**Save the `accessToken` and `userId`** - you'll need them for authenticated requests.
+
+### 4. Import Your Data
+```bash
+# Upload Uber Eats CSV file
+curl -X POST http://localhost:3000/csv/import \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "csvFile=@path/to/your/uber-data.csv" \
+  -F "userId=YOUR_USER_ID"
+```
+
+### 5. View Your Analytics
+```bash
+# Get spending summary
+curl http://localhost:3000/users/YOUR_USER_ID/totalSpent \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get comprehensive analytics
+curl http://localhost:3000/validation/user/YOUR_USER_ID/summary \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get wrapped analytics (viral insights)
+curl "http://localhost:3000/validation/user/YOUR_USER_ID/summary?includeWrapped=true" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+## 🔐 Authentication
+
+All user-specific endpoints require JWT authentication.
 
 ### Password Requirements
 - Minimum 8 characters
@@ -120,626 +157,345 @@ curl -X GET http://localhost:3000/users/{userId}/totalSpent \
 - **Refresh Token:** Expires in 7 days
 - Use `/auth/refresh` to get new tokens before expiry
 
-### Password Reset Flow
+### Quick Auth Flow
 ```bash
-# 1. Request password reset code
+# 1. Register
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "SecurePass123"}'
+
+# 2. Login (if already registered)
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "SecurePass123"}'
+
+# 3. Use token in requests
+curl -X GET http://localhost:3000/users/{userId}/totalSpent \
+  -H "Authorization: Bearer {accessToken}"
+
+# 4. Refresh token when needed
+curl -X POST http://localhost:3000/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken": "YOUR_REFRESH_TOKEN"}'
+```
+
+### Password Reset
+```bash
+# Request reset code
 curl -X POST http://localhost:3000/auth/password/reset/request \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com"}'
 
-# 2. Verify the code (optional - checks if code is valid)
-curl -X POST http://localhost:3000/auth/password/reset/verify \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "code": "123456"}'
-
-# 3. Complete password reset with new password
+# Complete reset
 curl -X POST http://localhost:3000/auth/password/reset/complete \
   -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "code": "123456", "newPassword": "NewPassword123"}'
+  -d '{"email": "user@example.com", "code": "123456", "newPassword": "NewPass123"}'
 ```
 
-### Email Verification Flow
+### Email Verification
 ```bash
-# 1. Send verification code (triggered after registration or login with unverified email)
+# Send verification code
 curl -X POST http://localhost:3000/auth/email/verify/send \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com"}'
 
-# 2. Confirm email verification with code
+# Confirm verification
 curl -X POST http://localhost:3000/auth/email/verify/confirm \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "code": "123456"}'
 ```
 
-**Note:** OTP codes expire in 15 minutes. Rate limiting applies to prevent abuse.
+**Note:** OTP codes expire in 15 minutes. Rate limiting applies.
 
-## 🔄 CI/CD Pipeline
+---
 
-The project now includes automated CI/CD with GitHub Actions:
+## 📚 API Reference
 
-### Automated Checks
-- ✅ TypeScript compilation
-- ✅ Linting (if configured)
-- ✅ Docker builds (dev & prod)
-- ✅ Security audit
-- ✅ PostgreSQL integration testing
+**Base URL:** `http://localhost:3000` (local) | `https://snacktrackapi-production.up.railway.app` (production)
 
-### Running Locally
+### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login with email/password
+- `POST /auth/refresh` - Refresh access token
+- `POST /auth/logout` - Logout (invalidate refresh token)
+- `POST /auth/password/reset/request` - Request password reset code
+- `POST /auth/password/reset/verify` - Verify reset code
+- `POST /auth/password/reset/complete` - Complete password reset
+- `POST /auth/email/verify/send` - Send email verification code
+- `POST /auth/email/verify/confirm` - Confirm email verification
+
+### Data Import
+- `POST /csv/import` - Import Uber Eats CSV/ZIP file
+  - Requires: `Authorization: Bearer {token}`
+  - Form data: `csvFile` (file), `userId` (string)
+
+### Users
+- `GET /users/:userId/totalSpent` - Get total spending for user
+  - Requires: `Authorization: Bearer {token}`
+
+### Receipts
+- `GET /receipts` - Get all receipts with pagination and filtering
+  - Query params: `userId`, `page`, `limit`, `startDate`, `endDate`, `restaurantName`, `minAmount`, `maxAmount`
+  - Requires: `Authorization: Bearer {token}`
+
+### Analytics
+- `GET /validation/user/:userId/summary` - Comprehensive user analytics
+  - Query params: `includeWrapped=true` (optional, adds viral insights)
+  - Requires: `Authorization: Bearer {token}`
+
+### System
+- `GET /` - Basic health check (returns "ALIVE")
+- `GET /health` - Detailed health check with database status
+- `GET /monitoring/health` - System health with metrics
+
+### API Documentation
+- Swagger UI available at `/api-docs` (when running locally)
+
+---
+
+## 🛠️ Development Guide
+
+### For New Developers
+
+#### Project Structure
+```
+src/
+├── config/          # Configuration (database, Redis, Sentry, etc.)
+├── models/         # Data models and TypeScript interfaces
+├── routes/         # API route handlers
+├── services/       # Business logic
+│   ├── core/       # Core services (cache, container)
+│   ├── data/       # Database access (PostgresService, repositories)
+│   ├── email/      # Email processing (Gmail, Outlook)
+│   ├── import/     # CSV import and data source management
+│   └── receipt/    # Receipt processing logic
+└── middleware/     # Express middleware (auth, pagination, error handling)
+```
+
+#### Key Files
+- `src/index.ts` - Application entry point, server setup
+- `src/services/data/PostgresService.ts` - Database connection and queries
+- `src/services/core/CacheService.ts` - Redis caching
+- `src/middleware/auth.ts` - JWT authentication middleware
+- `src/routes/` - All API endpoints organized by feature
+
+#### Running Locally
 ```bash
-# Check TypeScript compilation
+# Start all services (PostgreSQL, Redis, API)
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f snack-track-api
+
+# Stop services
+docker-compose down
+
+# Rebuild after dependency changes
+docker-compose up --build -d
+```
+
+#### Development Workflow
+1. **Make changes** to TypeScript files in `src/`
+2. **Server auto-restarts** (hot reload enabled)
+3. **Test endpoints** with curl or Postman
+4. **Check logs** in terminal or Railway dashboard
+
+#### Testing
+```bash
+# Run test suites
+cd tests
+./test-full-suite.sh           # Complete test suite
+./test-auth-comprehensive.sh   # Authentication tests
+./test-pagination.sh           # Pagination tests
+./test-load-balancing.sh       # Load balancing tests
+```
+
+#### Building for Production
+```bash
+# Compile TypeScript
 npm run build
 
-# Run full test suite (14 tests)
-cd tests && ./test-full-suite.sh
-
-# Or run individual test suites
-cd tests
-./test-auth-comprehensive.sh    # Authentication only
-./test-cache-performance.sh     # Redis caching
-./test-cache-invalidation.sh    # Cache invalidation
+# Test production build locally
+npm start
 ```
 
-**Test Documentation:** See [`tests/README.md`](tests/README.md) for details  
-**Workflow file:** `.github/workflows/ci.yml`
+---
 
-## 📊 Phase 3: Monitoring & Operations
+## 🔧 Configuration
 
-### Centralized Logging System
+### Environment Variables
 
-All application logs are centralized through Winston logger with dynamic log levels and accessible storage.
+**Required:**
+- `DATABASE_URL` - PostgreSQL connection string
+- `JWT_SECRET` - Secret key for JWT token signing
 
-**Features:**
-- ✅ **Centralized logging** - All logs through Winston logger
-- ✅ **Dynamic log levels** - Change at runtime via API (no restart required)
-- ✅ **Zoom capability** - Switch to debug mode for detailed troubleshooting
-- ✅ **In-memory buffer** - Last 1000 logs queryable via API
-- ✅ **Better Stack integration** - Optional cloud aggregation for 30+ day retention
+**Optional:**
+- `REDIS_URL` - Redis connection string (enables caching)
+- `SENTRY_DSN` - Sentry error tracking (production)
+- `LOG_LEVEL` - Logging level (`error`, `warn`, `info`, `debug`)
+- `LOGTAIL_TOKEN` - Better Stack/Logtail token (long-term log storage)
+- `PORT` - Server port (default: 3000)
+- `NODE_ENV` - Environment (`development` or `production`)
 
-### Quick How-To Guide
+### Docker Compose Setup
+The `docker-compose.yml` file includes:
+- **PostgreSQL** - Database service
+- **Redis** - Cache service
+- **API** - Main application service
 
-#### Viewing Logs
+All services are pre-configured and start automatically.
 
-**Railway Dashboard (Real-time):**
+### Local vs Production
+
+**Local Development (Default):**
+- Running `docker-compose up` uses **local** PostgreSQL and Redis containers
+- Perfect for development and testing
+- No Railway connection needed
+
+**Railway Production (Automatic):**
+- When you **push code to Railway**, it automatically deploys
+- Railway uses its own environment variables (set in Railway dashboard)
+- No code changes needed - Railway handles production configuration automatically
+
+**Optional: Local Development with Railway Services**
+If you want to run locally but connect to Railway's production database/Redis (not recommended for most cases):
+1. Create a `.env` file with Railway credentials
+2. Comment out the `environment:` section in `docker-compose.yml` (lines 11-13)
+3. Restart: `docker-compose up --build -d snack-track-api`
+
+---
+
+## 📊 Monitoring & Operations
+
+### Logging
+
+**View Logs:**
 ```bash
-# View logs in Railway dashboard → Service → Logs tab
-# Logs are automatically captured from stdout/stderr
-# Human-readable format for easy scanning
+# Local development (replace with production URL for production)
+curl http://localhost:3000/monitoring/logs
+
+# Filter by level
+curl "http://localhost:3000/monitoring/logs?level=error&limit=50"
 ```
 
-**Via API (Recent Logs):**
+**Change Log Level (No Restart Required):**
 ```bash
-# Get recent logs (last 100 entries)
-curl https://snacktrackapi-production.up.railway.app/monitoring/logs
+# Check current level
+curl http://localhost:3000/monitoring/log-level
 
-# Filter by log level
-curl https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=50
-
-# Get logs since specific time
-curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?since=2025-11-20T10:00:00Z"
-```
-
-#### Zooming In on Issues (Dynamic Log Level)
-
-**No restart required** - change log level at runtime:
-
-```bash
-# 1. Check current log level
-curl https://snacktrackapi-production.up.railway.app/monitoring/log-level
-# Returns: { "level": "info", "availableLevels": ["error", "warn", "info", "debug"] }
-
-# 2. Change to debug mode (immediate effect, no restart)
-curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
+# Switch to debug mode
+curl -X POST http://localhost:3000/monitoring/log-level \
   -H "Content-Type: application/json" \
   -d '{"level": "debug"}'
-# Returns: { "success": true, "oldLevel": "info", "newLevel": "debug" }
-
-# 3. Get detailed logs with full context
-curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=100"
 ```
+
+**Note:** For production, replace `http://localhost:3000` with your production URL.
 
 **Log Levels:**
 - `error` - Errors only
 - `warn` - Warnings and errors
-- `info` - Normal operation (default) - clean, scannable logs
-- `debug` - Full details - IP addresses, user agents, stack traces, all metadata
+- `info` - Normal operation (default)
+- `debug` - Full details with stack traces
 
-#### Long-Term Storage (30+ Days)
+### Error Tracking (Sentry)
 
-**Option 1: Better Stack/Logtail (Recommended)**
-```bash
-# Set in Railway environment variables
-LOGTAIL_TOKEN=your_token_here
-
-# Benefits:
-# - 30+ day retention (configurable)
-# - Advanced search and filtering
-# - Alerts and notifications
-# - Free tier: 1GB/month
-```
-
-**Option 2: In-Memory Buffer (Recent Logs Only)**
-```bash
-# Last 1000 logs available via API
-curl https://snacktrackapi-production.up.railway.app/monitoring/logs?limit=1000
-```
-
-### Log Format
-
-**Info Level (Default) - Clean & Scannable:**
-```
-20:31:04  GET    200  /health     1ms
-20:31:04  POST   400  /auth/register     7ms
-20:31:04  ✗  Error occurred  |  method=POST url=/auth/register
-```
-
-**Debug Level - Full Details:**
-```
-20:31:04  GET    200  /health     1ms  |  ip=::ffff:172.18.0.1 ua=curl/8.17.0
-20:31:04  ✗  Error occurred  |  method=POST url=/auth/register ip=::ffff:172.18.0.1
-  SyntaxError: Unexpected token...
-    at JSON.parse (<anonymous>)
-    at parse (/usr/src/app/node_modules/body-parser/...)
-```
-
-### Helpful Commands
-
-```bash
-# Check current log level
-curl https://snacktrackapi-production.up.railway.app/monitoring/log-level
-
-# Change to debug (no restart)
-curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
-  -H "Content-Type: application/json" -d '{"level": "debug"}'
-
-# Get recent errors
-curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?level=error&limit=50"
-
-# Get logs since specific time
-curl "https://snacktrackapi-production.up.railway.app/monitoring/logs?since=2025-11-20T10:00:00Z&limit=100"
-
-# Change back to info
-curl -X POST https://snacktrackapi-production.up.railway.app/monitoring/log-level \
-  -H "Content-Type: application/json" -d '{"level": "info"}'
-```
-
-### Configuration
-
-**Environment Variables:**
-```bash
-# Log level (default: 'info')
-LOG_LEVEL=info
-
-# Better Stack/Logtail token (optional, for long-term storage)
-LOGTAIL_TOKEN=your_token_here
-```
-
-### Complete Sentry Integration
-
-Sentry is now fully integrated with enhanced features:
+**Setup:**
+1. Create account at [sentry.io](https://sentry.io)
+2. Create Node.js/Express project
+3. Copy DSN
+4. Set `SENTRY_DSN` environment variable
+5. Deploy - errors automatically tracked
 
 **Features:**
-- ✅ **Error Tracking** - Automatic 5xx error capture
-- ✅ **Performance Monitoring (APM)** - HTTP request tracing, custom transactions
-- ✅ **User Context** - Automatic user tracking in error reports
-- ✅ **Breadcrumbs** - Request and operation breadcrumbs for debugging
-- ✅ **Custom Transactions** - Performance tracking for critical operations
-- ✅ **Sensitive Data Filtering** - Automatic password/token removal
+- Automatic error capture (5xx errors)
+- Performance monitoring (APM)
+- User context tracking
+- Breadcrumbs for debugging
 
-**APM Features:**
-- HTTP request tracing (10% sampling in prod, 100% in dev)
-- Custom transaction tracking
-- Performance span measurements
-- Database query latency tracking
+### Health Monitoring
 
-**Usage in Code:**
-```typescript
-import { sentryConfig } from './config/sentry';
+```bash
+# System health
+GET /monitoring/health
 
-// Add breadcrumb
-sentryConfig.addBreadcrumb('Operation started', 'custom', { data: 'value' });
+# Alert status
+GET /monitoring/alerts
 
-// Start custom transaction
-const transaction = sentryConfig.startTransaction('Import CSV', 'task');
-// ... do work ...
-transaction?.finish();
-
-// Add performance span
-const span = sentryConfig.addSpan('Database Query', 'Query users');
-// ... do query ...
-span?.finish();
+# Cache status
+GET /monitoring/cache
 ```
 
-### Database Backups
+---
 
-Automated database backup system with retention policy:
+## 🗄️ Database
 
-**Features:**
-- **Automated backups** - Compressed SQL dumps
-- **Retention policy** - Keeps last 30 days (configurable)
-- **Timestamped files** - Easy to identify backup dates
-- **Error handling** - Comprehensive logging and error reporting
+### Schema
+- **users** - User accounts
+- **receipts** - Food delivery receipts
+- **verification_codes** - Email/password reset codes
 
-**Usage:**
+### Optimizations
+- GIN index on JSONB items column
+- Partial indexes for common queries
+- Year column for future partitioning
+- Connection pooling (20 connections in prod)
+
+### Backups
 ```bash
 # Manual backup
 ./scripts/backup-database.sh
 
-# Automated daily backup (add to crontab)
+# Automated (add to crontab)
 0 2 * * * /path/to/scripts/backup-database.sh
 ```
 
-**Configuration (Environment Variables):**
+---
+
+## 🧪 Testing
+
+### Test Suites
+- `tests/test-full-suite.sh` - Complete integration tests
+- `tests/test-auth-comprehensive.sh` - Authentication flow
+- `tests/test-pagination.sh` - Pagination functionality
+- `tests/test-load-balancing.sh` - Multi-instance readiness
+- `tests/load-test-realistic.sh` - Load testing (50 users, 1000 requests)
+
+### Running Tests
 ```bash
-BACKUP_DIR=./backups          # Backup directory
-RETENTION_DAYS=30              # Days to retain backups
-DB_HOST=localhost              # Database host
-DB_PORT=5432                   # Database port
-DB_NAME=snacktrack_dev        # Database name
-DB_USER=snacktrack            # Database user
-DB_PASSWORD=password           # Database password
-```
-
-**Backup Files:**
-- Format: `snacktrack_backup_YYYYMMDD_HHMMSS.sql.gz`
-- Location: `./backups/` (or `BACKUP_DIR`)
-- Logs: `./backups/backup.log`
-
-### Alerting System
-
-Comprehensive alerting system for error rates and performance:
-
-**Features:**
-- **Error Rate Monitoring** - Tracks errors per minute
-- **Performance Monitoring** - p95 response time tracking
-- **Database Health** - Database latency monitoring
-- **Automatic Alerts** - Sentry integration for alert notifications
-- **Health Status API** - Real-time health status endpoint
-
-**Alert Thresholds (Configurable):**
-- Error rate: 10 errors/minute
-- Response time: 2000ms p95
-- Database latency: 1000ms
-- Error count: 50 errors in 5-minute window
-
-**Monitoring Endpoints:**
-```bash
-# Get system health status (public)
-GET /monitoring/health
-
-# Get alert status (public)
-GET /monitoring/alerts
-
-# Get current log level (public)
-GET /monitoring/log-level
-
-# Change log level dynamically (public, no restart required)
-POST /monitoring/log-level
-Content-Type: application/json
-{ "level": "debug" }
-
-# Get recent logs from in-memory buffer (public)
-GET /monitoring/logs?level=error&limit=50&since=2025-11-20T10:00:00Z
-```
-
-**Response Example:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "metrics": {
-    "errorCount": 2,
-    "requestCount": 150,
-    "errorRate": 0.4,
-    "avgResponseTime": 245,
-    "p95ResponseTime": 844
-  },
-  "thresholds": {
-    "errorRate": 10,
-    "responseTime": 2000,
-    "databaseLatency": 1000,
-    "errorCount": 50
-  }
-}
-```
-
-## 🚨 Error Tracking with Sentry (Phase 3 Enhanced)
-
-The API includes **complete Sentry integration** with error tracking and APM:
-
-### Configuration
-```bash
-# Required for production error tracking and APM
-SENTRY_DSN=your_sentry_dsn_here
-SENTRY_RELEASE=1.0.0  # Optional: version tracking
-```
-
-### Enhanced Features (Phase 3)
-- ✅ **Automatic error capture** - All 5xx errors sent to Sentry
-- ✅ **Performance Monitoring (APM)** - HTTP request tracing (10% sampling in prod)
-- ✅ **User context** - Automatic user tracking in error reports
-- ✅ **Breadcrumbs** - Request and operation breadcrumbs for debugging
-- ✅ **Custom transactions** - Performance tracking for critical operations
-- ✅ **Sensitive data filtering** - Passwords and tokens automatically removed
-- ✅ **Free tier compatible** - 5,000 errors/month, 10k transactions/month
-
-### APM Features
-- HTTP request tracing with response times
-- Custom transaction tracking for background jobs
-- Performance span measurements
-- Database query latency tracking (via breadcrumbs)
-
-### Usage
-- **Development:** Sentry disabled by default (no DSN required)
-- **Production:** Set `SENTRY_DSN` environment variable to enable
-- **Sampling:** 100% errors, 10% performance in prod (configurable)
-- **Upgrade:** Change nothing - scales from free tier to paid seamlessly
-
-### Setup Timing
-⚠️ **Set up Sentry BEFORE deploying to production**
-
-1. Create free Sentry account at [sentry.io](https://sentry.io)
-2. Create a new project (select Node.js/Express)
-3. Copy your DSN
-4. Add `SENTRY_DSN` to your production environment variables
-5. Deploy - errors and performance data will immediately start being tracked
-
-**Why before deployment?** You want error tracking active from day 1 so you catch any deployment issues immediately.
-
-**Learn more:** [sentry.io](https://sentry.io)
-
-## 🗄️ Database State After Cloning
-
-When you clone this project, you get a **fresh, empty database**:
-
-### 🔄 **Database Persistence:**
-- **Data persists** between container restarts (stored in Docker volume)
-- **Data is NOT shared** between different machines
-- **Perfect for privacy** - each person's data stays on their machine
-
-
-## 📁 Test Data Structure
-
-The project includes sample Uber CSV data for testing:
-
-```
-MockUberData/
-└── Uber Data/
-    └── Eats/
-        ├── user_orders-0.csv      ← Use this file for testing
-        └── eats_app_analytics-0.csv
-```
-
-**For testing:** Use `MockUberData/Uber Data/Eats/user_orders-0.csv`  
-**For your own data:** Replace with your downloaded Uber CSV file
-
-
-## 🎭 Three Ways to Use It
-
-### Option 1: Uber CSV Import (Recommended)
-**Import your complete Uber Eats history**
-
-```bash
-# Register a user (requires email and password)
-curl -X POST http://localhost:3000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "YourPass123"}'
-# Save the accessToken from response
-
-# Upload your Uber CSV file (example uses the included test data)
-curl -X POST http://localhost:3000/csv/import \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -F "csvFile=@MockUberData/Uber Data/Eats/user_orders-0.csv" \
-  -F "userId=YOUR_USER_ID"
-
-# Check total spending
-curl http://localhost:3000/users/YOUR_USER_ID/totalSpent \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-
-# User summary
-curl http://localhost:3000/validation/user/YOUR_USER_ID/summary \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
-
-> **Note:** The example uses the included test CSV file. Replace the file path with your own Uber CSV file when you have it.
-
-### Option 2: Financial Aggregator (Coming Soon)
-**Connect bank/credit card accounts**
-
-```bash
-# Coming soon: Plaid/TrueLayer integration
-# Real-time transaction fetching
-# No waiting required
-```
-
-### Option 3: Email Parsing (Fallback)
-**Use Gmail for receipt parsing**
-
-Use the pre-configured test account `snacktracktest@gmail.com`
-
-1. **Create .env file**
-   ```bash
-   cat > .env << 'EOF'
-   GMAIL_CLIENT_ID=340572988877-8g7j3mqdpa4l69drsjr9r7sscu49j1n7.apps.googleusercontent.com
-   GMAIL_CLIENT_SECRET=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
-   GMAIL_REDIRECT_URI=http://localhost:3000/auth/callback
-   GMAIL_REFRESH_TOKEN=1//05uMl2jXPkTkMCgYIARAAGAUSNwF-L9IrS3JQyKkHDSceLQPRudCJHfd-n3A7lIhT69uKZVbN0dbNIVD2XnXP7vuoTZW7S7qXlxI
-   PORT=3000
-   NODE_ENV=development
-   EOF
-   ```
-
-2. **Restart the API**
-   ```bash
-   docker-compose down && docker-compose up --build -d
-   ```
-
-3. **Test with real data**
-   ```bash
-   # Create user with test Gmail
-   curl -X POST http://localhost:3000/users/create \
-     -H "Content-Type: application/json" \
-     -d '{"email": "snacktracktest@gmail.com"}'
-   
-   # Update receipts (fetches real emails)
-   curl -X POST http://localhost:3000/users/YOUR_USER_ID/update-receipts
-   
-   # Check spending
-   curl http://localhost:3000/users/YOUR_USER_ID/totalSpent
-   ```
-
-
-## 📊 API Endpoints
-
-**Base URL:** `http://localhost:3000`
-
-### 🔐 Authentication Endpoints
-- `POST /auth/register` - Register a new user with email and password
-- `POST /auth/login` - Login with email and password
-- `POST /auth/refresh` - Refresh access token using refresh token
-- `POST /auth/logout` - Logout (invalidate refresh token)
-- `POST /auth/password/reset/request` - Request password reset code (OTP sent to email)
-- `POST /auth/password/reset/verify` - Verify password reset code (validates code)
-- `POST /auth/password/reset/complete` - Complete password reset with new password
-- `POST /auth/email/verify/send` - Send email verification code
-- `POST /auth/email/verify/confirm` - Confirm email verification with code
-
-### 🥡 CSV Import Endpoints
-- `POST /csv/import` - Import CSV file directly to database
-
-### 👤 User Management Endpoints
-- `POST /users/create` - Create a new user (requires email)
-- `GET /users/:id/totalSpent` - Get total spending for user
-
-### 📊 Analytics & Validation Endpoints
-- `GET /validation/user/{userId}/summary` - Get comprehensive user analytics and validation
-
-### 🗄️ Database Management Endpoints
-- `GET /database/users` - Get all users with statistics
-- `GET /database/stats` - Get database statistics and health information
-- `DELETE /database/users/{id}` - Delete user and associated receipts
-
-### 🧾 Receipt Endpoints
-- `GET /receipts` - Get all receipts with filtering options
-
-### 📊 Monitoring Endpoints
-- `GET /monitoring/health` - Get detailed system health status with metrics
-- `GET /monitoring/alerts` - Get current alerting status and thresholds
-
-### 🔧 System Endpoints
-- `GET /` - Health check
-- `GET /health` - Detailed health check with database connectivity
-
-### Example Usage
-```bash
-# Create user
-curl -X POST http://localhost:3000/users/create \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com"}'
-
-# Import Uber CSV (using included test data)
-curl -X POST http://localhost:3000/csv/import \
-  -F "csvFile=@MockUberData/Uber Data/Eats/user_orders-0.csv" \
-  -F "userId=YOUR_USER_ID"
-
-# Get comprehensive summary
-curl http://localhost:3000/validation/user/YOUR_USER_ID/summary
-
-# Verify data integrity
-curl http://localhost:3000/validation/user/YOUR_USER_ID/verify-csv
-
-# Check database health
-curl http://localhost:3000/validation/database/health
-
-# Database management examples
-curl http://localhost:3000/database/users
-curl http://localhost:3000/database/stats
-curl "http://localhost:3000/database/receipts?limit=5"
-curl http://localhost:3000/database/receipts/RECEIPT_ID
+cd tests
+./test-full-suite.sh
 ```
 
 ---
 
-## 🛠️ Advanced Setup
+## 🚀 Deployment
 
-### Using Your Own Gmail Account
+### Railway Production (Automatic)
 
-**Note:** You'll need to add yourself as a test user in the Google Cloud Console.
+**How it works:**
+1. Push code to your repository
+2. Railway automatically detects the push and deploys
+3. Railway uses environment variables configured in the Railway dashboard
+4. No code changes needed - production configuration is automatic
 
-**Credentials for Google Cloud Console:**
-- **Email:** `snacktracktest@gmail.com`
-- **Password:** `bluetoastsquares1`
+### Production Environment
+- **Platform:** Railway (validated)
+- **Database:** PostgreSQL (Railway managed)
+- **Cache:** Redis (Railway managed)
+- **Monitoring:** Sentry APM
 
-1. **Add Yourself as Test User**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Sign in with the credentials above
-   - Go to "APIs & Services" → "OAuth consent screen"
-   - Add your Gmail address to "Test users"
-   - Save
+### Railway Environment Variables
+Configure these in the Railway dashboard:
+- `NODE_ENV=production` (usually set automatically)
+- `DATABASE_URL` - Railway PostgreSQL connection string (auto-provided)
+- `JWT_SECRET` - Secret key for JWT tokens
+- `SENTRY_DSN` - Sentry error tracking (recommended)
+- `REDIS_URL` - Railway Redis connection string (auto-provided if Redis service added)
 
-2. **Get Your Refresh Token**
-   - Create `get-token.js` with the script from the [scripts folder](scripts/get-refresh-token.js)
-   - Run: `node get-token.js`
-   - Follow the OAuth flow
-   - Add the refresh token to your `.env` file
-
-3. **Update .env File**
-   ```bash
-   # Replace the GMAIL_REFRESH_TOKEN with your token
-   GMAIL_REFRESH_TOKEN=YOUR_REFRESH_TOKEN_FROM_STEP_2
-   ```
-
-### Troubleshooting
-
-- **"Cannot GET /auth/callback"**: Normal during OAuth setup
-- **"invalid_client"**: Check your CLIENT_SECRET in .env
-- **"Access blocked"**: Add yourself as test user in Google Cloud Console
-- **Port 3000 in use**: Stop other services or change port in docker-compose.yml
-- **Docker networking issues**: The system uses standard Docker bridge networking and should work on any system with Docker installed
-
----
-
-## 🤝 Contributing
-
-### Quick Start for Contributors
-
-1. **Fork and clone**
-   ```bash
-   git clone https://github.com/harry-david-brown/SnackTrackAPI
-   cd SnackTrackAPI
-   ```
-
-2. **Create feature branch**
-   ```bash
-   git checkout -b your-feature-name
-   ```
-
-3. **Start development**
-   ```bash
-   docker-compose up --build
-   # API available at http://localhost:3000
-   # Hot reload enabled - changes auto-restart server
-   ```
-
-4. **Test your changes**
-   ```bash
-   curl http://localhost:3000/
-   # Test your specific endpoints
-   ```
-
-5. **Commit and push**
-   ```bash
-   git add .
-   git commit -m "Add feature: brief description"
-   git push origin your-feature-name
-   ```
-
-6. **Create pull request** on GitHub
-
-### Development Tips
-- **Hot Reload**: Server restarts automatically on file changes
-- **Testing**: Always test with API endpoints before committing
-- **Branch Names**: Use descriptive names like `add-outlook-support`
-- **Commit Messages**: Be clear about what you changed
+### Deployment Checklist
+- [ ] Configure environment variables in Railway dashboard
+- [ ] Verify health checks: `curl https://your-app.railway.app/health`
+- [ ] Monitor logs in Railway dashboard
 
 ---
 
@@ -748,94 +504,43 @@ curl http://localhost:3000/database/receipts/RECEIPT_ID
 ```
 snack-track/
 ├── src/
-│   ├── config/                          # Configuration management
-│   │   ├── AppConfig.ts                 # Centralized app configuration and environment settings
-│   │   ├── ChainConfig.ts               # Restaurant chain consolidation logic
-│   │   └── DataSourcePriority.ts        # Data source priority and deduplication rules
-│   │
-│   ├── models/                          # Data models and interfaces
-│   │   ├── AccountType.ts               # User account type enumeration
-│   │   ├── CreateUserDTO.ts             # User creation data transfer object
-│   │   ├── Email.ts                     # Email model with parsing and filtering logic
-│   │   └── Receipt.ts                   # Receipt model with financial breakdown
-│   │
-│   ├── routes/                          # API route handlers
-│   │   ├── csv.ts                       # CSV import/export endpoints
-│   │   ├── receipts.ts                  # Receipt management endpoints
-│   │   ├── users.ts                     # User management and total spending
-│   │   └── validation.ts                # Data validation and health check endpoints
-│   │
-│   ├── services/                        # Business logic and data access
-│   │   ├── core/                        # Core business orchestration
-│   │   │   ├── DatabaseService.ts       # Main business logic coordinator
-│   │   │   └── ServiceContainer.ts      # Dependency injection container
-│   │   │
-│   │   ├── data/                        # Data access layer
-│   │   │   ├── PostgresService.ts       # Database connection and query execution
-│   │   │   ├── ReceiptRepository.ts     # Receipt data access operations
-│   │   │   └── UserRepository.ts        # User data access operations
-│   │   │
-│   │   ├── email/                       # Email processing services
-│   │   │   ├── EmailClient.ts           # Email client interface and factory
-│   │   │   ├── EmailFilterService.ts    # Email filtering and classification
-│   │   │   ├── GmailClient.ts           # Gmail API integration with mock fallback
-│   │   │   └── OutlookClient.ts         # Outlook API integration (placeholder)
-│   │   │
-│   │   ├── import/                      # Data import and source management
-│   │   │   ├── CsvImportService.ts      # CSV parsing and import logic
-│   │   │   ├── DataSourceManager.ts     # Multi-source data coordination
-│   │   │   └── DeduplicationService.ts  # Duplicate detection and resolution
-│   │   │
-│   │   └── receipt/                     # Receipt processing services
-│   │       ├── ReceiptLookupService.ts  # Receipt fetching from various sources
-│   │       ├── ReceiptMatcher.ts        # Fuzzy matching for duplicate detection
-│   │       ├── ReceiptParserService.ts  # Email-to-receipt parsing logic
-│   │       └── ReceiptService.ts        # Receipt business logic and operations
-│   │
-│   └── index.ts                         # Application entry point and server setup
-│
-├── MockUberData/                        # Sample data for testing
-│   └── Uber Data/
-│       └── Eats/
-│           └── user_orders-0.csv        # Test CSV file with Uber Eats data
-│
-├── scripts/                             # Utility scripts
-│   ├── get-refresh-token.js             # OAuth token generation helper
-│   └── test-config.ts                   # Configuration testing utilities
-│
-├── docker-compose.yml                   # Development environment setup
-├── docker-compose.prod.yml              # Production environment setup
-├── Dockerfile                           # Production container configuration
-├── Dockerfile.dev                       # Development container configuration
-├── package.json                         # Node.js dependencies and scripts
-├── tsconfig.json                        # TypeScript configuration
-└── README.md                            # Project documentation
+│   ├── config/          # App configuration, Redis, Sentry, logger
+│   ├── models/          # TypeScript interfaces and types
+│   ├── routes/          # API route handlers
+│   ├── services/        # Business logic
+│   │   ├── core/        # Cache, service container
+│   │   ├── data/        # Database access layer
+│   │   ├── email/       # Email processing
+│   │   ├── import/      # CSV import services
+│   │   └── receipt/      # Receipt processing
+│   ├── middleware/      # Auth, pagination, error handling
+│   └── index.ts         # Application entry point
+├── tests/               # Test suites
+├── scripts/             # Utility scripts
+├── MockUberData/        # Sample test data
+├── docker-compose.yml   # Development environment
+└── README.md
 ```
 
-### 🏗️ Architecture Overview
+---
 
-**Core Services** (`/core`): Main business logic and orchestration
-- `DatabaseService`: Coordinates user and receipt operations
-- `ServiceContainer`: Manages dependency injection
+## 🤝 Contributing
 
-**Data Services** (`/data`): Data access and persistence
-- `PostgresService`: Database connection and query execution
-- `UserRepository` & `ReceiptRepository`: Data access operations
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Test thoroughly
+5. Commit with clear messages
+6. Push and create a pull request
 
-**Email Services** (`/email`): Email processing and client management
-- `EmailClient`: Interface for different email providers
-- `GmailClient`: Gmail API integration with mock data fallback
-- `EmailFilterService`: Email classification and filtering
-
-**Import Services** (`/import`): Data import and source management
-- `CsvImportService`: CSV parsing and import functionality
-- `DataSourceManager`: Multi-source data coordination
-- `DeduplicationService`: Duplicate detection and resolution
-
-**Receipt Services** (`/receipt`): Receipt-specific processing
-- `ReceiptLookupService`: Fetches receipts from various sources
-- `ReceiptParserService`: Converts emails to receipt objects
-- `ReceiptMatcher`: Handles fuzzy matching for duplicates
-- `ReceiptService`: Receipt business logic and operations
+### Development Tips
+- Hot reload is enabled - changes auto-restart server
+- Always test endpoints before committing
+- Follow existing code patterns
+- Update tests for new features
 
 ---
+
+## 📝 License
+
+MIT License
