@@ -3,10 +3,14 @@ import { container } from '../services/core/ServiceContainer';
 import { ReceiptType } from '../models/Receipt';
 import { PostgresService } from '../services/data/PostgresService';
 import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
+import { paginationMiddleware, parsePagination, createPaginatedResponse } from '../middleware/pagination';
 
 const router = Router();
 const postgresService = container.postgres;
 const receiptService = new ReceiptService(postgresService);
+
+// Apply pagination middleware to all routes
+router.use(paginationMiddleware);
 
 /**
  * @swagger
@@ -106,8 +110,7 @@ const receiptService = new ReceiptService(postgresService);
 router.get('/', async (req: Request, res: Response) => {
   try {
     const filters: ReceiptFilters = {};
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
+    const { page, limit, offset } = parsePagination(req);
 
     // Parse filters from query parameters
     if (req.query.userId) filters.userId = req.query.userId as string;
@@ -120,19 +123,52 @@ router.get('/', async (req: Request, res: Response) => {
 
     const receipts = await receiptService.getReceipts(filters, limit, offset);
     
-    // Get total count for pagination
-    const totalResult = await postgresService.query('SELECT COUNT(*) as count FROM receipts');
+    // Get total count for pagination (with filters applied)
+    // Build WHERE clause for count query to match filters
+    let countQuery = 'SELECT COUNT(*) as count FROM receipts WHERE 1=1';
+    const countParams: any[] = [];
+    let paramIndex = 1;
+    
+    if (filters.userId) {
+        countQuery += ` AND user_id = $${paramIndex}`;
+        countParams.push(filters.userId);
+        paramIndex++;
+    }
+    if (filters.startDate) {
+        countQuery += ` AND order_date >= $${paramIndex}`;
+        countParams.push(filters.startDate);
+        paramIndex++;
+    }
+    if (filters.endDate) {
+        countQuery += ` AND order_date <= $${paramIndex}`;
+        countParams.push(filters.endDate);
+        paramIndex++;
+    }
+    if (filters.restaurantName) {
+        countQuery += ` AND restaurant_name = $${paramIndex}`;
+        countParams.push(filters.restaurantName);
+        paramIndex++;
+    }
+    if (filters.minAmount !== undefined) {
+        countQuery += ` AND amount_spent >= $${paramIndex}`;
+        countParams.push(filters.minAmount);
+        paramIndex++;
+    }
+    if (filters.maxAmount !== undefined) {
+        countQuery += ` AND amount_spent <= $${paramIndex}`;
+        countParams.push(filters.maxAmount);
+        paramIndex++;
+    }
+    if (filters.receiptType) {
+        countQuery += ` AND receipt_type = $${paramIndex}`;
+        countParams.push(filters.receiptType);
+        paramIndex++;
+    }
+    
+    const totalResult = await postgresService.query(countQuery, countParams);
     const total = parseInt(totalResult.rows[0].count);
     
-    res.json({
-      receipts,
-      pagination: {
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total
-      }
-    });
+    res.json(createPaginatedResponse(receipts, total, page, limit));
   } catch (err) {
     console.error('Error fetching receipts:', err);
     res.status(500).json({ error: 'Failed to fetch receipts' });

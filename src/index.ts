@@ -107,6 +107,7 @@ app.get('/', (req: Request, res: Response) => {
 // For comprehensive metrics, use /monitoring/health
 app.get('/health', async (req: Request, res: Response) => {
   const startTime = Date.now();
+  
   try {
     await postgresService.query('SELECT 1');
     const dbLatency = Date.now() - startTime;
@@ -165,7 +166,7 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 // Setup Swagger documentation
 setupSwagger(app);
 
-// Mount routers
+// Mount API routes
 app.use('/auth', authRouter);
 app.use('/auth/password/reset', authPasswordResetRouter);
 app.use('/auth/email/verify', authEmailVerificationRouter);

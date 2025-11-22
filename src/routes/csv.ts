@@ -169,7 +169,7 @@ router.post('/import', authenticateToken, validateOwnership, csvImportRateLimit,
       });
     }
 
-    // Parse and import CSV
+    // Process CSV synchronously
     const importResult = await csvImportService.parseCsvFile(csvBuffer, userId);
     
     if (importResult.success && importResult.receipts.length > 0) {
