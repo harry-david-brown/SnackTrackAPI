@@ -273,47 +273,7 @@ export class PostgresService {
       }
     }
 
-    // 2. Add partial indexes for common query patterns
-    // Index for receipts with order_date (most queries filter by date)
-    try {
-      await this.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_has_date 
-        ON receipts(user_id, order_date DESC) 
-        WHERE order_date IS NOT NULL
-      `);
-    } catch (error: any) {
-      if (error.code !== '42P07') {
-        console.warn('⚠️  Partial index (has_date) creation warning:', error.message);
-      }
-    }
-
-    // Index for recent receipts (last 2 years) - most common query
-    try {
-      await this.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_recent 
-        ON receipts(user_id, order_date DESC) 
-        WHERE order_date >= NOW() - INTERVAL '2 years'
-      `);
-    } catch (error: any) {
-      if (error.code !== '42P07') {
-        console.warn('⚠️  Partial index (recent) creation warning:', error.message);
-      }
-    }
-
-    // Index for receipts with restaurant names (for analytics)
-    try {
-      await this.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_has_restaurant 
-        ON receipts(user_id, restaurant_name) 
-        WHERE restaurant_name IS NOT NULL
-      `);
-    } catch (error: any) {
-      if (error.code !== '42P07') {
-        console.warn('⚠️  Partial index (has_restaurant) creation warning:', error.message);
-      }
-    }
-
-    // 3. Add year column for easier partitioning/archiving
+    // 2. Add year column for easier partitioning/archiving
     // This is critical, so we'll try multiple times if needed
     try {
       await this.query(`

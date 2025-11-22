@@ -275,9 +275,6 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
       indexname,
       CASE 
         WHEN indexname LIKE '%items_gin%' THEN 'GIN index on JSONB items'
-        WHEN indexname LIKE '%has_date%' THEN 'Partial index for receipts with dates'
-        WHEN indexname LIKE '%recent%' THEN 'Partial index for recent receipts'
-        WHEN indexname LIKE '%has_restaurant%' THEN 'Partial index for receipts with restaurants'
         WHEN indexname LIKE '%year%' THEN 'Year column index'
         ELSE 'Other index'
       END as optimization_type
@@ -285,9 +282,6 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
     WHERE schemaname = 'public' AND tablename = 'receipts'
     AND (
       indexname LIKE '%items_gin%' OR
-      indexname LIKE '%has_date%' OR
-      indexname LIKE '%recent%' OR
-      indexname LIKE '%has_restaurant%' OR
       indexname LIKE '%year%'
     )
   `);
@@ -339,7 +333,6 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
       yearColumn: yearColumnCheck.rows.length > 0,
       status: {
         ginIndex: optimizationChecks.rows.some((r: any) => r.indexname.includes('items_gin')),
-        partialIndexes: optimizationChecks.rows.some((r: any) => r.indexname.includes('has_date') || r.indexname.includes('recent')),
         yearColumn: yearColumnCheck.rows.length > 0
       }
     },
@@ -351,7 +344,6 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
     })),
     _note: {
       ginIndex: "GIN index enables fast searches within JSONB items column",
-      partialIndexes: "Partial indexes are smaller and faster for filtered queries",
       yearColumn: "Year column enables future partitioning and archiving strategies"
     }
   });

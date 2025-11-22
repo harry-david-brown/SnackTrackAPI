@@ -7,9 +7,8 @@
  * Optimizations:
  * 1. Additional indexes for better query performance
  * 2. GIN index on JSONB items column for item searches
- * 3. Partial indexes for common query patterns
- * 4. Table statistics and maintenance
- * 5. Optional: Year column for easier partitioning/archiving
+ * 3. Table statistics and maintenance
+ * 4. Optional: Year column for easier partitioning/archiving
  */
 
 import { Pool } from 'pg';
@@ -28,16 +27,13 @@ export class DatabaseOptimizations {
       // 1. Add GIN index on JSONB items column for item searches
       await this.addItemsGinIndex();
 
-      // 2. Add partial indexes for common query patterns
-      await this.addPartialIndexes();
-
-      // 3. Add year column for easier partitioning/archiving (optional)
+      // 2. Add year column for easier partitioning/archiving (optional)
       await this.addYearColumn();
 
-      // 4. Add covering index for analytics queries
+      // 3. Add covering index for analytics queries
       await this.addAnalyticsCoveringIndex();
 
-      // 5. Update table statistics
+      // 4. Update table statistics
       await this.updateStatistics();
 
       console.log('✅ Database optimizations applied successfully');
@@ -61,41 +57,6 @@ export class DatabaseOptimizations {
       console.log('✅ GIN index on items column created');
     } catch (error: any) {
       if (error.code !== '42P07') { // Index already exists
-        throw error;
-      }
-    }
-  }
-
-  /**
-   * Add partial indexes for common query patterns
-   * These are smaller and faster than full indexes
-   */
-  private async addPartialIndexes(): Promise<void> {
-    try {
-      // Index for receipts with order_date (most queries filter by date)
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_has_date 
-        ON receipts(user_id, order_date DESC) 
-        WHERE order_date IS NOT NULL
-      `);
-
-      // Index for recent receipts (last 2 years) - most common query
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_recent 
-        ON receipts(user_id, order_date DESC) 
-        WHERE order_date >= NOW() - INTERVAL '2 years'
-      `);
-
-      // Index for receipts with restaurant names (for analytics)
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_receipts_has_restaurant 
-        ON receipts(user_id, restaurant_name) 
-        WHERE restaurant_name IS NOT NULL
-      `);
-
-      console.log('✅ Partial indexes created');
-    } catch (error: any) {
-      if (error.code !== '42P07') {
         throw error;
       }
     }
@@ -166,7 +127,6 @@ export class DatabaseOptimizations {
         CREATE INDEX IF NOT EXISTS idx_receipts_analytics_covering 
         ON receipts(user_id, order_date DESC) 
         INCLUDE (restaurant_name, amount_spent, items, receipt_type, data_source)
-        WHERE order_date IS NOT NULL
       `);
       console.log('✅ Analytics covering index created');
     } catch (error: any) {
