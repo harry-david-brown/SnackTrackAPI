@@ -53,7 +53,7 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **Sentry Integration** - Complete error tracking and APM with performance monitoring
 - [x] **APM Integration** - Application performance monitoring via Sentry
 - [x] **Alerting** - Error rate and performance alerts with health monitoring
-- [x] **Database Optimizations** - GIN index on JSONB items, partial indexes for common queries, year column for partitioning
+- [x] **Database Optimizations** - GIN index on JSONB items, year column for partitioning
 - [x] **Load Balancing Support** - Stateless design, shared Redis cache, graceful shutdown, health checks
 - [x] **Pagination for receipts (Doesn't do anything right now, future feature)** - Handle large datasets efficiently
 
