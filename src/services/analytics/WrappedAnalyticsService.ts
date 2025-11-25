@@ -494,6 +494,9 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate Missed Investment
+   * 
+   * Calculates what each receipt would be worth if invested in S&P 500
+   * from the date it was spent, then sums all values.
    */
   private async calculateMissedInvestment(receipts: ReceiptForAnalytics[]): Promise<MissedInvestment | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate).sort((a, b) => 
@@ -508,9 +511,23 @@ export class WrappedAnalyticsService {
     const daysElapsed = Math.floor((now.getTime() - firstOrder.orderDate!.getTime()) / (1000 * 60 * 60 * 24));
 
     // Average S&P 500 annual return ~10%
-    const yearsElapsed = daysElapsed / 365;
     const sp500Return = 10; // Simplified 10% annual
-    const wouldBeWorth = totalSpent * Math.pow(1 + sp500Return / 100, yearsElapsed);
+    const annualReturnRate = sp500Return / 100;
+    
+    // Calculate compound interest for each receipt based on when it was spent
+    let wouldBeWorth = 0;
+    validReceipts.forEach(receipt => {
+      const daysSinceReceipt = Math.floor((now.getTime() - receipt.orderDate!.getTime()) / (1000 * 60 * 60 * 24));
+      const yearsSinceReceipt = daysSinceReceipt / 365;
+      // Only calculate if the receipt date is in the past
+      if (yearsSinceReceipt > 0) {
+        wouldBeWorth += receipt.amountSpent * Math.pow(1 + annualReturnRate, yearsSinceReceipt);
+      } else {
+        // For future dates (shouldn't happen, but handle gracefully), just add the amount
+        wouldBeWorth += receipt.amountSpent;
+      }
+    });
+    
     const missedGains = wouldBeWorth - totalSpent;
 
     return {
