@@ -133,11 +133,11 @@ curl http://localhost:3000/users/YOUR_USER_ID/totalSpent \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # Get comprehensive analytics
-curl http://localhost:3000/validation/user/YOUR_USER_ID/summary \
+curl http://localhost:3000/users/YOUR_USER_ID/summary \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # Get wrapped analytics (viral insights)
-curl "http://localhost:3000/validation/user/YOUR_USER_ID/summary?includeWrapped=true" \
+curl "http://localhost:3000/users/YOUR_USER_ID/summary?includeWrapped=true" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -226,30 +226,64 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 
 ### Data Import
 - `POST /csv/import` - Import Uber Eats CSV/ZIP file
-  - Requires: `Authorization: Bearer {token}`
+  - **Requires:** `Authorization: Bearer {token}`
   - Form data: `csvFile` (file), `userId` (string)
 
 ### Users
-- `GET /users/:userId/totalSpent` - Get total spending for user
-  - Requires: `Authorization: Bearer {token}`
+- `GET /users/:id/totalSpent` - Get total spending for user
+  - **Requires:** `Authorization: Bearer {token}`
+  - Users can only access their own data
+- `GET /users/:id/summary` - Comprehensive user analytics
+  - **Requires:** `Authorization: Bearer {token}`
+  - Query params: `includeWrapped=true` (optional, adds viral insights)
+  - Users can only access their own data
 
 ### Receipts
-- `GET /receipts` - Get all receipts with pagination and filtering
-  - Query params: `userId`, `page`, `limit`, `startDate`, `endDate`, `restaurantName`, `minAmount`, `maxAmount`
-  - Requires: `Authorization: Bearer {token}`
+- `GET /receipts?userId={userId}` - Get receipts with pagination and filtering
+  - **Requires:** `Authorization: Bearer {token}`
+  - **Required:** `userId` query parameter (must match authenticated user)
+  - Query params: `page`, `limit`, `startDate`, `endDate`, `restaurantName`, `minAmount`, `maxAmount`
+  - Users can only query their own receipts
 
-### Analytics
-- `GET /validation/user/:userId/summary` - Comprehensive user analytics
-  - Query params: `includeWrapped=true` (optional, adds viral insights)
-  - Requires: `Authorization: Bearer {token}`
+### Database (Admin - API Key Required)
+- `GET /database/users` - List all users with statistics
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /database/stats` - Database statistics and health
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `DELETE /database/users/:id` - Delete user and all receipts
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+
+### Monitoring
+**Public Endpoints (No Authentication):**
+- `GET /monitoring/health` - System health with metrics
+- `GET /monitoring/alerts` - Alert status
+
+**Admin Endpoints (API Key Required):**
+- `GET /monitoring/log-level` - Get current log level
+- `POST /monitoring/log-level` - Change log level dynamically
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /monitoring/logs` - Get recent logs from in-memory buffer
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /monitoring/cache` - Redis cache statistics
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /monitoring/test-sentry` - Test Sentry error capture
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /monitoring/database-optimizations` - Database optimization status
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
+- `GET /monitoring/query-performance` - Query performance analysis
+  - **Requires:** `X-API-Key: {apiKey}` header or `?apiKey={apiKey}` query parameter
 
 ### System
 - `GET /` - Basic health check (returns "ALIVE")
 - `GET /health` - Detailed health check with database status
-- `GET /monitoring/health` - System health with metrics
 
 ### API Documentation
-- Swagger UI available at `/api-docs` (when running locally)
+- Swagger UI available at `/docs` (when running locally)
+
+### Security Notes
+- **JWT Authentication:** Required for all user-specific endpoints. Get token via `/auth/login` or `/auth/register`
+- **API Key Authentication:** Required for admin endpoints (database, monitoring). Set `API_KEY` environment variable in production
+- **Ownership Validation:** Users can only access their own data (enforced automatically)
 
 ---
 
@@ -372,20 +406,22 @@ If you want to run locally but connect to Railway's production database/Redis (n
 **View Logs:**
 ```bash
 # Local development (replace with production URL for production)
-curl http://localhost:3000/monitoring/logs
+# Requires API key for admin endpoints
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:3000/monitoring/logs
 
 # Filter by level
-curl "http://localhost:3000/monitoring/logs?level=error&limit=50"
+curl -H "X-API-Key: YOUR_API_KEY" "http://localhost:3000/monitoring/logs?level=error&limit=50"
 ```
 
 **Change Log Level (No Restart Required):**
 ```bash
-# Check current level
+# Check current level (public endpoint)
 curl http://localhost:3000/monitoring/log-level
 
-# Switch to debug mode
+# Switch to debug mode (requires API key)
 curl -X POST http://localhost:3000/monitoring/log-level \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
   -d '{"level": "debug"}'
 ```
 
@@ -415,14 +451,15 @@ curl -X POST http://localhost:3000/monitoring/log-level \
 ### Health Monitoring
 
 ```bash
-# System health
+# System health (public endpoint)
 GET /monitoring/health
 
-# Alert status
+# Alert status (public endpoint)
 GET /monitoring/alerts
 
-# Cache status
+# Cache status (requires API key)
 GET /monitoring/cache
+# Header: X-API-Key: YOUR_API_KEY
 ```
 
 ---
@@ -489,6 +526,7 @@ Configure these in the Railway dashboard:
 - `NODE_ENV=production` (usually set automatically)
 - `DATABASE_URL` - Railway PostgreSQL connection string (auto-provided)
 - `JWT_SECRET` - Secret key for JWT tokens
+- `API_KEY` - API key for admin endpoints (database, monitoring) - **Required for production security**
 - `SENTRY_DSN` - Sentry error tracking (recommended)
 - `REDIS_URL` - Railway Redis connection string (auto-provided if Redis service added)
 
