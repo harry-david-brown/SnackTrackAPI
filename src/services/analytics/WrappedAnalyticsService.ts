@@ -10,6 +10,7 @@ import {
   MostExpensiveOrder,
   CoffeeAddiction,
   NightOwl,
+  SpentThisYear,
   CouldHaveBought,
   MissedInvestment,
   CostPerMeal,
@@ -46,6 +47,7 @@ export class WrappedAnalyticsService {
       mostExpensiveOrder,
       coffeeAddiction,
       nightOwl,
+      spentThisYear,
       couldHaveBought,
       missedInvestment,
       costPerMeal,
@@ -65,6 +67,7 @@ export class WrappedAnalyticsService {
       this.calculateNightOwl(receipts),
       
       // Comparative analytics
+      this.calculateSpentThisYear(receipts),
       this.calculateCouldHaveBought(receipts),
       this.calculateMissedInvestment(receipts),
       this.calculateCostPerMeal(receipts),
@@ -88,6 +91,7 @@ export class WrappedAnalyticsService {
         nightOwl
       },
       comparative: {
+        spentThisYear,
         couldHaveBought,
         missedInvestment,
         costPerMeal
@@ -453,6 +457,36 @@ export class WrappedAnalyticsService {
       totalSpent: parseFloat(totalSpent.toFixed(2)),
       latestOrder: this.formatTime(latest.orderDate!),
       message: `${percentage}% of your orders were after 10pm`
+    };
+  }
+
+  /**
+   * Calculate Spent This Year
+   * Total spending for the current calendar year
+   */
+  private async calculateSpentThisYear(receipts: ReceiptForAnalytics[]): Promise<SpentThisYear | undefined> {
+    const currentYear = new Date().getFullYear();
+    const yearStart = new Date(currentYear, 0, 1); // January 1st of current year
+    const yearEnd = new Date(currentYear, 11, 31, 23, 59, 59); // December 31st of current year
+
+    // Filter receipts from current year
+    const thisYearReceipts = receipts.filter(r => {
+      if (!r.orderDate) return false;
+      return r.orderDate >= yearStart && r.orderDate <= yearEnd;
+    });
+
+    if (thisYearReceipts.length === 0) return undefined;
+
+    const totalSpent = thisYearReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
+    const orderCount = thisYearReceipts.length;
+    const averagePerOrder = totalSpent / orderCount;
+
+    return {
+      totalSpent: parseFloat(totalSpent.toFixed(2)),
+      year: currentYear,
+      orderCount,
+      averagePerOrder: parseFloat(averagePerOrder.toFixed(2)),
+      message: `You've spent $${totalSpent.toFixed(2)} on delivery this year`
     };
   }
 

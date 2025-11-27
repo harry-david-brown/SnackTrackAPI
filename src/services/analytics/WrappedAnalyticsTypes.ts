@@ -87,6 +87,14 @@ export interface NightOwl {
 
 // Comparative Analytics
 
+export interface SpentThisYear {
+  totalSpent: number;
+  year: number;
+  orderCount: number;
+  averagePerOrder: number;
+  message: string;
+}
+
 export interface CouldHaveBought {
   totalSpent: number;
   comparisons: Array<{
@@ -163,6 +171,7 @@ export interface WrappedAnalytics {
     nightOwl?: NightOwl;
   };
   comparative: {
+    spentThisYear?: SpentThisYear;
     couldHaveBought?: CouldHaveBought;
     missedInvestment?: MissedInvestment;
     costPerMeal?: CostPerMeal;
