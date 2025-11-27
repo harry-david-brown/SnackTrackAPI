@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
+import { validateApiKey } from '../middleware/security';
 
 const router = Router();
+
+// All database routes require API key authentication
+router.use(validateApiKey);
 
 /**
  * @swagger

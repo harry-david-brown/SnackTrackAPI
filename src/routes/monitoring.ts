@@ -9,6 +9,7 @@ import { container } from '../services/core/ServiceContainer';
 import { asyncHandler } from '../middleware/errorHandler';
 import { getLogLevel, setLogLevel, getRecentLogs } from '../config/logger';
 import { cacheService } from '../services/core/CacheService';
+import { validateApiKey } from '../middleware/security';
 
 const router = Router();
 
@@ -100,6 +101,8 @@ router.get('/log-level', asyncHandler(async (req: Request, res: Response) => {
  *     summary: Change log level dynamically
  *     description: Changes the log level at runtime without requiring a server restart
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -118,7 +121,8 @@ router.get('/log-level', asyncHandler(async (req: Request, res: Response) => {
  *       400:
  *         description: Invalid log level
  */
-router.post('/log-level', asyncHandler(async (req: Request, res: Response) => {
+// Sensitive monitoring routes require API key authentication
+router.post('/log-level', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   const { level } = req.body;
   
   if (!level) {
@@ -150,6 +154,8 @@ router.post('/log-level', asyncHandler(async (req: Request, res: Response) => {
  *     summary: Get recent logs from in-memory buffer
  *     description: Returns recent logs from the in-memory buffer (last 1000 entries). For long-term storage, use Better Stack/Logtail.
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
  *         name: level
@@ -173,7 +179,7 @@ router.post('/log-level', asyncHandler(async (req: Request, res: Response) => {
  *       200:
  *         description: Recent logs
  */
-router.get('/logs', asyncHandler(async (req: Request, res: Response) => {
+router.get('/logs', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   const level = req.query.level as string | undefined;
   const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
   const since = req.query.since as string | undefined;
@@ -195,11 +201,13 @@ router.get('/logs', asyncHandler(async (req: Request, res: Response) => {
  *     summary: Get Redis cache statistics and performance metrics
  *     description: Returns cache status, hit/miss rates, and performance impact
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     responses:
  *       200:
  *         description: Cache statistics
  */
-router.get('/cache', asyncHandler(async (req: Request, res: Response) => {
+router.get('/cache', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   const cacheStats = await cacheService.getStats();
   
   res.json({
@@ -218,11 +226,13 @@ router.get('/cache', asyncHandler(async (req: Request, res: Response) => {
  *     summary: Test Sentry error capture
  *     description: Intentionally triggers an error to test Sentry integration. Useful for verifying error tracking is working.
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     responses:
  *       500:
  *         description: Test error (this is expected)
  */
-router.get('/test-sentry', asyncHandler(async (req: Request, res: Response) => {
+router.get('/test-sentry', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   // Intentionally throw an error to test Sentry
   throw new Error('Sentry test error - This is intentional to verify error tracking is working');
 }));
@@ -234,11 +244,13 @@ router.get('/test-sentry', asyncHandler(async (req: Request, res: Response) => {
  *     summary: Get database optimization status
  *     description: Returns information about database indexes, table sizes, and optimization status
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     responses:
  *       200:
  *         description: Database optimization status
  */
-router.get('/database-optimizations', asyncHandler(async (req: Request, res: Response) => {
+router.get('/database-optimizations', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   const postgres = container.postgres;
 
   // Get table sizes
@@ -356,6 +368,8 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
  *     summary: Test database query performance (bypasses Redis cache)
  *     description: Runs EXPLAIN ANALYZE on common queries to verify index usage and performance
  *     tags: [Monitoring]
+ *     security:
+ *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
  *         name: userId
@@ -367,7 +381,7 @@ router.get('/database-optimizations', asyncHandler(async (req: Request, res: Res
  *       200:
  *         description: Query performance analysis
  */
-router.get('/query-performance', asyncHandler(async (req: Request, res: Response) => {
+router.get('/query-performance', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
   let { userId } = req.query;
   const postgres = container.postgres;
 

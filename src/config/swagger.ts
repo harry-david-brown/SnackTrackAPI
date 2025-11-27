@@ -348,7 +348,7 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
           type: 'apiKey',
           in: 'header',
           name: 'X-API-Key',
-          description: 'API key for authentication (optional for most endpoints)'
+          description: 'API key for authentication. Required for admin endpoints (database, monitoring). Can also be passed as query parameter: ?apiKey=your-key'
         }
       },
       responses: {

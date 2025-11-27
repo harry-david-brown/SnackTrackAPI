@@ -4,6 +4,8 @@ import { ReceiptType } from '../models/Receipt';
 import { PostgresService } from '../services/data/PostgresService';
 import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
 import { paginationMiddleware, parsePagination, createPaginatedResponse } from '../middleware/pagination';
+import { authenticateToken, validateOwnership } from '../middleware/auth';
+import { ValidationError } from '../middleware/errorHandler';
 
 const router = Router();
 const postgresService = container.postgres;
@@ -16,12 +18,19 @@ router.use(paginationMiddleware);
  * @swagger
  * /receipts:
  *   get:
- *     summary: Get all receipts
- *     description: Retrieve receipts with optional filtering and pagination
+ *     summary: Get receipts (requires authentication)
+ *     description: Retrieve receipts with optional filtering and pagination. Requires JWT authentication. Users can only query their own receipts (userId must match authenticated user).
  *     tags: [Receipts]
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID (required, must match authenticated user)
  *       - in: query
  *         name: limit
  *         schema:
@@ -37,12 +46,6 @@ router.use(paginationMiddleware);
  *           minimum: 0
  *           default: 0
  *         description: Number of receipts to skip
- *       - in: query
- *         name: userId
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Filter by user ID
  *       - in: query
  *         name: restaurantName
  *         schema:
@@ -107,13 +110,25 @@ router.use(paginationMiddleware);
  *               $ref: '#/components/schemas/Error'
  */
 // GET /receipts - Get all receipts with optional filters
-router.get('/', async (req: Request, res: Response) => {
+// Requires authentication - users can only query their own receipts
+router.get('/', authenticateToken, async (req: Request, res: Response) => {
   try {
     const filters: ReceiptFilters = {};
     const { page, limit, offset } = parsePagination(req);
 
-    // Parse filters from query parameters
-    if (req.query.userId) filters.userId = req.query.userId as string;
+    // Require userId filter and ensure it matches authenticated user
+    if (!req.query.userId) {
+      throw new ValidationError('userId query parameter is required');
+    }
+    
+    const requestedUserId = req.query.userId as string;
+    
+    // Ensure user can only query their own receipts
+    if (req.user?.userId !== requestedUserId) {
+      throw new ValidationError('You can only query your own receipts');
+    }
+    
+    filters.userId = requestedUserId;
     if (req.query.receiptType) filters.receiptType = req.query.receiptType as ReceiptType;
     if (req.query.restaurantName) filters.restaurantName = req.query.restaurantName as string;
     if (req.query.startDate) filters.startDate = new Date(req.query.startDate as string);
