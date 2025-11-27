@@ -577,17 +577,30 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate Cost Per Meal (Delivery Tax)
-   * Calculates actual delivery fees: totalOrderAmount - sum(itemPrices)
+   * Calculates all extra costs beyond base food prices:
+   * extraCosts = totalOrderAmount - sum(itemPrices)
+   * 
+   * Where totalOrderAmount (amountSpent) includes:
+   * - Base food item prices
+   * - Delivery fee
+   * - Service fee
+   * - Tax
+   * - Tip
+   * 
+   * This gives us the true "delivery tax" - all costs beyond getting the food yourself.
    */
   private async calculateCostPerMeal(receipts: ReceiptForAnalytics[]): Promise<CostPerMeal | undefined> {
     if (receipts.length === 0) return undefined;
 
-    // Calculate delivery fees for each receipt
-    // Delivery fee = amountSpent - sum(item.price * item.quantity)
-    const receiptsWithDeliveryFees: Array<{ receipt: ReceiptForAnalytics; deliveryFee: number; itemCount: number }> = [];
+    // Calculate extra costs for each receipt
+    // extraCosts = amountSpent - sum(item.price * item.quantity)
+    // amountSpent is the final total including delivery fee, service fee, tax, and tip
+    const receiptsWithExtraCosts: Array<{ receipt: ReceiptForAnalytics; extraCosts: number; itemCount: number }> = [];
+    let skippedReceipts = 0;
+    let skippedReasons = { noItems: 0, invalidPrices: 0, itemSubtotalTooHigh: 0 };
     
     receipts.forEach(receipt => {
-      // Calculate sum of item prices
+      // Calculate sum of item prices (base food cost)
       const itemSubtotal = receipt.items.reduce((sum, item) => {
         // Only count items with valid prices (> 0)
         if (item.price > 0) {
@@ -596,31 +609,85 @@ export class WrappedAnalyticsService {
         return sum;
       }, 0);
 
-      // Only include receipts where we have valid item prices
-      // If itemSubtotal is 0 or greater than amountSpent, skip this receipt
-      if (itemSubtotal > 0 && itemSubtotal < receipt.amountSpent) {
-        const deliveryFee = receipt.amountSpent - itemSubtotal;
-        const itemCount = receipt.items.reduce((sum, item) => sum + item.quantity, 0);
-        receiptsWithDeliveryFees.push({ receipt, deliveryFee, itemCount });
+      const itemCount = receipt.items.reduce((sum, item) => sum + item.quantity, 0);
+
+      // Validate we can calculate extra costs
+      if (itemCount === 0) {
+        skippedReceipts++;
+        skippedReasons.noItems++;
+        return;
+      }
+
+      if (itemSubtotal <= 0) {
+        skippedReceipts++;
+        skippedReasons.invalidPrices++;
+        return;
+      }
+
+      // If itemSubtotal >= amountSpent, something is wrong with the data
+      // (item prices might be inflated or include fees already)
+      // We'll still include it but log it for debugging
+      if (itemSubtotal >= receipt.amountSpent) {
+        skippedReceipts++;
+        skippedReasons.itemSubtotalTooHigh++;
+        return;
+      }
+
+      // Calculate extra costs (delivery fee + service fee + tax + tip)
+      // This is the difference between what was paid and the base food cost
+      const extraCosts = receipt.amountSpent - itemSubtotal;
+      
+      // Only include if extra costs are positive (should always be, but safety check)
+      if (extraCosts > 0) {
+        receiptsWithExtraCosts.push({ receipt, extraCosts, itemCount });
       }
     });
 
     // Need at least some receipts with valid data
-    if (receiptsWithDeliveryFees.length === 0) return undefined;
+    if (receiptsWithExtraCosts.length === 0) {
+      // Log why we have no data for debugging
+      console.warn(`[WrappedAnalytics] calculateCostPerMeal: No valid receipts. Total: ${receipts.length}, Skipped: ${skippedReceipts}`, skippedReasons);
+      return undefined;
+    }
 
-    // Aggregate delivery fees
-    const totalDeliveryFees = receiptsWithDeliveryFees.reduce((sum, r) => sum + r.deliveryFee, 0);
-    const averageDeliveryFee = totalDeliveryFees / receiptsWithDeliveryFees.length;
+    // Aggregate extra costs
+    const totalDeliveryFees = receiptsWithExtraCosts.reduce((sum, r) => sum + r.extraCosts, 0);
+    const averageDeliveryFee = totalDeliveryFees / receiptsWithExtraCosts.length;
     
     // Calculate total meals (sum of all item quantities)
-    const totalMeals = receiptsWithDeliveryFees.reduce((sum, r) => sum + r.itemCount, 0);
+    const totalMeals = receiptsWithExtraCosts.reduce((sum, r) => sum + r.itemCount, 0);
     const averageDeliveryFeePerMeal = totalMeals > 0 ? totalDeliveryFees / totalMeals : averageDeliveryFee;
+
+    // Log calculation details for debugging
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[WrappedAnalytics] calculateCostPerMeal: ${receiptsWithExtraCosts.length}/${receipts.length} receipts used. ` +
+        `Total extra costs: $${totalDeliveryFees.toFixed(2)}, ` +
+        `Avg per order: $${averageDeliveryFee.toFixed(2)}, ` +
+        `Avg per meal: $${averageDeliveryFeePerMeal.toFixed(2)}, ` +
+        `Total meals: ${totalMeals}`);
+      
+      // Show sample calculations for first 3 receipts
+      if (receiptsWithExtraCosts.length > 0) {
+        console.log(`[WrappedAnalytics] Sample calculations (first 3 receipts):`);
+        receiptsWithExtraCosts.slice(0, 3).forEach((r, idx) => {
+          const itemSubtotal = r.receipt.items.reduce((sum, item) => {
+            if (item.price > 0) return sum + (item.price * item.quantity);
+            return sum;
+          }, 0);
+          console.log(`  Receipt ${idx + 1}: amountSpent=$${r.receipt.amountSpent.toFixed(2)}, ` +
+            `itemSubtotal=$${itemSubtotal.toFixed(2)}, ` +
+            `extraCosts=$${r.extraCosts.toFixed(2)}, ` +
+            `items=${r.itemCount}, ` +
+            `perMeal=$${(r.extraCosts / r.itemCount).toFixed(2)}`);
+        });
+      }
+    }
 
     return {
       totalDeliveryFees: parseFloat(totalDeliveryFees.toFixed(2)),
       averageDeliveryFee: parseFloat(averageDeliveryFee.toFixed(2)),
       averageDeliveryFeePerMeal: parseFloat(averageDeliveryFeePerMeal.toFixed(2)),
-      totalOrders: receiptsWithDeliveryFees.length,
+      totalOrders: receiptsWithExtraCosts.length,
       message: `You paid $${averageDeliveryFeePerMeal.toFixed(2)} extra per meal in delivery fees`
     };
   }

@@ -74,3 +74,4 @@ async function insertTestReceipts() {
 
 insertTestReceipts();
 
+
