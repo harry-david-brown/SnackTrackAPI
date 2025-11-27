@@ -576,23 +576,52 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Cost Per Meal
+   * Calculate Cost Per Meal (Delivery Tax)
+   * Calculates actual delivery fees: totalOrderAmount - sum(itemPrices)
    */
   private async calculateCostPerMeal(receipts: ReceiptForAnalytics[]): Promise<CostPerMeal | undefined> {
     if (receipts.length === 0) return undefined;
 
-    const totalSpent = receipts.reduce((sum, r) => sum + r.amountSpent, 0);
-    const deliveryAverage = totalSpent / receipts.length;
-    const groceryEstimate = 7.50; // Average meal cooked at home
-    const difference = deliveryAverage - groceryEstimate;
-    const annualWaste = difference * receipts.length;
+    // Calculate delivery fees for each receipt
+    // Delivery fee = amountSpent - sum(item.price * item.quantity)
+    const receiptsWithDeliveryFees: Array<{ receipt: ReceiptForAnalytics; deliveryFee: number; itemCount: number }> = [];
+    
+    receipts.forEach(receipt => {
+      // Calculate sum of item prices
+      const itemSubtotal = receipt.items.reduce((sum, item) => {
+        // Only count items with valid prices (> 0)
+        if (item.price > 0) {
+          return sum + (item.price * item.quantity);
+        }
+        return sum;
+      }, 0);
+
+      // Only include receipts where we have valid item prices
+      // If itemSubtotal is 0 or greater than amountSpent, skip this receipt
+      if (itemSubtotal > 0 && itemSubtotal < receipt.amountSpent) {
+        const deliveryFee = receipt.amountSpent - itemSubtotal;
+        const itemCount = receipt.items.reduce((sum, item) => sum + item.quantity, 0);
+        receiptsWithDeliveryFees.push({ receipt, deliveryFee, itemCount });
+      }
+    });
+
+    // Need at least some receipts with valid data
+    if (receiptsWithDeliveryFees.length === 0) return undefined;
+
+    // Aggregate delivery fees
+    const totalDeliveryFees = receiptsWithDeliveryFees.reduce((sum, r) => sum + r.deliveryFee, 0);
+    const averageDeliveryFee = totalDeliveryFees / receiptsWithDeliveryFees.length;
+    
+    // Calculate total meals (sum of all item quantities)
+    const totalMeals = receiptsWithDeliveryFees.reduce((sum, r) => sum + r.itemCount, 0);
+    const averageDeliveryFeePerMeal = totalMeals > 0 ? totalDeliveryFees / totalMeals : averageDeliveryFee;
 
     return {
-      deliveryAverage: parseFloat(deliveryAverage.toFixed(2)),
-      groceryEstimate,
-      difference: parseFloat(difference.toFixed(2)),
-      annualWaste: parseFloat(annualWaste.toFixed(2)),
-      message: `You paid $${difference.toFixed(2)} extra per meal for convenience`
+      totalDeliveryFees: parseFloat(totalDeliveryFees.toFixed(2)),
+      averageDeliveryFee: parseFloat(averageDeliveryFee.toFixed(2)),
+      averageDeliveryFeePerMeal: parseFloat(averageDeliveryFeePerMeal.toFixed(2)),
+      totalOrders: receiptsWithDeliveryFees.length,
+      message: `You paid $${averageDeliveryFeePerMeal.toFixed(2)} extra per meal in delivery fees`
     };
   }
 

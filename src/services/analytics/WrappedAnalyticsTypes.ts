@@ -115,10 +115,10 @@ export interface MissedInvestment {
 }
 
 export interface CostPerMeal {
-  deliveryAverage: number;
-  groceryEstimate: number;
-  difference: number;
-  annualWaste: number;
+  totalDeliveryFees: number;        // Sum of all delivery fees
+  averageDeliveryFee: number;       // Average fee per order
+  averageDeliveryFeePerMeal: number; // Average fee per meal (if applicable)
+  totalOrders: number;              // Number of orders used in calculation
   message: string;
 }
 
