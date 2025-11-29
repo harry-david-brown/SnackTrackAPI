@@ -19,11 +19,18 @@ export class GmailClient implements EmailClient {
       return this.getMockEmails(user);
     }
 
-    // Use real Gmail API (credentials are configured)
+    // Use real Gmail API with user-specific tokens
     const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
     const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
-    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/callback';
-    const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
+    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/gmail/callback';
+
+    // Use user's refresh token if available, otherwise fall back to env var (for backward compatibility)
+    const REFRESH_TOKEN = user.gmailRefreshToken || process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
+
+    if (!REFRESH_TOKEN || REFRESH_TOKEN === 'your_refresh_token_here') {
+      console.log('❌ No Gmail refresh token available for user');
+      return this.getMockEmails(user);
+    }
 
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
     oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });

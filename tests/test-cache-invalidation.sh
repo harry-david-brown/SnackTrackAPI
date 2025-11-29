@@ -32,7 +32,7 @@ echo ""
 
 # Step 2: Get summary (should cache it with 0 receipts)
 echo "2️⃣  Getting initial summary (0 receipts)..."
-SUMMARY1=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY1=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 
 RECEIPTS_BEFORE=$(echo "$SUMMARY1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('statistics', {}).get('totalReceipts', 0))" 2>/dev/null)
@@ -43,7 +43,7 @@ echo ""
 
 # Step 3: Verify cache hit
 echo "3️⃣  Getting summary again (should hit cache)..."
-SUMMARY2=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY2=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 
 echo "✅ Second request completed"
@@ -67,7 +67,7 @@ echo ""
 
 # Step 5: Get summary again (should be cache MISS after invalidation)
 echo "5️⃣  Getting summary after upload (cache should be invalidated)..."
-SUMMARY3=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY3=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 
 RECEIPTS_AFTER=$(echo "$SUMMARY3" | python3 -c "import sys,json; print(json.load(sys.stdin).get('statistics', {}).get('totalReceipts', 0))" 2>/dev/null)

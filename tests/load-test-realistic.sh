@@ -111,7 +111,7 @@ for i in $(seq 1 $NUM_USERS); do
         make_request "$API_URL/health" "" "$i-$j" &
         ;;
       1)
-        make_request "$API_URL/validation/user/$USER_ID/summary" "$TOKEN" "$i-$j" &
+        make_request "$API_URL/users/$USER_ID/summary" "$TOKEN" "$i-$j" &
         ;;
       2)
         make_request "$API_URL/users/$USER_ID/totalSpent" "$TOKEN" "$i-$j" &

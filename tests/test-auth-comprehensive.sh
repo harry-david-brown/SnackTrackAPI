@@ -169,7 +169,7 @@ echo ""
 
 # Test 14: Access user summary (protected route)
 echo -e "${YELLOW}Test 14: Access user summary with token${NC}"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_URL/validation/user/$USER_ID/summary" \
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
 test_endpoint "Access user summary" "200" "$HTTP_CODE"

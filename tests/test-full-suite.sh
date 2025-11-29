@@ -111,7 +111,7 @@ fi
 # Test 6: Protected Endpoint Without Auth (Should Fail)
 echo ""
 echo "3️⃣  Testing authorization..."
-UNAUTH=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/validation/user/$USER_ID/summary")
+UNAUTH=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/users/$USER_ID/summary")
 
 if [ "$UNAUTH" = "401" ]; then
   test_pass "Protected endpoint blocks unauthorized access"
@@ -120,7 +120,7 @@ else
 fi
 
 # Test 7: Protected Endpoint With Auth (Should Succeed)
-AUTH_SUMMARY=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/validation/user/$USER_ID/summary" \
+AUTH_SUMMARY=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 
 if [ "$AUTH_SUMMARY" = "200" ]; then
@@ -133,7 +133,7 @@ fi
 echo ""
 echo "4️⃣  Testing Redis caching..."
 START=$(date +%s%N)
-SUMMARY1=$(curl -s "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY1=$(curl -s "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 LATENCY1=$((($END - $START) / 1000000))
@@ -146,7 +146,7 @@ fi
 
 # Test 9: Cache Hit (Second Request - Should Be Faster)
 START=$(date +%s%N)
-SUMMARY2=$(curl -s "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY2=$(curl -s "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 LATENCY2=$((($END - $START) / 1000000))
@@ -191,7 +191,7 @@ fi
 # Test 12: Cache Invalidation After Upload
 echo ""
 echo "6️⃣  Testing cache invalidation..."
-SUMMARY3=$(curl -s "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY3=$(curl -s "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 
 RECEIPTS=$(echo "$SUMMARY3" | python3 -c "import sys,json; print(json.load(sys.stdin).get('statistics', {}).get('totalReceipts', 0))" 2>/dev/null)
@@ -217,7 +217,7 @@ USER_ID2=$(echo "$REGISTER2" | python3 -c "import sys,json; print(json.load(sys.
 ACCESS_TOKEN2=$(echo "$REGISTER2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('accessToken', ''))" 2>/dev/null)
 
 # Try to access User 1's data with User 2's token
-FORBIDDEN=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/validation/user/$USER_ID/summary" \
+FORBIDDEN=$(curl -s -w "%{http_code}" -o /dev/null "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN2")
 
 if [ "$FORBIDDEN" = "403" ]; then

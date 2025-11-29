@@ -7,6 +7,10 @@ export interface User {
   password?: string; // Optional - not returned in API responses
   emailVerified?: boolean; // Email verification status
   timezone?: string; // IANA timezone (e.g., 'America/New_York', 'Europe/London')
+  gmailRefreshToken?: string; // Gmail OAuth refresh token
+  gmailAccessToken?: string; // Gmail OAuth access token
+  gmailTokenExpiry?: string; // When the access token expires
+  gmailConnected?: boolean; // Whether Gmail is connected
   createdAt?: string;
 }
 

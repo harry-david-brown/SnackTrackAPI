@@ -11,6 +11,7 @@ import receiptsRouter from './routes/receipts';
 import csvRouter from './routes/csv';
 import databaseRouter from './routes/database';
 import monitoringRouter from './routes/monitoring';
+import gmailRouter from './routes/gmail';
 import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
@@ -174,6 +175,7 @@ app.use('/receipts', receiptsRouter);
 app.use('/csv', csvRouter);
 app.use('/database', databaseRouter);
 app.use('/monitoring', monitoringRouter);
+app.use('/gmail', gmailRouter);
 
 // Error handling middleware (must be last)
 // Our custom error handler (logs to Winston and handles response formatting)

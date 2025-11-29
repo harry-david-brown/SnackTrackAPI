@@ -130,7 +130,7 @@ function testHealthCheck() {
 
 function testAnalytics(user) {
   const response = http.get(
-    `${BASE_URL}/validation/user/${user.userId}/summary`,
+    `${BASE_URL}/users/${user.userId}/summary`,
     {
       headers: { 'Authorization': `Bearer ${user.accessToken}` },
       tags: { endpoint: 'analytics' }

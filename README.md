@@ -10,7 +10,7 @@ A Node.js/TypeScript API that automatically tracks your food spending through mu
 - [x] **CSV/ZIP Import** - Parse and import Uber Eats data
 - [x] **Spending Analytics** - Comprehensive user summaries and insights
 - [x] **Wrapped Analytics** - Spotify-style shareable insights (13 viral categories)
-- [x] **Email Integration** - Parse receipts from Gmail
+- [x] **Email Integration** - Parse receipts from Gmail (now with OAuth connection!)
 - [x] **Restaurant Chain Consolidation** - Smart grouping across locations
 - [x] **JWT Authentication** - Secure user authentication and authorization
 - [x] **Password Reset** - OTP-based password recovery with email delivery
@@ -225,9 +225,31 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 - `POST /auth/email/verify/confirm` - Confirm email verification
 
 ### Data Import
+#### CSV/ZIP Upload
 - `POST /csv/import` - Import Uber Eats CSV/ZIP file
   - **Requires:** `Authorization: Bearer {token}`
   - Form data: `csvFile` (file), `userId` (string)
+
+#### Gmail Integration (NEW! 🎉)
+**Mobile OAuth Flow:**
+- `GET /gmail/auth-url` - Get OAuth URL for mobile apps
+  - **Requires:** `Authorization: Bearer {token}`
+  - Returns: `{"authUrl": string, "state": string}`
+- `POST /gmail/exchange-token` - Exchange authorization code for tokens
+  - **Requires:** `Authorization: Bearer {token}`
+  - Body: `{"code": string}` - Authorization code from Google
+
+**Import & Management:**
+- `GET /gmail/status` - Check Gmail connection status
+  - **Requires:** `Authorization: Bearer {token}`
+  - Returns: `{"connected": boolean, "email": string}`
+- `POST /gmail/import` - Import Uber Eats receipts from Gmail
+  - **Requires:** `Authorization: Bearer {token}`
+  - Body: `{"replaceExisting": boolean}` (optional)
+- `POST /gmail/disconnect` - Disconnect Gmail account
+  - **Requires:** `Authorization: Bearer {token}`
+
+📱 **Designed for React Native - See [MOBILE_INTEGRATION_GUIDE.md](./MOBILE_INTEGRATION_GUIDE.md)**
 
 ### Users
 - `GET /users/:id/totalSpent` - Get total spending for user

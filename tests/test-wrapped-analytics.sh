@@ -47,7 +47,7 @@ echo ""
 # 3. Test summary WITHOUT wrapped analytics
 echo "3️⃣  Testing summary (without wrapped)..."
 START=$(date +%s%N)
-SUMMARY=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 DURATION_MS=$((($END - $START) / 1000000))
@@ -62,7 +62,7 @@ echo "   (This may take a few seconds - 14 analytics calculations)"
 echo ""
 
 START=$(date +%s%N)
-WRAPPED=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary?includeWrapped=true" \
+WRAPPED=$(curl -s -X GET "$API_URL/users/$USER_ID/summary?includeWrapped=true" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 DURATION_MS=$((($END - $START) / 1000000))
@@ -183,7 +183,7 @@ fi
 # 5. Test caching (second request should be faster)
 echo "5️⃣  Testing cache performance..."
 START=$(date +%s%N)
-CACHED=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary?includeWrapped=true" \
+CACHED=$(curl -s -X GET "$API_URL/users/$USER_ID/summary?includeWrapped=true" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 CACHED_MS=$((($END - $START) / 1000000))
