@@ -14,15 +14,22 @@ import { GmailImportService } from '../services/import/GmailImportService';
 
 const router = Router();
 
-// Gmail OAuth configuration
-const getOAuth2Client = (): OAuth2Client => {
+/**
+ * Gmail OAuth Configuration
+ * Returns OAuth2Client with proper redirect URI based on platform
+ */
+const getOAuth2Client = (platform: 'web' | 'mobile' = 'mobile'): OAuth2Client => {
   const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
   const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-  const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/gmail/callback';
-
+  
   if (!CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error('Gmail OAuth credentials not configured');
+    throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
   }
+
+  // Choose redirect URI based on platform
+  const REDIRECT_URI = platform === 'web' 
+    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8082/oauth-callback')
+    : (process.env.MOBILE_REDIRECT_URI || 'snacktrack://oauth/callback');
 
   return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 };
@@ -56,39 +63,37 @@ const getOAuth2Client = (): OAuth2Client => {
  *         description: Internal server error
  */
 router.get('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    
-    if (!userId) {
-      throw new ValidationError('User ID not found in token');
-    }
-
-    const oAuth2Client = getOAuth2Client();
-    
-    // For mobile apps, use custom scheme for redirect (if configured)
-    const redirectUri = process.env.MOBILE_REDIRECT_URI || process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/gmail/callback';
-
-    // Generate OAuth URL with appropriate scopes
-    const authUrl = oAuth2Client.generateAuthUrl({
-      access_type: 'offline', // Required to get refresh token
-      prompt: 'consent', // Force consent screen to ensure refresh token
-      scope: [
-        'https://www.googleapis.com/auth/gmail.readonly',
-      ],
-      state: userId, // Pass userId in state to identify user after callback
-      redirect_uri: redirectUri
-    });
-
-    console.log(`🔐 Generated Gmail OAuth URL for user: ${userId}`);
-    
-    res.json({
-      authUrl,
-      state: userId
-    });
-  } catch (error) {
-    console.error('Error generating Gmail OAuth URL:', error);
-    throw new ValidationError('Failed to initiate Gmail connection');
+  const userId = req.user?.userId;
+  
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
   }
+
+  // Get platform from query parameter (web or mobile)
+  const platform = (req.query.platform as string)?.toLowerCase() === 'web' ? 'web' : 'mobile';
+  
+  // Create OAuth2Client with platform-specific redirect URI
+  const oAuth2Client = getOAuth2Client(platform);
+  const redirectUri = platform === 'web' 
+    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8082/oauth-callback')
+    : (process.env.MOBILE_REDIRECT_URI || 'snacktrack://oauth/callback');
+
+  // Generate OAuth URL
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: ['https://www.googleapis.com/auth/gmail.readonly'],
+    state: userId,
+  });
+
+  console.log(`🔐 Gmail OAuth initiated - User: ${userId} | Platform: ${platform} | Redirect: ${redirectUri}`);
+  
+  res.json({
+    authUrl,
+    state: userId,
+    platform,
+    redirectUri // For debugging
+  });
 }));
 
 /**
