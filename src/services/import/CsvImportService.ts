@@ -374,8 +374,8 @@ export class CsvImportService {
       await this.postgres.query(`
         INSERT INTO receipts (
           user_id, receipt_type, data_source, restaurant_name, order_date, 
-          amount_spent, items
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          amount_spent, items, delivery_time
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
         receipt.userId,
         receipt.receiptType,
@@ -383,7 +383,8 @@ export class CsvImportService {
         receipt.restaurantName,
         receipt.orderDate,
         receipt.amountSpent,
-        receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]'
+        receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
+        receipt.deliveryTime || null
       ]);
     }
   }
