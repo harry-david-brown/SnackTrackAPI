@@ -749,18 +749,18 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Delivery Waits (DoorDash only)
+   * Calculate Delivery Waits (DoorDash and Uber Eats)
    * Calculates total and average time spent waiting for deliveries
    */
   private async calculateDeliveryWaits(receipts: ReceiptForAnalytics[]): Promise<DeliveryWaits | undefined> {
-    // Only calculate for DoorDash receipts that have both order date and delivery time
-    const doorDashReceipts = receipts.filter(r => 
-      r.receiptType === 'doordash' && 
+    // Calculate for DoorDash and Uber Eats receipts that have both order date and delivery time
+    const receiptsWithWaitTime = receipts.filter(r => 
+      (r.receiptType === 'doordash' || r.receiptType === 'uber_eats') && 
       r.orderDate && 
       r.deliveryTime
     );
 
-    if (doorDashReceipts.length === 0) {
+    if (receiptsWithWaitTime.length === 0) {
       return undefined;
     }
 
@@ -770,7 +770,7 @@ export class WrappedAnalyticsService {
       minutes: number;
     }> = [];
 
-    doorDashReceipts.forEach(receipt => {
+    receiptsWithWaitTime.forEach(receipt => {
       if (receipt.orderDate && receipt.deliveryTime) {
         const waitMs = receipt.deliveryTime.getTime() - receipt.orderDate.getTime();
         const waitMinutes = Math.round(waitMs / (1000 * 60));

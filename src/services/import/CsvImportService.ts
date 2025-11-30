@@ -321,6 +321,16 @@ export class CsvImportService {
         console.warn(`Invalid date format: ${firstRow.Request_Time_Local}`);
       }
 
+      // Parse delivery time (Final_Delivery_Time_Local is when order was delivered)
+      let deliveryTime: Date | undefined;
+      try {
+        if (firstRow.Final_Delivery_Time_Local) {
+          deliveryTime = new Date(firstRow.Final_Delivery_Time_Local);
+        }
+      } catch (error) {
+        console.warn(`Invalid delivery time format: ${firstRow.Final_Delivery_Time_Local}`);
+      }
+
       // Parse order price - use the maximum Order_Price from all rows in case of inconsistencies
       // All rows should have the same Order_Price, but we take max to handle any data issues
       const orderPrices = orderRows.map(row => parseFloat(row.Order_Price)).filter(p => !isNaN(p));
@@ -345,7 +355,8 @@ export class CsvImportService {
         ReceiptType.UBER_EATS, // Set receipt_type to UBER_EATS
         firstRow.Restaurant_Name,
         orderDate,
-        DataSource.CSV // dataSource
+        DataSource.CSV, // dataSource
+        deliveryTime // delivery_time for wait time analytics
       );
 
       receipts.push(receipt);
