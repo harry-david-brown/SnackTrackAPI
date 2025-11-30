@@ -11,6 +11,7 @@ import { userCreationRateLimit } from '../middleware/security';
 import { validateEmail } from '../middleware/validation';
 import { AuthService } from '../services/AuthService';
 import { LoginRequest, RegisterRequest, RefreshTokenRequest } from '../models/Token';
+import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
 
 const router = Router();
 
@@ -86,8 +87,11 @@ router.post('/register', userCreationRateLimit, asyncHandler(async (req: Request
     throw new ValidationError('Invalid email format', 'email');
   }
 
+  // Detect timezone from request (header or body)
+  const timezone = detectTimezoneFromRequest(req) || getDefaultTimezone();
+
   const authService = container.get<AuthService>('authService');
-  const result = await authService.register(email, password);
+  const result = await authService.register(email, password, timezone);
 
   res.status(201).json(result);
 }));

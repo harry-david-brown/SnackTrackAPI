@@ -102,19 +102,22 @@ export class UserRepository {
     };
   }
 
-  async createUserWithPassword(email: string, hashedPassword: string): Promise<string> {
+  async createUserWithPassword(email: string, hashedPassword: string, timezone?: string): Promise<string> {
     // First check if user already exists
     const existingUser = await this.findByEmail(email);
     if (existingUser) {
       throw new Error('User with this email already exists');
     }
 
+    // Use provided timezone or default
+    const userTimezone = timezone || 'America/New_York';
+
     // Create new user with password (email_verified defaults to false)
     const userId = uuidv4();
     try {
       const result = await this.postgres.query(
-        'INSERT INTO users (id, email, password, email_verified, created_at) VALUES ($1, $2, $3, FALSE, NOW()) RETURNING id',
-        [userId, email, hashedPassword]
+        'INSERT INTO users (id, email, password, email_verified, timezone, created_at) VALUES ($1, $2, $3, FALSE, $4, NOW()) RETURNING id',
+        [userId, email, hashedPassword, userTimezone]
       );
       return result.rows[0].id;
     } catch (error: any) {

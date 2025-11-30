@@ -95,7 +95,7 @@ export class AuthService {
   /**
    * Register a new user with email and password
    */
-  async register(email: string, password: string): Promise<AuthResponse> {
+  async register(email: string, password: string, timezone?: string): Promise<AuthResponse> {
     // Normalize email
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -114,10 +114,11 @@ export class AuthService {
     // Hash password
     const hashedPassword = await UserModel.hashPassword(password);
 
-    // Create user
+    // Create user with timezone
     const userId = await this.userRepository.createUserWithPassword(
       normalizedEmail,
-      hashedPassword
+      hashedPassword,
+      timezone
     );
 
     // Fetch created user

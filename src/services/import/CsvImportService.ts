@@ -290,14 +290,17 @@ export class CsvImportService {
 
   /**
    * Convert Uber Eats CSV rows to Receipt objects
-   * Groups items by order (same restaurant, same time, same order price)
+   * Groups items by order (same restaurant, same time)
+   * Note: All items in the same order should have the same Order_Price, but we group by restaurant + time
+   * to handle any data inconsistencies where Order_Price might vary
    */
   private convertUberEatsRowsToReceipts(rows: UberCsvRow[], userId: string): Receipt[] {
-    // Group rows by order (restaurant + time + order price)
+    // Group rows by order (restaurant + time only)
+    // All items in the same order should be grouped together regardless of Order_Price value
     const orderGroups = new Map<string, UberCsvRow[]>();
     
     for (const row of rows) {
-      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}-${row.Order_Price}`;
+      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}`;
       
       if (!orderGroups.has(orderKey)) {
         orderGroups.set(orderKey, []);
@@ -318,12 +321,14 @@ export class CsvImportService {
         console.warn(`Invalid date format: ${firstRow.Request_Time_Local}`);
       }
 
-      // Parse order price
-      const orderPrice = parseFloat(firstRow.Order_Price);
-      if (isNaN(orderPrice)) {
-        console.warn(`Invalid order price: ${firstRow.Order_Price}`);
+      // Parse order price - use the maximum Order_Price from all rows in case of inconsistencies
+      // All rows should have the same Order_Price, but we take max to handle any data issues
+      const orderPrices = orderRows.map(row => parseFloat(row.Order_Price)).filter(p => !isNaN(p));
+      if (orderPrices.length === 0) {
+        console.warn(`No valid order price found for order: ${firstRow.Restaurant_Name} at ${firstRow.Request_Time_Local}`);
         continue;
       }
+      const orderPrice = Math.max(...orderPrices); // Use max price as order total
 
       // Convert items
       const items: ReceiptItem[] = orderRows.map(row => ({
@@ -351,12 +356,14 @@ export class CsvImportService {
 
   /**
    * Get count of unique Uber Eats orders
+   * Counts by restaurant + time (not price) to match receipt grouping
    */
   private getUniqueUberEatsOrderCount(rows: UberCsvRow[]): number {
     const uniqueOrders = new Set<string>();
     
     for (const row of rows) {
-      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}-${row.Order_Price}`;
+      // Count unique orders by restaurant + time (matching receipt grouping)
+      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}`;
       uniqueOrders.add(orderKey);
     }
     
@@ -371,13 +378,15 @@ export class CsvImportService {
     await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
     
     for (const receipt of receipts) {
+      // Use the userId parameter to ensure consistency (receipt.userId should match, but use parameter for safety)
+      // This ensures receipts are always associated with the correct user, even if receipt.userId is somehow incorrect
       await this.postgres.query(`
         INSERT INTO receipts (
           user_id, receipt_type, data_source, restaurant_name, order_date, 
           amount_spent, items, delivery_time
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
-        receipt.userId,
+        userId, // Use the userId parameter, not receipt.userId, to ensure consistency
         receipt.receiptType,
         receipt.dataSource,
         receipt.restaurantName,
