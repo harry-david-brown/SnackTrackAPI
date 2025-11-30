@@ -83,6 +83,51 @@ export function convertToLocalTime(utcDate: Date, timezone: string = 'America/Ne
   return localDate;
 }
 
+// Cache formatters per timezone to avoid recreating them thousands of times
+const hourFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const dayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getHourFormatter(timezone: string): Intl.DateTimeFormat {
+  if (!hourFormatterCache.has(timezone)) {
+    hourFormatterCache.set(timezone, new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false
+    }));
+  }
+  return hourFormatterCache.get(timezone)!;
+}
+
+function getDayFormatter(timezone: string): Intl.DateTimeFormat {
+  if (!dayFormatterCache.has(timezone)) {
+    dayFormatterCache.set(timezone, new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'long'
+    }));
+  }
+  return dayFormatterCache.get(timezone)!;
+}
+
+function getDateFormatter(timezone: string): Intl.DateTimeFormat {
+  if (!dateFormatterCache.has(timezone)) {
+    dateFormatterCache.set(timezone, new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }));
+  }
+  return dateFormatterCache.get(timezone)!;
+}
+
 /**
  * Get the hour in the user's timezone from a UTC date
  * @param utcDate - The UTC date
@@ -92,13 +137,8 @@ export function convertToLocalTime(utcDate: Date, timezone: string = 'America/Ne
 export function getLocalHour(utcDate: Date | null, timezone: string = 'America/New_York'): number | null {
   if (!utcDate) return null;
   
-  // Use Intl.DateTimeFormat to get the hour directly in the user's timezone
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    hour12: false
-  });
-  
+  // Use cached formatter to avoid recreating it thousands of times
+  const formatter = getHourFormatter(timezone);
   const hour = parseInt(formatter.format(utcDate), 10);
   return hour;
 }
@@ -112,14 +152,9 @@ export function getLocalHour(utcDate: Date | null, timezone: string = 'America/N
 export function getLocalDay(utcDate: Date | null, timezone: string = 'America/New_York'): number | null {
   if (!utcDate) return null;
   
-  // Get the date components in the user's timezone
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    weekday: 'long'
-  }).formatToParts(utcDate);
+  // Use cached formatter to avoid recreating it thousands of times
+  const formatter = getDayFormatter(timezone);
+  const parts = formatter.formatToParts(utcDate);
   
   const year = parseInt(parts.find(p => p.type === 'year')?.value || '0', 10);
   const month = parseInt(parts.find(p => p.type === 'month')?.value || '0', 10) - 1;
@@ -138,18 +173,8 @@ export function getLocalDay(utcDate: Date | null, timezone: string = 'America/Ne
 export function getLocalDate(utcDate: Date | null, timezone: string = 'America/New_York'): Date | null {
   if (!utcDate) return null;
   
-  // Get all date components in the user's timezone
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-  
+  // Use cached formatter to avoid recreating it thousands of times
+  const formatter = getDateFormatter(timezone);
   const parts = formatter.formatToParts(utcDate);
   
   const year = parseInt(parts.find(p => p.type === 'year')?.value || '0', 10);

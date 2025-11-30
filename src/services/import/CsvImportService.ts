@@ -372,29 +372,46 @@ export class CsvImportService {
 
   /**
    * Import receipts to database
+   * Uses batch insert for performance (much faster than individual inserts)
    */
   async importReceipts(receipts: Receipt[], userId: string): Promise<void> {
     // Clear existing receipts for this user to avoid duplicates
     await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
     
-    for (const receipt of receipts) {
-      // Use the userId parameter to ensure consistency (receipt.userId should match, but use parameter for safety)
-      // This ensures receipts are always associated with the correct user, even if receipt.userId is somehow incorrect
+    if (receipts.length === 0) return;
+    
+    // Batch insert for performance (much faster than individual inserts)
+    // Process in chunks of 100 to avoid query size limits
+    const batchSize = 100;
+    for (let i = 0; i < receipts.length; i += batchSize) {
+      const batch = receipts.slice(i, i + batchSize);
+      
+      // Build values array and placeholders for batch insert
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      
+      batch.forEach((receipt, index) => {
+        const paramIndex = index * 8 + 1; // PostgreSQL uses $1, $2, $3, etc.
+        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7})`);
+        values.push(
+          userId, // Use the userId parameter, not receipt.userId, to ensure consistency
+          receipt.receiptType,
+          receipt.dataSource,
+          receipt.restaurantName,
+          receipt.orderDate,
+          receipt.amountSpent,
+          receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
+          receipt.deliveryTime || null
+        );
+      });
+      
+      // Execute batch insert
       await this.postgres.query(`
         INSERT INTO receipts (
           user_id, receipt_type, data_source, restaurant_name, order_date, 
           amount_spent, items, delivery_time
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [
-        userId, // Use the userId parameter, not receipt.userId, to ensure consistency
-        receipt.receiptType,
-        receipt.dataSource,
-        receipt.restaurantName,
-        receipt.orderDate,
-        receipt.amountSpent,
-        receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
-        receipt.deliveryTime || null
-      ]);
+        ) VALUES ${placeholders.join(', ')}
+      `, values);
     }
   }
 
