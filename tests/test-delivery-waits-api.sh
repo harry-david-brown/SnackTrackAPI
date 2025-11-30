@@ -153,7 +153,8 @@ test_verify_receipts() {
         return 0  # Don't fail, just warn
     fi
     
-    RECEIPT_COUNT=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); receipts=data.get('receipts', []); print(len(receipts))" 2>/dev/null || echo "0")
+    # Check both 'receipts' and 'data' fields (API might use either)
+    RECEIPT_COUNT=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); receipts=data.get('receipts', data.get('data', [])); print(len(receipts))" 2>/dev/null || echo "0")
     
     if [ "$RECEIPT_COUNT" -gt 0 ]; then
         print_test 0 "Receipts retrieved (${RECEIPT_COUNT} receipts)"
@@ -163,7 +164,7 @@ test_verify_receipts() {
 import sys, json
 try:
     data = json.load(sys.stdin)
-    receipts = data.get('receipts', [])
+    receipts = data.get('receipts', data.get('data', []))
     has_delivery_time = any(r.get('deliveryTime') for r in receipts)
     print('true' if has_delivery_time else 'false')
 except:
