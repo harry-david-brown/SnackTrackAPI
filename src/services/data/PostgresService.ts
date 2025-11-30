@@ -288,6 +288,20 @@ export class PostgresService {
       }
     }
 
+    // 3. Add delivery_time column for DoorDash delivery wait analytics
+    try {
+      await this.query(`
+        ALTER TABLE receipts 
+        ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMP
+      `);
+      console.log('✅ Delivery time column added (or already exists)');
+    } catch (error: any) {
+      if (error.code !== '42701') { // 42701 = duplicate_column
+        console.error('❌ Delivery time column migration failed:', error.message);
+        throw error; // Re-throw critical errors
+      }
+    }
+
     try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_year 

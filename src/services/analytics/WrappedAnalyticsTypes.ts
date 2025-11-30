@@ -142,7 +142,9 @@ export interface WeekendWarrior {
 }
 
 export interface DeliveryWaits {
-  averageMinutes: number;
+  totalMinutes: number;        // Total time spent waiting across all orders
+  averageMinutes: number;       // Average wait time per order
+  totalOrders: number;         // Number of orders with valid wait times
   longestWait?: {
     minutes: number;
     restaurant: string;
@@ -197,5 +199,6 @@ export interface ReceiptForAnalytics {
   }>;
   receiptType: string;
   dataSource: string;
+  deliveryTime?: Date | null; // Delivery time (for DoorDash wait time analytics)
 }
 

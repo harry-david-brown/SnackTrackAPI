@@ -15,7 +15,8 @@ import {
   MissedInvestment,
   CostPerMeal,
   PeakHungerHour,
-  WeekendWarrior
+  WeekendWarrior,
+  DeliveryWaits
 } from './WrappedAnalyticsTypes';
 
 /**
@@ -52,7 +53,8 @@ export class WrappedAnalyticsService {
       missedInvestment,
       costPerMeal,
       peakHungerHour,
-      weekendWarrior
+      weekendWarrior,
+      deliveryWaits
     ] = await Promise.all([
       // Shame analytics
       this.calculateLateNightOrders(receipts),
@@ -74,7 +76,8 @@ export class WrappedAnalyticsService {
       
       // Pattern analytics
       this.calculatePeakHungerHour(receipts),
-      this.calculateWeekendWarrior(receipts)
+      this.calculateWeekendWarrior(receipts),
+      this.calculateDeliveryWaits(receipts)
     ]);
 
     return {
@@ -98,7 +101,8 @@ export class WrappedAnalyticsService {
       },
       patterns: {
         peakHungerHour,
-        weekendWarrior
+        weekendWarrior,
+        deliveryWaits
       }
     };
   }
@@ -116,7 +120,8 @@ export class WrappedAnalyticsService {
         amount_spent as "amountSpent",
         items,
         receipt_type as "receiptType",
-        data_source as "dataSource"
+        data_source as "dataSource",
+        delivery_time as "deliveryTime"
       FROM receipts
       WHERE user_id = $1
       ORDER BY order_date DESC
@@ -127,6 +132,7 @@ export class WrappedAnalyticsService {
       ...row,
       amountSpent: parseFloat(row.amountSpent),
       orderDate: row.orderDate ? new Date(row.orderDate) : null,
+      deliveryTime: row.deliveryTime ? new Date(row.deliveryTime) : null,
       items: Array.isArray(row.items) ? row.items : []
     }));
   }
@@ -588,16 +594,27 @@ export class WrappedAnalyticsService {
    * - Tip
    * 
    * This gives us the true "delivery tax" - all costs beyond getting the food yourself.
+   * 
+   * Note: DoorDash CSV exports don't include the total order amount with fees,
+   * so we skip DoorDash receipts for this calculation.
    */
   private async calculateCostPerMeal(receipts: ReceiptForAnalytics[]): Promise<CostPerMeal | undefined> {
     if (receipts.length === 0) return undefined;
+
+    // Filter out DoorDash receipts - their CSV doesn't include total order amount with fees
+    // DoorDash CSV only has item subtotals, not the final total including delivery fees, tax, etc.
+    const receiptsWithTotalAmount = receipts.filter(r => r.receiptType !== 'doordash');
+    
+    if (receiptsWithTotalAmount.length === 0) {
+      return undefined;
+    }
 
     // Calculate extra costs for each receipt
     // extraCosts = amountSpent - sum(item.price * item.quantity)
     // amountSpent is the final total including delivery fee, service fee, tax, and tip
     const receiptsWithExtraCosts: Array<{ receipt: ReceiptForAnalytics; extraCosts: number; itemCount: number }> = [];
     
-    receipts.forEach(receipt => {
+    receiptsWithTotalAmount.forEach(receipt => {
       // Calculate sum of item prices (base food cost)
       const itemSubtotal = receipt.items.reduce((sum, item) => {
         // Only count items with valid prices (> 0)
@@ -678,6 +695,75 @@ export class WrappedAnalyticsService {
       orderCount: maxCount,
       percentageOfTotal: percentage,
       message: `You're hungriest at ${this.formatHour(peakHour)}`
+    };
+  }
+
+  /**
+   * Calculate Delivery Waits (DoorDash only)
+   * Calculates total and average time spent waiting for deliveries
+   */
+  private async calculateDeliveryWaits(receipts: ReceiptForAnalytics[]): Promise<DeliveryWaits | undefined> {
+    // Only calculate for DoorDash receipts that have both order date and delivery time
+    const doorDashReceipts = receipts.filter(r => 
+      r.receiptType === 'doordash' && 
+      r.orderDate && 
+      r.deliveryTime
+    );
+
+    if (doorDashReceipts.length === 0) {
+      return undefined;
+    }
+
+    // Calculate wait time for each order (in minutes)
+    const waitTimes: Array<{
+      receipt: ReceiptForAnalytics;
+      minutes: number;
+    }> = [];
+
+    doorDashReceipts.forEach(receipt => {
+      if (receipt.orderDate && receipt.deliveryTime) {
+        const waitMs = receipt.deliveryTime.getTime() - receipt.orderDate.getTime();
+        const waitMinutes = Math.round(waitMs / (1000 * 60));
+        
+        // Only include valid wait times (positive)
+        if (waitMinutes > 0) {
+          waitTimes.push({ receipt, minutes: waitMinutes });
+        }
+      }
+    });
+
+    if (waitTimes.length === 0) {
+      return undefined;
+    }
+
+    // Calculate total and average wait time
+    const totalMinutes = waitTimes.reduce((sum, wt) => sum + wt.minutes, 0);
+    const averageMinutes = Math.round(totalMinutes / waitTimes.length);
+
+    // Find longest wait
+    const longestWait = waitTimes.reduce((longest, current) => 
+      current.minutes > longest.minutes ? current : longest
+    );
+
+    // Find fastest delivery
+    const fastestDelivery = waitTimes.reduce((fastest, current) => 
+      current.minutes < fastest.minutes ? current : fastest
+    );
+
+    return {
+      totalMinutes,
+      averageMinutes,
+      totalOrders: waitTimes.length,
+      longestWait: {
+        minutes: longestWait.minutes,
+        restaurant: longestWait.receipt.restaurantName || 'Unknown',
+        amount: longestWait.receipt.amountSpent,
+        message: `Your longest wait was ${longestWait.minutes} minutes for ${longestWait.receipt.restaurantName || 'Unknown'}`
+      },
+      fastestDelivery: {
+        minutes: fastestDelivery.minutes,
+        restaurant: fastestDelivery.receipt.restaurantName || 'Unknown'
+      }
     };
   }
 

@@ -28,8 +28,8 @@ export class ReceiptRepository {
     await this.postgres.query(`
       INSERT INTO receipts (
         user_id, receipt_type, data_source, restaurant_name, order_date, 
-        amount_spent, items
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        amount_spent, items, delivery_time
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `, [
       receipt.userId,
       receipt.receiptType,
@@ -37,7 +37,8 @@ export class ReceiptRepository {
       receipt.restaurantName,
       receipt.orderDate,
       receipt.amountSpent,
-      receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]'
+      receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
+      receipt.deliveryTime || null
     ]);
   }
 
@@ -67,7 +68,8 @@ export class ReceiptRepository {
       row.receipt_type,
       row.restaurant_name,
       row.order_date ? new Date(row.order_date) : undefined,
-      row.data_source as DataSource || DataSource.CSV
+      row.data_source as DataSource || DataSource.CSV,
+      row.delivery_time ? new Date(row.delivery_time) : undefined
     );
     
     // Set the ID for database responses

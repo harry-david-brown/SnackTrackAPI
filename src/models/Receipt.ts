@@ -33,7 +33,9 @@ export class Receipt {
     public restaurantName?: string,
     public orderDate?: Date,
     // Data source tracking
-    public dataSource: DataSource = DataSource.CSV
+    public dataSource: DataSource = DataSource.CSV,
+    // Delivery time for DoorDash (time when order was delivered)
+    public deliveryTime?: Date
   ) {}
 
   // Helper method to get total items count
@@ -66,7 +68,8 @@ export class Receipt {
       receiptType: this.receiptType,
       restaurantName: this.restaurantName,
       orderDate: this.orderDate,
-      dataSource: this.dataSource
+      dataSource: this.dataSource,
+      deliveryTime: this.deliveryTime
     };
   }
 }

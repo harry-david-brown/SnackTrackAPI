@@ -221,12 +221,20 @@ export class CsvImportService {
     for (const [orderKey, orderRows] of orderGroups) {
       const firstRow = orderRows[0];
       
-      // Parse order date
+      // Parse order date (CREATED_AT is when order was placed)
       let orderDate: Date | undefined;
       try {
         orderDate = new Date(firstRow.CREATED_AT);
       } catch (error) {
         console.warn(`Invalid date format: ${firstRow.CREATED_AT}`);
+      }
+
+      // Parse delivery time (DELIVERY_TIME is when order was delivered)
+      let deliveryTime: Date | undefined;
+      try {
+        deliveryTime = new Date(firstRow.DELIVERY_TIME);
+      } catch (error) {
+        console.warn(`Invalid delivery time format: ${firstRow.DELIVERY_TIME}`);
       }
 
       // Calculate order total by summing SUBTOTAL
@@ -256,7 +264,8 @@ export class CsvImportService {
         ReceiptType.DOORDASH, // Set receipt_type to DOORDASH
         firstRow.STORE_NAME,
         orderDate,
-        DataSource.CSV // dataSource
+        DataSource.CSV, // dataSource
+        deliveryTime // delivery_time for wait time analytics
       );
 
       receipts.push(receipt);
