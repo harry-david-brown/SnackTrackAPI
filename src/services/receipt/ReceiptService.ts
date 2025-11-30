@@ -31,8 +31,8 @@ export class ReceiptService {
     await this.postgres.query(`
       INSERT INTO receipts (
         id, user_id, receipt_type, data_source, restaurant_name, order_date, 
-        amount_spent, items
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        amount_spent, items, delivery_time
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [
       receiptId,
       receipt.userId,
@@ -41,7 +41,8 @@ export class ReceiptService {
       receipt.restaurantName,
       receipt.orderDate,
       receipt.amountSpent,
-      JSON.stringify(receipt.items)
+      JSON.stringify(receipt.items),
+      receipt.deliveryTime || null
     ]);
 
     return receiptId;
@@ -322,7 +323,8 @@ export class ReceiptService {
       (row.receipt_type as ReceiptType) || ReceiptType.UNKNOWN,
       row.restaurant_name,
       row.order_date ? new Date(row.order_date) : undefined,
-      (row.data_source as DataSource) || DataSource.CSV
+      (row.data_source as DataSource) || DataSource.CSV,
+      row.delivery_time ? new Date(row.delivery_time) : undefined
     );
   }
 }
