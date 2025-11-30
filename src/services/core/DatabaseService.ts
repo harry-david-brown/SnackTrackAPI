@@ -15,8 +15,8 @@ export class DatabaseService {
     private receiptRepository: ReceiptRepository
   ) {}
 
-  async createUser(email: string): Promise<string> {
-    return await this.userRepository.createUser(email);
+  async createUser(email: string, timezone?: string): Promise<string> {
+    return await this.userRepository.createUser(email, timezone);
   }
 
 
@@ -26,6 +26,10 @@ export class DatabaseService {
 
   async getUserTotalSpent(id: string): Promise<number> {
     return await this.receiptRepository.getTotalSpentByUserId(id);
+  }
+
+  async updateUserTimezone(userId: string, timezone: string): Promise<void> {
+    return await this.userRepository.updateTimezone(userId, timezone);
   }
 
   async updateUserReceipts(): Promise<void> {

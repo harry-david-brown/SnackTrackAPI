@@ -183,6 +183,16 @@ export class PostgresService {
         console.log('Email verified column already exists or migration failed');
       }
 
+      // Migration: Add timezone column to users table (for UTC to local time conversion)
+      try {
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) DEFAULT 'America/New_York'
+        `);
+        console.log('✅ Timezone column migration completed');
+      } catch (error) {
+        console.log('Timezone column already exists or migration failed');
+      }
+
       // Create verification_codes table
       await this.query(`
         CREATE TABLE IF NOT EXISTS verification_codes (

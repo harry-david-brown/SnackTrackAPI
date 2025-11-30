@@ -18,6 +18,7 @@ import {
   WeekendWarrior,
   DeliveryWaits
 } from './WrappedAnalyticsTypes';
+import { getLocalDate, getLocalHour, getLocalDay } from '../../utils/timezone';
 
 /**
  * Wrapped Analytics Service
@@ -30,6 +31,9 @@ export class WrappedAnalyticsService {
    * Calculate all wrapped analytics for a user
    */
   async calculateWrappedAnalytics(userId: string): Promise<WrappedAnalytics> {
+    // Fetch user timezone (default to 'America/New_York' if not set)
+    const userTimezone = await this.fetchUserTimezone(userId);
+    
     // Fetch all receipts for the user
     const receipts = await this.fetchUserReceipts(userId);
 
@@ -57,26 +61,26 @@ export class WrappedAnalyticsService {
       deliveryWaits
     ] = await Promise.all([
       // Shame analytics
-      this.calculateLateNightOrders(receipts),
-      this.calculateLaziestDay(receipts),
-      this.calculateLongestStreak(receipts),
+      this.calculateLateNightOrders(receipts, userTimezone),
+      this.calculateLaziestDay(receipts, userTimezone),
+      this.calculateLongestStreak(receipts, userTimezone),
       this.calculateSingleItemOrders(receipts),
       this.calculateChainDependency(receipts),
       
       // Flex analytics
       this.calculateMostExpensiveOrder(receipts),
       this.calculateCoffeeAddiction(receipts),
-      this.calculateNightOwl(receipts),
+      this.calculateNightOwl(receipts, userTimezone),
       
       // Comparative analytics
-      this.calculateSpentThisYear(receipts),
+      this.calculateSpentThisYear(receipts, userTimezone),
       this.calculateCouldHaveBought(receipts),
       this.calculateMissedInvestment(receipts),
       this.calculateCostPerMeal(receipts),
       
       // Pattern analytics
-      this.calculatePeakHungerHour(receipts),
-      this.calculateWeekendWarrior(receipts),
+      this.calculatePeakHungerHour(receipts, userTimezone),
+      this.calculateWeekendWarrior(receipts, userTimezone),
       this.calculateDeliveryWaits(receipts)
     ]);
 
@@ -105,6 +109,15 @@ export class WrappedAnalyticsService {
         deliveryWaits
       }
     };
+  }
+
+  /**
+   * Fetch user timezone from database
+   */
+  private async fetchUserTimezone(userId: string): Promise<string> {
+    const query = `SELECT timezone FROM users WHERE id = $1`;
+    const result = await this.pool.query(query, [userId]);
+    return result.rows[0]?.timezone || 'America/New_York';
   }
 
   /**
@@ -139,24 +152,26 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate 3am Regret Orders
-   * Orders placed between midnight and 6am
+   * Orders placed between midnight and 6am (in user's local timezone)
    */
-  private async calculateLateNightOrders(receipts: ReceiptForAnalytics[]): Promise<LateNightOrders | undefined> {
+  private async calculateLateNightOrders(receipts: ReceiptForAnalytics[], timezone: string): Promise<LateNightOrders | undefined> {
     const lateNightReceipts = receipts.filter(r => {
       if (!r.orderDate) return false;
-      const hour = r.orderDate.getHours();
-      return hour >= 0 && hour < 6;
+      const hour = getLocalHour(r.orderDate, timezone);
+      return hour !== null && hour >= 0 && hour < 6;
     });
 
     if (lateNightReceipts.length === 0) return undefined;
 
     const totalSpent = lateNightReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
     
-    // Find latest order
+    // Find latest order (by hour in user's timezone)
     const latest = lateNightReceipts.reduce((latest, r) => {
       if (!r.orderDate) return latest;
       if (!latest.orderDate) return r;
-      return r.orderDate.getHours() > latest.orderDate.getHours() ? r : latest;
+      const rHour = getLocalHour(r.orderDate, timezone) || 0;
+      const latestHour = getLocalHour(latest.orderDate, timezone) || 0;
+      return rHour > latestHour ? r : latest;
     }, lateNightReceipts[0]);
 
     // Find worst offender (most expensive late night order)
@@ -164,13 +179,19 @@ export class WrappedAnalyticsService {
       r.amountSpent > worst.amountSpent ? r : worst
     , lateNightReceipts[0]);
 
+    // Format times in user's local timezone
+    const formatLocalTime = (date: Date) => {
+      const localDate = getLocalDate(date, timezone);
+      return localDate ? this.formatTime(localDate) : 'Unknown';
+    };
+
     return {
       count: lateNightReceipts.length,
       totalSpent: parseFloat(totalSpent.toFixed(2)),
-      latestOrder: latest.orderDate ? this.formatTime(latest.orderDate) : 'Unknown',
+      latestOrder: latest.orderDate ? formatLocalTime(latest.orderDate) : 'Unknown',
       worstOffender: worstOffender.orderDate ? {
         restaurant: worstOffender.restaurantName || 'Unknown',
-        time: this.formatTime(worstOffender.orderDate),
+        time: formatLocalTime(worstOffender.orderDate),
         amount: worstOffender.amountSpent,
         items: worstOffender.items.map(i => i.name)
       } : undefined
@@ -179,17 +200,20 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate Laziest Day
-   * Day with most orders
+   * Day with most orders (using user's local timezone)
    */
-  private async calculateLaziestDay(receipts: ReceiptForAnalytics[]): Promise<LaziestDay | undefined> {
+  private async calculateLaziestDay(receipts: ReceiptForAnalytics[], timezone: string): Promise<LaziestDay | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
-    // Group by date
+    // Group by date in user's local timezone
     const dayGroups = new Map<string, ReceiptForAnalytics[]>();
     validReceipts.forEach(r => {
       if (!r.orderDate) return;
-      const dateKey = r.orderDate.toISOString().split('T')[0];
+      // Get the date string in user's timezone (YYYY-MM-DD)
+      const localDate = getLocalDate(r.orderDate, timezone);
+      if (!localDate) return;
+      const dateKey = localDate.toISOString().split('T')[0];
       if (!dayGroups.has(dateKey)) {
         dayGroups.set(dateKey, []);
       }
@@ -226,15 +250,18 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate Longest Streak
-   * Consecutive days ordering
+   * Consecutive days ordering (using user's local timezone)
    */
-  private async calculateLongestStreak(receipts: ReceiptForAnalytics[]): Promise<LongestStreak | undefined> {
+  private async calculateLongestStreak(receipts: ReceiptForAnalytics[], timezone: string): Promise<LongestStreak | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
-    // Get unique dates (sorted)
+    // Get unique dates in user's local timezone (sorted)
     const uniqueDates = Array.from(new Set(
-      validReceipts.map(r => r.orderDate!.toISOString().split('T')[0])
+      validReceipts.map(r => {
+        const localDate = getLocalDate(r.orderDate!, timezone);
+        return localDate ? localDate.toISOString().split('T')[0] : null;
+      }).filter((d): d is string => d !== null)
     )).sort();
 
     if (uniqueDates.length < 3) return undefined; // Need at least 3 days
@@ -269,7 +296,9 @@ export class WrappedAnalyticsService {
 
     // Calculate total spent during streak
     const streakReceipts = validReceipts.filter(r => {
-      const date = r.orderDate!.toISOString().split('T')[0];
+      const localDate = getLocalDate(r.orderDate!, timezone);
+      if (!localDate) return false;
+      const date = localDate.toISOString().split('T')[0];
       return date >= startDate && date <= endDate;
     });
     const totalSpent = streakReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
@@ -440,45 +469,64 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Night Owl Badge
+   * Calculate Night Owl Badge (orders after 10pm in user's local timezone)
    */
-  private async calculateNightOwl(receipts: ReceiptForAnalytics[]): Promise<NightOwl | undefined> {
+  private async calculateNightOwl(receipts: ReceiptForAnalytics[], timezone: string): Promise<NightOwl | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
-    const nightOrders = validReceipts.filter(r => r.orderDate!.getHours() >= 22);
+    const nightOrders = validReceipts.filter(r => {
+      const hour = getLocalHour(r.orderDate!, timezone);
+      return hour !== null && hour >= 22;
+    });
     if (nightOrders.length === 0) return undefined;
 
     const totalSpent = nightOrders.reduce((sum, r) => sum + r.amountSpent, 0);
     const percentage = Math.round((nightOrders.length / validReceipts.length) * 100);
 
-    // Find latest order
-    const latest = nightOrders.reduce((latest, r) => 
-      r.orderDate!.getHours() > latest.orderDate!.getHours() ? r : latest
-    , nightOrders[0]);
+    // Find latest order (by hour in user's timezone)
+    const latest = nightOrders.reduce((latest, r) => {
+      const rHour = getLocalHour(r.orderDate!, timezone) || 0;
+      const latestHour = getLocalHour(latest.orderDate!, timezone) || 0;
+      return rHour > latestHour ? r : latest;
+    }, nightOrders[0]);
+
+    const formatLocalTime = (date: Date) => {
+      const localDate = getLocalDate(date, timezone);
+      return localDate ? this.formatTime(localDate) : 'Unknown';
+    };
 
     return {
       percentage,
       count: nightOrders.length,
       totalSpent: parseFloat(totalSpent.toFixed(2)),
-      latestOrder: this.formatTime(latest.orderDate!),
+      latestOrder: formatLocalTime(latest.orderDate!),
       message: `${percentage}% of your orders were after 10pm`
     };
   }
 
   /**
    * Calculate Spent This Year
-   * Total spending for the current calendar year
+   * Total spending for the current calendar year (in user's local timezone)
    */
-  private async calculateSpentThisYear(receipts: ReceiptForAnalytics[]): Promise<SpentThisYear | undefined> {
-    const currentYear = new Date().getFullYear();
-    const yearStart = new Date(currentYear, 0, 1); // January 1st of current year
-    const yearEnd = new Date(currentYear, 11, 31, 23, 59, 59); // December 31st of current year
-
-    // Filter receipts from current year
+  private async calculateSpentThisYear(receipts: ReceiptForAnalytics[], timezone: string): Promise<SpentThisYear | undefined> {
+    // Get current year in user's timezone
+    const now = new Date();
+    const localNow = getLocalDate(now, timezone) || now;
+    const currentYear = localNow.getFullYear();
+    
+    // Create year boundaries in user's timezone
+    // We need to convert local year boundaries back to UTC for comparison
+    const yearStartLocal = new Date(currentYear, 0, 1); // Jan 1 in server timezone
+    const yearEndLocal = new Date(currentYear, 11, 31, 23, 59, 59); // Dec 31 in server timezone
+    
+    // Filter receipts from current year (comparing UTC dates, but year is determined by local timezone)
     const thisYearReceipts = receipts.filter(r => {
       if (!r.orderDate) return false;
-      return r.orderDate >= yearStart && r.orderDate <= yearEnd;
+      const localDate = getLocalDate(r.orderDate, timezone);
+      if (!localDate) return false;
+      const receiptYear = localDate.getFullYear();
+      return receiptYear === currentYear;
     });
 
     if (thisYearReceipts.length === 0) return undefined;
@@ -664,17 +712,19 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Peak Hunger Hour
+   * Calculate Peak Hunger Hour (in user's local timezone)
    */
-  private async calculatePeakHungerHour(receipts: ReceiptForAnalytics[]): Promise<PeakHungerHour | undefined> {
+  private async calculatePeakHungerHour(receipts: ReceiptForAnalytics[], timezone: string): Promise<PeakHungerHour | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
-    // Group by hour
+    // Group by hour in user's local timezone
     const hourCounts = new Map<number, number>();
     validReceipts.forEach(r => {
-      const hour = r.orderDate!.getHours();
-      hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+      const hour = getLocalHour(r.orderDate!, timezone);
+      if (hour !== null) {
+        hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+      }
     });
 
     // Find peak hour
@@ -768,9 +818,9 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Weekend Warrior
+   * Calculate Weekend Warrior (using user's local timezone)
    */
-  private async calculateWeekendWarrior(receipts: ReceiptForAnalytics[]): Promise<WeekendWarrior | undefined> {
+  private async calculateWeekendWarrior(receipts: ReceiptForAnalytics[], timezone: string): Promise<WeekendWarrior | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
@@ -780,7 +830,8 @@ export class WrappedAnalyticsService {
     let weekdaySpending = 0;
 
     validReceipts.forEach(r => {
-      const day = r.orderDate!.getDay();
+      const day = getLocalDay(r.orderDate!, timezone);
+      if (day === null) return;
       const isWeekend = day === 0 || day === 6; // Sunday or Saturday
 
       if (isWeekend) {

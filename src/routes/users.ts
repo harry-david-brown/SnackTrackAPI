@@ -5,6 +5,7 @@ import { validateUUIDParam, validateUserCreation } from '../middleware/validatio
 import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
 import { cacheService } from '../services/core/CacheService';
+import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
 
 const router = Router();
 const databaseService = container.databaseService;
@@ -14,28 +15,59 @@ const databaseService = container.databaseService;
  * /users/create:
  *   post:
  *     summary: Create a new user
- *     description: Create a new user account with an email address
+ *     description: |
+ *       Create a new user account with an email address.
+ *       The user's timezone is automatically detected from the X-Timezone header (mobile apps should send this).
+ *       Alternatively, timezone can be provided in the request body, or it defaults to 'America/New_York'.
  *     tags: [Users]
  *     security:
  *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: X-Timezone
+ *         schema:
+ *           type: string
+ *           example: "America/New_York"
+ *         description: IANA timezone identifier (e.g., 'America/New_York', 'Europe/London'). Mobile apps should send this header based on device settings.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/CreateUserRequest'
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               timezone:
+ *                 type: string
+ *                 description: Optional IANA timezone identifier. If not provided, will use X-Timezone header or default.
+ *                 example: "America/New_York"
  *           example:
  *             email: "user@example.com"
+ *             timezone: "America/New_York"
  *     responses:
  *       201:
  *         description: User created successfully
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/CreateUserResponse'
+ *               type: object
+ *               properties:
+ *                 userId:
+ *                   type: string
+ *                   format: uuid
+ *                 message:
+ *                   type: string
+ *                 timezone:
+ *                   type: string
+ *                   description: The timezone that was set for the user
  *             example:
  *               userId: "550e8400-e29b-41d4-a716-446655440000"
  *               message: "User created successfully"
+ *               timezone: "America/New_York"
  *       400:
  *         $ref: '#/components/responses/ValidationError'
  *       429:
@@ -50,10 +82,15 @@ const databaseService = container.databaseService;
 // Create a new user (with rate limiting)
 router.post('/create', userCreationRateLimit, validateUserCreation, asyncHandler(async (req: Request, res: Response) => {
   try {
-    const id = await databaseService.createUser(req.body.email);
+    // Detect timezone from request (mobile apps should send X-Timezone header)
+    // Falls back to request body timezone field, then to default
+    const detectedTimezone = detectTimezoneFromRequest(req) || getDefaultTimezone();
+    
+    const id = await databaseService.createUser(req.body.email, detectedTimezone);
     res.status(201).json({ 
       userId: id,
-      message: 'User created successfully'
+      message: 'User created successfully',
+      timezone: detectedTimezone // Return detected timezone so frontend knows what was set
     });
   } catch (error) {
     throw new DatabaseError('Failed to create user', error as Error);
@@ -328,6 +365,95 @@ router.get('/:id/debug/emails', authenticateToken, validateOwnership, validateUU
   } catch (error) {
     if (error instanceof NotFoundError) throw error;
     throw new DatabaseError('Failed to fetch emails', error as Error);
+  }
+}));
+
+/**
+ * @swagger
+ * /users/{id}/timezone:
+ *   put:
+ *     summary: Update user's timezone
+ *     description: Update the timezone for a user. This affects how receipt times are displayed in analytics (e.g., "3am regret" orders are calculated based on local time).
+ *     tags: [Users]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - timezone
+ *             properties:
+ *               timezone:
+ *                 type: string
+ *                 description: IANA timezone identifier (e.g., 'America/New_York', 'Europe/London', 'Asia/Tokyo')
+ *                 example: "America/New_York"
+ *     responses:
+ *       200:
+ *         description: Timezone updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Timezone updated successfully"
+ *                 timezone:
+ *                   type: string
+ *                   example: "America/New_York"
+ *       400:
+ *         description: Invalid timezone format
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         description: Internal server error
+ */
+router.put('/:id/timezone', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { timezone } = req.body;
+    
+    if (!timezone || typeof timezone !== 'string') {
+      return res.status(400).json({ 
+        error: 'Invalid request',
+        message: 'Timezone is required and must be a string'
+      });
+    }
+
+    // Validate timezone format (basic validation)
+    // IANA timezones are typically in format: Continent/City
+    if (!/^[A-Za-z_]+\/[A-Za-z_]+/.test(timezone)) {
+      return res.status(400).json({ 
+        error: 'Invalid timezone format',
+        message: 'Timezone must be a valid IANA timezone identifier (e.g., "America/New_York", "Europe/London")'
+      });
+    }
+
+    // Check if user exists
+    const user = await databaseService.getUser(req.params.id);
+    if (!user) {
+      throw new NotFoundError('User', req.params.id);
+    }
+
+    await databaseService.updateUserTimezone(req.params.id, timezone);
+    
+    res.json({ 
+      message: 'Timezone updated successfully',
+      timezone 
+    });
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    throw new DatabaseError('Failed to update timezone', error as Error);
   }
 }));
 

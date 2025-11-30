@@ -6,6 +6,7 @@ export interface User {
   email: string;
   password?: string; // Optional - not returned in API responses
   emailVerified?: boolean; // Email verification status
+  timezone?: string; // IANA timezone (e.g., 'America/New_York', 'Europe/London')
   createdAt?: string;
 }
 

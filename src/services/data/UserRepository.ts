@@ -9,19 +9,22 @@ import { v4 as uuidv4 } from 'uuid';
 export class UserRepository {
   constructor(private postgres: PostgresService) {}
 
-  async createUser(email: string): Promise<string> {
+  async createUser(email: string, timezone?: string): Promise<string> {
     // First check if user already exists
     const existingUser = await this.findByEmail(email);
     if (existingUser) {
       return existingUser.id;
     }
 
+    // Use provided timezone or default
+    const userTimezone = timezone || 'America/New_York';
+
     // Create new user if doesn't exist
     const userId = uuidv4();
     try {
       const result = await this.postgres.query(
-        'INSERT INTO users (id, email) VALUES ($1, $2) RETURNING id',
-        [userId, email]
+        'INSERT INTO users (id, email, timezone) VALUES ($1, $2, $3) RETURNING id',
+        [userId, email, userTimezone]
       );
       return result.rows[0].id;
     } catch (error: any) {
@@ -38,7 +41,7 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, email_verified, created_at FROM users WHERE id = $1',
+      'SELECT id, email, email_verified, timezone, created_at FROM users WHERE id = $1',
       [id]
     );
     if (result.rows.length === 0) return undefined;
@@ -48,23 +51,25 @@ export class UserRepository {
       id: row.id,
       email: row.email,
       emailVerified: row.email_verified || false,
+      timezone: row.timezone || 'America/New_York', // Default timezone
       createdAt: row.created_at
     };
   }
 
   async findAll(): Promise<User[]> {
-    const result = await this.postgres.query('SELECT id, email, email_verified, created_at FROM users');
+    const result = await this.postgres.query('SELECT id, email, email_verified, timezone, created_at FROM users');
     return result.rows.map((row: any) => ({
       id: row.id,
       email: row.email,
       emailVerified: row.email_verified || false,
+      timezone: row.timezone || 'America/New_York', // Default timezone
       createdAt: row.created_at
     }));
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, email_verified, created_at FROM users WHERE email = $1',
+      'SELECT id, email, email_verified, timezone, created_at FROM users WHERE email = $1',
       [email]
     );
     if (result.rows.length === 0) return undefined;
@@ -74,13 +79,14 @@ export class UserRepository {
       id: row.id,
       email: row.email,
       emailVerified: row.email_verified || false,
+      timezone: row.timezone || 'America/New_York', // Default timezone
       createdAt: row.created_at
     };
   }
 
   async findByEmailWithPassword(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, password, email_verified, created_at FROM users WHERE email = $1',
+      'SELECT id, email, password, email_verified, timezone, created_at FROM users WHERE email = $1',
       [email]
     );
     if (result.rows.length === 0) return undefined;
@@ -91,6 +97,7 @@ export class UserRepository {
       email: row.email,
       password: row.password,
       emailVerified: row.email_verified || false,
+      timezone: row.timezone || 'America/New_York', // Default timezone
       createdAt: row.created_at
     };
   }
@@ -130,6 +137,19 @@ export class UserRepository {
     await this.postgres.query(
       'UPDATE users SET password = $1, updated_at = NOW() WHERE email = $2',
       [hashedPassword, email]
+    );
+  }
+
+  async updateTimezone(userId: string, timezone: string): Promise<void> {
+    // Validate timezone format (basic check - should be IANA timezone)
+    // Common IANA timezones: America/New_York, Europe/London, Asia/Tokyo, etc.
+    if (!timezone || typeof timezone !== 'string' || timezone.length > 50) {
+      throw new Error('Invalid timezone format');
+    }
+
+    await this.postgres.query(
+      'UPDATE users SET timezone = $1, updated_at = NOW() WHERE id = $2',
+      [timezone, userId]
     );
   }
 
