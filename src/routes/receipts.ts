@@ -186,7 +186,13 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
     res.json(createPaginatedResponse(receipts, total, page, limit));
   } catch (err) {
     console.error('Error fetching receipts:', err);
-    res.status(500).json({ error: 'Failed to fetch receipts' });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    const errorDetails = err instanceof Error ? err.stack : String(err);
+    console.error('Error details:', errorDetails);
+    res.status(500).json({ 
+      error: 'Failed to fetch receipts',
+      message: errorMessage
+    });
   }
 });
 

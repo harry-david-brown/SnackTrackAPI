@@ -99,7 +99,7 @@ export class ReceiptService {
       params.push(filters.maxAmount);
     }
 
-    query += ` ORDER BY order_date DESC, created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    query += ` ORDER BY order_date DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
     params.push(limit, offset);
 
     const result = await this.postgres.query(query, params);

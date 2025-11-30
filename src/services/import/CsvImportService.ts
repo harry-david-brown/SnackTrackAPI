@@ -381,8 +381,8 @@ export class CsvImportService {
     if (receipts.length === 0) return;
     
     // Batch insert for performance (much faster than individual inserts)
-    // Process in chunks of 100 to avoid query size limits
-    const batchSize = 100;
+    // Process in chunks of 50 to avoid query size limits and ensure reliability
+    const batchSize = 50;
     for (let i = 0; i < receipts.length; i += batchSize) {
       const batch = receipts.slice(i, i + batchSize);
       
@@ -405,13 +405,19 @@ export class CsvImportService {
         );
       });
       
-      // Execute batch insert
-      await this.postgres.query(`
-        INSERT INTO receipts (
-          user_id, receipt_type, data_source, restaurant_name, order_date, 
-          amount_spent, items, delivery_time
-        ) VALUES ${placeholders.join(', ')}
-      `, values);
+      // Execute batch insert with error handling
+      try {
+        await this.postgres.query(`
+          INSERT INTO receipts (
+            user_id, receipt_type, data_source, restaurant_name, order_date, 
+            amount_spent, items, delivery_time
+          ) VALUES ${placeholders.join(', ')}
+        `, values);
+      } catch (error: any) {
+        console.error(`Batch insert failed for batch starting at index ${i}:`, error.message);
+        console.error(`Batch size: ${batch.length}, Placeholders: ${placeholders.length}, Values: ${values.length}`);
+        throw error; // Re-throw to let the caller handle it
+      }
     }
   }
 
