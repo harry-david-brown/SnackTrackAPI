@@ -41,7 +41,7 @@ const upload = multer({
  * /csv/import:
  *   post:
  *     summary: Import CSV or ZIP file
- *     description: Import receipt data from a CSV file or ZIP archive (Uber Eats data export). ZIP files are automatically extracted to find user_orders-0.csv.
+ *     description: Import receipt data from a CSV file or ZIP archive (Uber Eats or DoorDash data export). ZIP files are automatically extracted and platform is auto-detected.
  *     tags: [CSV Import]
  *     security:
  *       - BearerAuth: []
@@ -58,7 +58,7 @@ const upload = multer({
  *               csvFile:
  *                 type: string
  *                 format: binary
- *                 description: CSV file or ZIP archive containing Uber Eats data (max 50MB)
+ *                 description: CSV file or ZIP archive containing Uber Eats or DoorDash data (max 50MB)
  *               userId:
  *                 type: string
  *                 format: uuid
@@ -94,10 +94,10 @@ const upload = multer({
  *               properties:
  *                 error:
  *                   type: string
- *                   example: "Could not find Uber Eats CSV in ZIP file"
+ *                   example: "Could not find CSV in ZIP file"
  *                 hint:
  *                   type: string
- *                   example: "Make sure you uploaded the complete Uber data export ZIP file"
+ *                   example: "Make sure you uploaded the complete Uber Eats or DoorDash data export ZIP file"
  *       401:
  *         description: Unauthorized - missing or invalid token
  *       403:
@@ -138,18 +138,20 @@ router.post('/import', authenticateToken, validateOwnership, csvImportRateLimit,
       // Validate ZIP file
       zipExtractor.validateZipFile(req.file.buffer, 50);
       
-      // Extract CSV from ZIP
+      // Extract CSV from ZIP (auto-detects platform)
       try {
-        const extractedFile = zipExtractor.extractUberEatsCSV(req.file.buffer);
+        const extractedFile = zipExtractor.extractCSV(req.file.buffer);
         csvBuffer = extractedFile.content;
         fileName = extractedFile.filename;
         
-        console.log(`✅ Extracted CSV from ZIP: ${extractedFile.path}`);
+        const platform = extractedFile.platform === 'uber' ? 'Uber Eats' : 
+                        extractedFile.platform === 'doordash' ? 'DoorDash' : 'Unknown';
+        console.log(`✅ Extracted ${platform} CSV from ZIP: ${extractedFile.path}`);
       } catch (error) {
         if (error instanceof ValidationError) {
           return res.status(400).json({
             error: error.message,
-            hint: 'Make sure you uploaded the complete Uber data export ZIP file'
+            hint: 'Make sure you uploaded the complete Uber Eats or DoorDash data export ZIP file'
           });
         }
         throw error;
@@ -159,13 +161,20 @@ router.post('/import', authenticateToken, validateOwnership, csvImportRateLimit,
       csvBuffer = req.file.buffer;
     }
 
-    // Validate CSV format
+    // Validate CSV format (auto-detects Uber Eats or DoorDash)
     const validation = csvImportService.validateCsvFormat(csvBuffer);
     if (!validation.valid) {
+      const format = csvImportService.detectCsvFormat(csvBuffer);
+      const platformHint = format === 'unknown' 
+        ? 'Uber Eats or DoorDash' 
+        : format === 'uber' 
+          ? 'Uber Eats' 
+          : 'DoorDash';
+      
       return res.status(400).json({
         error: 'Invalid CSV format',
         details: validation.errors,
-        hint: 'Please download a fresh export from Uber Eats'
+        hint: `Please download a fresh export from ${platformHint}`
       });
     }
 

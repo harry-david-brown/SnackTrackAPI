@@ -20,6 +20,18 @@ export interface UberCsvRow {
   Currency: string;
 }
 
+export interface DoorDashCsvRow {
+  ITEM: string;
+  CATEGORY: string;
+  STORE_NAME: string;
+  UNIT_PRICE: string;
+  QUANTITY: string;
+  SUBTOTAL: string;
+  CREATED_AT: string;
+  DELIVERY_TIME: string;
+  DELIVERY_ADDRESS: string;
+}
+
 export interface ImportResult {
   success: boolean;
   totalOrders: number;
@@ -33,9 +45,51 @@ export class CsvImportService {
   constructor(private postgres: PostgresService) {}
 
   /**
+   * Detect CSV format (Uber Eats or DoorDash)
+   */
+  detectCsvFormat(csvBuffer: Buffer): 'uber' | 'doordash' | 'unknown' {
+    const content = csvBuffer.toString();
+    const firstLine = content.split('\n')[0].toLowerCase();
+
+    // Check for DoorDash headers
+    if (firstLine.includes('item') && 
+        firstLine.includes('store_name') && 
+        firstLine.includes('created_at') &&
+        firstLine.includes('subtotal')) {
+      return 'doordash';
+    }
+
+    // Check for Uber Eats headers
+    if (firstLine.includes('restaurant_name') && 
+        firstLine.includes('request_time_local') && 
+        firstLine.includes('order_price') &&
+        firstLine.includes('item_name')) {
+      return 'uber';
+    }
+
+    return 'unknown';
+  }
+
+  /**
    * Parse CSV file and convert to Receipt objects
+   * Auto-detects format and routes to appropriate parser
    */
   async parseCsvFile(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
+    const format = this.detectCsvFormat(csvBuffer);
+
+    if (format === 'doordash') {
+      return this.parseDoorDashCsv(csvBuffer, userId);
+    } else if (format === 'uber') {
+      return this.parseUberEatsCsv(csvBuffer, userId);
+    } else {
+      throw new Error('Unknown CSV format. Expected Uber Eats or DoorDash format.');
+    }
+  }
+
+  /**
+   * Parse Uber Eats CSV file and convert to Receipt objects
+   */
+  async parseUberEatsCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
     const results: UberCsvRow[] = [];
     const errors: string[] = [];
     
@@ -69,12 +123,12 @@ export class CsvImportService {
         })
         .on('end', () => {
           try {
-            const receipts = this.convertCsvRowsToReceipts(results, userId);
+            const receipts = this.convertUberEatsRowsToReceipts(results, userId);
             const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
             
             resolve({
               success: errors.length === 0,
-              totalOrders: this.getUniqueOrderCount(results),
+              totalOrders: this.getUniqueUberEatsOrderCount(results),
               totalReceipts: receipts.length,
               totalAmount,
               errors,
@@ -91,10 +145,145 @@ export class CsvImportService {
   }
 
   /**
-   * Convert CSV rows to Receipt objects
+   * Parse DoorDash CSV file and convert to Receipt objects
+   */
+  async parseDoorDashCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
+    const results: DoorDashCsvRow[] = [];
+    const errors: string[] = [];
+    
+    return new Promise((resolve, reject) => {
+      const stream = Readable.from(csvBuffer.toString());
+      
+      stream
+        .pipe(csv())
+        .on('data', (row: DoorDashCsvRow) => {
+          try {
+            // Validate required fields
+            if (!row.STORE_NAME || !row.CREATED_AT) {
+              errors.push(`Invalid row: Missing required fields - ${JSON.stringify(row)}`);
+              return;
+            }
+
+            // Validate subtotal
+            const subtotal = parseFloat(row.SUBTOTAL);
+            if (isNaN(subtotal) || subtotal < 0) {
+              errors.push(`Invalid subtotal: ${row.SUBTOTAL}`);
+              return;
+            }
+            
+            results.push(row);
+          } catch (error) {
+            errors.push(`Error parsing row: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        })
+        .on('end', () => {
+          try {
+            const receipts = this.convertDoorDashRowsToReceipts(results, userId);
+            const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
+            
+            resolve({
+              success: errors.length === 0,
+              totalOrders: this.getUniqueDoorDashOrderCount(results),
+              totalReceipts: receipts.length,
+              totalAmount,
+              errors,
+              receipts
+            });
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .on('error', (error) => {
+          reject(error);
+        });
+    });
+  }
+
+  /**
+   * Convert DoorDash CSV rows to Receipt objects
+   * Groups items by order (same store, same created_at, same delivery_time)
+   */
+  private convertDoorDashRowsToReceipts(rows: DoorDashCsvRow[], userId: string): Receipt[] {
+    // Group rows by order (store + created_at + delivery_time)
+    const orderGroups = new Map<string, DoorDashCsvRow[]>();
+    
+    for (const row of rows) {
+      const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
+      
+      if (!orderGroups.has(orderKey)) {
+        orderGroups.set(orderKey, []);
+      }
+      orderGroups.get(orderKey)!.push(row);
+    }
+
+    const receipts: Receipt[] = [];
+    
+    for (const [orderKey, orderRows] of orderGroups) {
+      const firstRow = orderRows[0];
+      
+      // Parse order date
+      let orderDate: Date | undefined;
+      try {
+        orderDate = new Date(firstRow.CREATED_AT);
+      } catch (error) {
+        console.warn(`Invalid date format: ${firstRow.CREATED_AT}`);
+      }
+
+      // Calculate order total by summing SUBTOTAL
+      const orderTotal = orderRows.reduce((sum, row) => {
+        const subtotal = parseFloat(row.SUBTOTAL) || 0;
+        return sum + subtotal;
+      }, 0);
+
+      if (isNaN(orderTotal) || orderTotal <= 0) {
+        console.warn(`Invalid order total for order: ${orderKey}`);
+        continue;
+      }
+
+      // Convert items
+      const items: ReceiptItem[] = orderRows.map(row => ({
+        name: row.ITEM,
+        quantity: parseInt(row.QUANTITY) || 1,
+        price: parseFloat(row.UNIT_PRICE) || 0,
+        category: row.CATEGORY // Store category for potential analytics
+      }));
+
+      // Create receipt
+      const receipt = new Receipt(
+        userId,
+        items,
+        orderTotal,
+        ReceiptType.DOORDASH, // Set receipt_type to DOORDASH
+        firstRow.STORE_NAME,
+        orderDate,
+        DataSource.CSV // dataSource
+      );
+
+      receipts.push(receipt);
+    }
+
+    return receipts;
+  }
+
+  /**
+   * Get count of unique DoorDash orders
+   */
+  private getUniqueDoorDashOrderCount(rows: DoorDashCsvRow[]): number {
+    const uniqueOrders = new Set<string>();
+    
+    for (const row of rows) {
+      const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
+      uniqueOrders.add(orderKey);
+    }
+    
+    return uniqueOrders.size;
+  }
+
+  /**
+   * Convert Uber Eats CSV rows to Receipt objects
    * Groups items by order (same restaurant, same time, same order price)
    */
-  private convertCsvRowsToReceipts(rows: UberCsvRow[], userId: string): Receipt[] {
+  private convertUberEatsRowsToReceipts(rows: UberCsvRow[], userId: string): Receipt[] {
     // Group rows by order (restaurant + time + order price)
     const orderGroups = new Map<string, UberCsvRow[]>();
     
@@ -139,7 +328,7 @@ export class CsvImportService {
         userId,
         items,
         orderPrice,
-        ReceiptType.UBER_EATS,
+        ReceiptType.UBER_EATS, // Set receipt_type to UBER_EATS
         firstRow.Restaurant_Name,
         orderDate,
         DataSource.CSV // dataSource
@@ -152,9 +341,9 @@ export class CsvImportService {
   }
 
   /**
-   * Get count of unique orders
+   * Get count of unique Uber Eats orders
    */
-  private getUniqueOrderCount(rows: UberCsvRow[]): number {
+  private getUniqueUberEatsOrderCount(rows: UberCsvRow[]): number {
     const uniqueOrders = new Set<string>();
     
     for (const row of rows) {
@@ -191,7 +380,7 @@ export class CsvImportService {
   }
 
   /**
-   * Validate CSV file format
+   * Validate CSV file format (supports both Uber Eats and DoorDash)
    */
   validateCsvFormat(csvBuffer: Buffer): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
@@ -203,24 +392,44 @@ export class CsvImportService {
       return { valid: false, errors };
     }
 
-    // Check for required headers
-    const requiredHeaders = [
-      'City_Name',
-      'Restaurant_Name', 
-      'Request_Time_Local',
-      'Order_Status',
-      'Item_Name',
-      'Item_quantity',
-      'Item_Price',
-      'Order_Price',
-      'Currency'
-    ];
+    const format = this.detectCsvFormat(csvBuffer);
+    const firstLine = content.split('\n')[0].toLowerCase();
 
-    const firstLine = content.split('\n')[0];
-    for (const header of requiredHeaders) {
-      if (!firstLine.includes(header)) {
-        errors.push(`Missing required header: ${header}`);
+    if (format === 'doordash') {
+      // Check for DoorDash required headers
+      const requiredHeaders = [
+        'item',
+        'store_name',
+        'created_at',
+        'subtotal',
+        'quantity',
+        'unit_price'
+      ];
+
+      for (const header of requiredHeaders) {
+        if (!firstLine.includes(header)) {
+          errors.push(`Missing required DoorDash header: ${header}`);
+        }
       }
+    } else if (format === 'uber') {
+      // Check for Uber Eats required headers
+      const requiredHeaders = [
+        'restaurant_name',
+        'request_time_local',
+        'order_status',
+        'item_name',
+        'item_quantity',
+        'item_price',
+        'order_price'
+      ];
+
+      for (const header of requiredHeaders) {
+        if (!firstLine.includes(header)) {
+          errors.push(`Missing required Uber Eats header: ${header}`);
+        }
+      }
+    } else {
+      errors.push('Unknown CSV format. Expected Uber Eats or DoorDash format.');
     }
 
     return {

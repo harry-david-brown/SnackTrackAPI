@@ -435,7 +435,7 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
       },
       {
         name: 'CSV Import',
-        description: 'CSV and ZIP file import operations. Upload Uber Eats data as CSV or ZIP archive.'
+        description: 'CSV and ZIP file import operations. Upload Uber Eats or DoorDash data as CSV or ZIP archive. Platform is auto-detected.'
       },
       {
         name: 'Database',
