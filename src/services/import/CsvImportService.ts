@@ -46,16 +46,26 @@ export class CsvImportService {
 
   /**
    * Detect CSV format (Uber Eats or DoorDash)
+   * Also detects DoorDash profile_details.csv files (which don't have order data)
    */
   detectCsvFormat(csvBuffer: Buffer): 'uber' | 'doordash' | 'unknown' {
     const content = csvBuffer.toString();
     const firstLine = content.split('\n')[0].toLowerCase();
 
-    // Check for DoorDash headers
+    // Check for DoorDash order headers
     if (firstLine.includes('item') &&
         firstLine.includes('store_name') &&
         firstLine.includes('created_at') &&
         firstLine.includes('subtotal')) {
+      return 'doordash';
+    }
+
+    // Check for DoorDash profile headers (consumer_profile_details.csv)
+    // This file is sent when account has no orders yet
+    if (firstLine.includes('first_name') &&
+        firstLine.includes('last_name') &&
+        firstLine.includes('email') &&
+        firstLine.includes('phone_number')) {
       return 'doordash';
     }
 
@@ -548,7 +558,18 @@ export class CsvImportService {
     const firstLine = content.split('\n')[0].toLowerCase();
 
     if (format === 'doordash') {
-      // Check for DoorDash required headers
+      // Check if it's a profile file (no order data) or order file
+      const isProfileFile = firstLine.includes('first_name') && 
+                           firstLine.includes('last_name') && 
+                           firstLine.includes('email');
+      
+      if (isProfileFile) {
+        // Profile file is valid DoorDash format, but will have no orders
+        // Let it through validation - parser will handle "no orders" case
+        return { valid: true, errors: [] };
+      }
+      
+      // Check for DoorDash order required headers
       const requiredHeaders = [
         'item',
         'store_name',
