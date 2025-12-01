@@ -4,6 +4,9 @@ import { EmailClient } from './EmailClient';
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/AppConfig';
+import { ReceiptExtractor, RawEmail } from '../extraction';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Utility for base64 decoding (Gmail uses URL-safe base64)
 function decodeBase64Gmail(str: string): string {
@@ -16,14 +19,21 @@ export class GmailClient implements EmailClient {
     // Use centralized config to determine data source
     if (config.shouldUseMockData()) {
       console.log('🧪 Using mock Uber emails for testing.');
-      return this.getMockEmails(user);
+      return this.loadEmailsFromDebugFolder(user);
     }
 
-    // Use real Gmail API (credentials are configured)
+    // Use real Gmail API with user-specific tokens
     const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
     const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
-    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/callback';
-    const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
+    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/gmail/callback';
+
+    // Use user's refresh token if available, otherwise fall back to env var (for backward compatibility)
+    const REFRESH_TOKEN = user.gmailRefreshToken || process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
+
+    if (!REFRESH_TOKEN || REFRESH_TOKEN === 'your_refresh_token_here') {
+      console.log('❌ No Gmail refresh token available for user');
+      return this.getMockEmails(user);
+    }
 
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
     oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
@@ -40,16 +50,11 @@ export class GmailClient implements EmailClient {
         console.log(config.getEnvironmentInfo());
       }
       
-      const listRes = await gmail.users.messages.list({
-        userId: 'me', // Use 'me' for the authenticated user
-        q: searchQuery, // Use centralized config for search query
-        maxResults: 100, // Get more emails since we're filtering at source
-      });
-      
-      console.log('📧 Gmail API: Found', listRes.data.messages?.length || 0, 'Uber emails');
-
-      if (listRes.data.messages) {
-        for (const msg of listRes.data.messages) {
+      // Helper function to process a batch of messages
+      const processMessages = async (messages: Array<{ id?: string | null }> | undefined) => {
+        if (!messages) return;
+        
+        for (const msg of messages) {
           console.log('📨 Gmail API: Processing email ID:', msg.id);
           // Fetch the full message
           const msgRes = await gmail.users.messages.get({
@@ -57,11 +62,12 @@ export class GmailClient implements EmailClient {
             id: msg.id!,
           });
           const payload = msgRes.data.payload;
-          let from = '', to = '', body = '';
+          let from = '', to = '', subject = '', body = '';
           if (payload && payload.headers) {
             for (const header of payload.headers) {
               if (header.name === 'From') from = header.value || '';
               if (header.name === 'To') to = header.value || '';
+              if (header.name === 'Subject') subject = header.value || '';
             }
           }
           console.log('📧 Email from:', from, 'to:', to);
@@ -76,14 +82,203 @@ export class GmailClient implements EmailClient {
               }
             }
           }
-          emailList.push(new Email(user.id, from, to, body));
+          emailList.push(new Email(user.id, from, to, body, subject));
+        }
+      };
+
+      // Fetch emails with pagination
+      let nextPageToken: string | null | undefined = undefined;
+      let pageCount = 0;
+      let totalMessagesFound = 0;
+
+      while (true) {
+        pageCount++;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const listRes: any = await gmail.users.messages.list({
+          userId: 'me', // Use 'me' for the authenticated user
+          q: searchQuery, // Use centralized config for search query
+          maxResults: 500, // Maximum allowed by Gmail API
+          pageToken: nextPageToken || undefined,
+        });
+        
+        const messagesInPage = listRes.data.messages?.length || 0;
+        totalMessagesFound += messagesInPage;
+        
+        console.log(`📧 Gmail API: Page ${pageCount} - Found ${messagesInPage} Uber emails (Total so far: ${totalMessagesFound})`);
+
+        // Process messages from this page
+        await processMessages(listRes.data.messages);
+
+        // Check if there are more pages
+        nextPageToken = listRes.data.nextPageToken || null;
+        
+        if (!nextPageToken) {
+          break; // No more pages
+        }
+        
+        console.log(`📄 Gmail API: More pages available, fetching next page...`);
+      }
+
+      console.log(`📧 Gmail API: Completed pagination - Found ${totalMessagesFound} total Uber emails across ${pageCount} page(s)`);
+
+      if (true) {
+        // Save emails to JSON for debugging
+        try {
+          const debugDir = path.join(process.cwd(), 'debug-emails');
+          if (!fs.existsSync(debugDir)) {
+            fs.mkdirSync(debugDir, { recursive: true });
+          }
+
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const filename = `gmail-emails-${user.id}-${timestamp}.json`;
+          const filepath = path.join(debugDir, filename);
+
+          // Convert emails to JSON-serializable format
+          const emailsJson = emailList.map(email => ({
+            userId: email.userId,
+            from: email.from,
+            to: email.to,
+            body: email.body,
+            subject: email.subject
+          }));
+
+          fs.writeFileSync(filepath, JSON.stringify(emailsJson, null, 2));
+          console.log(`🔍 DEBUG: Saved ${emailList.length} emails to ${filepath}`);
+
+          // Also save emails with unknown restaurants (without body) for debugging
+          try {
+            const extractor = new ReceiptExtractor();
+            const unknownRestaurantEmails: any[] = [];
+
+            for (const email of emailList) {
+              const rawEmail: RawEmail = {
+                userId: email.userId,
+                from: email.from,
+                to: email.to,
+                body: email.body,
+                subject: email.subject
+              };
+
+              const result = extractor.extract(rawEmail);
+              
+              // Check if it's a receipt but merchant is unknown/null
+              if (result.classification.isReceipt && (!result.data?.merchant || result.data.merchant === 'Unknown')) {
+                unknownRestaurantEmails.push({
+                  userId: email.userId,
+                  from: email.from,
+                  to: email.to,
+                  subject: email.subject,
+                  // body is intentionally excluded
+                  extractedData: {
+                    merchant: result.data?.merchant || null,
+                    total: result.data?.total || null,
+                    orderDate: result.data?.orderDate || null,
+                    currency: result.data?.currency || null
+                  }
+                });
+              }
+            }
+
+            if (unknownRestaurantEmails.length > 0) {
+              const unknownFilename = `unknown-restaurants-${user.id}-${timestamp}.json`;
+              const unknownFilepath = path.join(debugDir, unknownFilename);
+              
+              fs.writeFileSync(unknownFilepath, JSON.stringify({
+                userId: user.id,
+                timestamp: new Date().toISOString(),
+                count: unknownRestaurantEmails.length,
+                emails: unknownRestaurantEmails
+              }, null, 2));
+              
+              console.log(`🔍 DEBUG: Saved ${unknownRestaurantEmails.length} unknown restaurant emails to ${unknownFilepath}`);
+            } else {
+              console.log(`✅ All restaurants identified successfully!`);
+            }
+          } catch (extractionError) {
+            console.error('❌ Failed to create unknown-restaurants debug file:', extractionError);
+          }
+        } catch (error) {
+          console.error('❌ Failed to save debug emails to JSON:', error);
         }
       }
+
       console.log('✅ Gmail API: Returning', emailList.length, 'emails to process');
       return emailList;
     } catch (error) {
       console.error('Gmail API error:', error);
       console.log('Falling back to mock data...');
+      return this.getMockEmails(user);
+    }
+  }
+
+  private loadEmailsFromDebugFolder(user: User): Email[] {
+    const debugDir = path.join(process.cwd(), 'debug-emails');
+    
+    if (!fs.existsSync(debugDir)) {
+      console.log(`⚠️ Debug-emails folder not found at ${debugDir}, falling back to generated mock emails`);
+      return this.getMockEmails(user);
+    }
+
+    try {
+      // Find all JSON files in the debug-emails folder, excluding unknown-restaurants files
+      const files = fs.readdirSync(debugDir)
+        .filter(file => file.endsWith('.json') && !file.includes('unknown-restaurants'))
+        .map(file => ({
+          name: file,
+          path: path.join(debugDir, file),
+          stats: fs.statSync(path.join(debugDir, file)),
+          isGmailEmails: file.startsWith('gmail-emails')
+        }))
+        // Sort: prefer gmail-emails files, then by modification time (newest first)
+        .sort((a, b) => {
+          if (a.isGmailEmails && !b.isGmailEmails) return -1;
+          if (!a.isGmailEmails && b.isGmailEmails) return 1;
+          return b.stats.mtime.getTime() - a.stats.mtime.getTime();
+        });
+
+      if (files.length === 0) {
+        console.log(`⚠️ No email JSON files found in debug-emails folder, falling back to generated mock emails`);
+        return this.getMockEmails(user);
+      }
+
+      // Load the most recent/preferred file
+      const selectedFile = files[0];
+      console.log(`📂 Loading emails from debug file: ${selectedFile.name}`);
+
+      const fileContent = fs.readFileSync(selectedFile.path, 'utf8');
+      const parsedContent = JSON.parse(fileContent);
+
+      // Handle both direct array format and nested format (for unknown-restaurants files that might slip through)
+      let emailsJson: any[];
+      if (Array.isArray(parsedContent)) {
+        emailsJson = parsedContent;
+      } else if (parsedContent.emails && Array.isArray(parsedContent.emails)) {
+        // Handle nested format (unknown-restaurants files)
+        console.log(`⚠️ File contains nested format, extracting emails array`);
+        emailsJson = parsedContent.emails;
+      } else {
+        console.log(`⚠️ JSON file does not contain a valid email array, falling back to generated mock emails`);
+        return this.getMockEmails(user);
+      }
+
+      // Convert JSON objects to Email objects
+      const emails = emailsJson.map((emailData: any) => {
+        // ALWAYS use the current user's ID, overriding any userId in the debug JSON
+        // This ensures receipts are saved for the currently logged-in user
+        return new Email(
+          user.id,  // Always use current user's ID
+          emailData.from || '',
+          emailData.to || user.email,
+          emailData.body || '',
+          emailData.subject || ''
+        );
+      });
+
+      console.log(`✅ Loaded ${emails.length} emails from debug-emails folder`);
+      return emails;
+    } catch (error) {
+      console.error('❌ Error loading emails from debug-emails folder:', error);
+      console.log('Falling back to generated mock emails');
       return this.getMockEmails(user);
     }
   }

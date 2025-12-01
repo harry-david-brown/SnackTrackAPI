@@ -314,12 +314,18 @@ export class WrappedAnalyticsService {
 
   /**
    * Calculate Single Item Orders
-   * Orders with 1-2 items under $20
+   * Orders with 1-2 items under $20, excluding receipts with Unknown items
    */
   private async calculateSingleItemOrders(receipts: ReceiptForAnalytics[]): Promise<SingleItemOrders | undefined> {
     const singleOrders = receipts.filter(r => {
       const itemCount = r.items.reduce((sum, item) => sum + item.quantity, 0);
-      return itemCount <= 2 && r.amountSpent < 20;
+      // Exclude receipts with any "Unknown" items (case-insensitive)
+      const hasUnknownItems = r.items.some(item => 
+        item.name.toLowerCase() === 'unknown' || 
+        item.name.trim() === '' || 
+        !item.name
+      );
+      return itemCount <= 2 && r.amountSpent < 20 && !hasUnknownItems;
     });
 
     if (singleOrders.length === 0) return undefined;
@@ -327,16 +333,23 @@ export class WrappedAnalyticsService {
     const totalSpent = singleOrders.reduce((sum, r) => sum + r.amountSpent, 0);
     const averageAmount = totalSpent / singleOrders.length;
 
-    // Find most common single item
+    // Find most common single item (excluding "Unknown")
     const itemCounts = new Map<string, number>();
     singleOrders.forEach(r => {
       r.items.forEach(item => {
-        const count = itemCounts.get(item.name) || 0;
-        itemCounts.set(item.name, count + 1);
+        // Skip Unknown/invalid items when counting (case-insensitive)
+        const itemName = item.name?.trim();
+        if (itemName && itemName.toLowerCase() !== 'unknown') {
+          const count = itemCounts.get(itemName) || 0;
+          itemCounts.set(itemName, count + 1);
+        }
       });
     });
 
-    let mostCommon = 'Unknown';
+    // If no valid items found, return undefined
+    if (itemCounts.size === 0) return undefined;
+
+    let mostCommon = 'Various items';
     let maxCount = 0;
     itemCounts.forEach((count, item) => {
       if (count > maxCount) {

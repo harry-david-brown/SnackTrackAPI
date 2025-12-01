@@ -138,6 +138,16 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
 
     const receipts = await receiptService.getReceipts(filters, limit, offset);
     
+    // Ensure items are properly serialized as arrays
+    const serializedReceipts = receipts.map(receipt => {
+      const receiptObj = receipt.toApiResponse ? receipt.toApiResponse() : receipt;
+      // Ensure items is always an array
+      if (!Array.isArray(receiptObj.items)) {
+        receiptObj.items = [];
+      }
+      return receiptObj;
+    });
+    
     // Get total count for pagination (with filters applied)
     // Build WHERE clause for count query to match filters
     let countQuery = 'SELECT COUNT(*) as count FROM receipts WHERE 1=1';
@@ -183,7 +193,7 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
     const totalResult = await postgresService.query(countQuery, countParams);
     const total = parseInt(totalResult.rows[0].count);
     
-    res.json(createPaginatedResponse(receipts, total, page, limit));
+    res.json(createPaginatedResponse(serializedReceipts, total, page, limit));
   } catch (err) {
     console.error('Error fetching receipts:', err);
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';

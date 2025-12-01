@@ -86,7 +86,7 @@ for i in $(seq 1 $CONCURRENT_USERS); do
         ;;
       1)
         # Analytics (with auth)
-        make_request "$API_URL/validation/user/$USER_ID/summary" "$ACCESS_TOKEN" "$i-$j" &
+        make_request "$API_URL/users/$USER_ID/summary" "$ACCESS_TOKEN" "$i-$j" &
         ;;
       2)
         # Total spent (with auth)

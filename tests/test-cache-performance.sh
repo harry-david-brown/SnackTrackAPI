@@ -29,7 +29,7 @@ echo ""
 # Step 2: First summary request (cache MISS)
 echo "2️⃣  First summary request (cache MISS expected)..."
 START=$(date +%s%N)
-SUMMARY1=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY1=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 LATENCY1=$((($END - $START) / 1000000))
@@ -40,7 +40,7 @@ echo ""
 # Step 3: Second summary request (cache HIT)
 echo "3️⃣  Second summary request (cache HIT expected)..."
 START=$(date +%s%N)
-SUMMARY2=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY2=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 LATENCY2=$((($END - $START) / 1000000))
@@ -51,7 +51,7 @@ echo ""
 # Step 4: Third summary request (should still be cached)
 echo "4️⃣  Third summary request (cache HIT expected)..."
 START=$(date +%s%N)
-SUMMARY3=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+SUMMARY3=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
 END=$(date +%s%N)
 LATENCY3=$((($END - $START) / 1000000))

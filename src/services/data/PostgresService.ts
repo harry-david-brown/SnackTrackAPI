@@ -193,6 +193,25 @@ export class PostgresService {
         console.log('Timezone column already exists or migration failed');
       }
 
+      // Migration: Add Gmail OAuth columns to users table
+      try {
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT
+        `);
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_access_token TEXT
+        `);
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_token_expiry TIMESTAMP
+        `);
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_connected BOOLEAN DEFAULT FALSE
+        `);
+        console.log('✅ Gmail OAuth columns migration completed');
+      } catch (error) {
+        console.log('Gmail OAuth columns already exist or migration failed');
+      }
+
       // Create verification_codes table
       await this.query(`
         CREATE TABLE IF NOT EXISTS verification_codes (

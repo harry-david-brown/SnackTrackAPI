@@ -156,4 +156,75 @@ export class UserRepository {
     );
   }
 
+  /**
+   * Update Gmail OAuth tokens for a user
+   */
+  async updateGmailTokens(userId: string, refreshToken: string, accessToken: string, expiryDate: Date): Promise<void> {
+    await this.postgres.query(
+      `UPDATE users SET 
+        gmail_refresh_token = $1, 
+        gmail_access_token = $2, 
+        gmail_token_expiry = $3,
+        gmail_connected = TRUE,
+        updated_at = NOW() 
+      WHERE id = $4`,
+      [refreshToken, accessToken, expiryDate, userId]
+    );
+  }
+
+  /**
+   * Get user with Gmail tokens
+   */
+  async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
+    const result = await this.postgres.query(
+      `SELECT id, email, email_verified, gmail_refresh_token, gmail_access_token, 
+              gmail_token_expiry, gmail_connected, created_at 
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) return undefined;
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      email: row.email,
+      emailVerified: row.email_verified || false,
+      gmailRefreshToken: row.gmail_refresh_token,
+      gmailAccessToken: row.gmail_access_token,
+      gmailTokenExpiry: row.gmail_token_expiry,
+      gmailConnected: row.gmail_connected || false,
+      createdAt: row.created_at
+    };
+  }
+
+  /**
+   * Disconnect Gmail account for a user
+   */
+  async disconnectGmail(userId: string): Promise<void> {
+    await this.postgres.query(
+      `UPDATE users SET 
+        gmail_refresh_token = NULL, 
+        gmail_access_token = NULL, 
+        gmail_token_expiry = NULL,
+        gmail_connected = FALSE,
+        updated_at = NOW() 
+      WHERE id = $1`,
+      [userId]
+    );
+  }
+
+  /**
+   * Check if user has Gmail connected
+   */
+  async hasGmailConnected(userId: string): Promise<boolean> {
+    const result = await this.postgres.query(
+      'SELECT gmail_connected FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (result.rows.length === 0) return false;
+    return result.rows[0].gmail_connected || false;
+  }
+
 }

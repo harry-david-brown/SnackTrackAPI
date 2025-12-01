@@ -43,7 +43,7 @@ create_user() {
 get_wrapped() {
   local user_id=$1
   local token=$2
-  curl -s -X GET "$API_URL/validation/user/$user_id/summary?includeWrapped=true" \
+  curl -s -X GET "$API_URL/users/$user_id/summary?includeWrapped=true" \
     -H "Authorization: Bearer $token"
 }
 
@@ -274,7 +274,7 @@ echo ""
 echo "TEST 5: Backward Compatibility"
 echo "-------------------------------"
 # Test without includeWrapped parameter
-BASIC=$(curl -s -X GET "$API_URL/validation/user/$USER_ID/summary" \
+BASIC=$(curl -s -X GET "$API_URL/users/$USER_ID/summary" \
   -H "Authorization: Bearer $TOKEN")
 
 HAS_STATS=$(echo "$BASIC" | python3 -c "import sys,json; print('statistics' in json.load(sys.stdin))" 2>/dev/null)

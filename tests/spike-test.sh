@@ -43,7 +43,7 @@ make_request() {
   
   # Analytics endpoint (most complex)
   local status=$(curl -s -o /dev/null -w "%{http_code}" \
-    "$API_URL/validation/user/$USER_ID/summary" \
+    "$API_URL/users/$USER_ID/summary" \
     -H "Authorization: Bearer $ACCESS_TOKEN" 2>&1)
   
   local end=$(date +%s%N)

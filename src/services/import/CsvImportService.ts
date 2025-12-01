@@ -52,16 +52,16 @@ export class CsvImportService {
     const firstLine = content.split('\n')[0].toLowerCase();
 
     // Check for DoorDash headers
-    if (firstLine.includes('item') && 
-        firstLine.includes('store_name') && 
+    if (firstLine.includes('item') &&
+        firstLine.includes('store_name') &&
         firstLine.includes('created_at') &&
         firstLine.includes('subtotal')) {
       return 'doordash';
     }
 
     // Check for Uber Eats headers
-    if (firstLine.includes('restaurant_name') && 
-        firstLine.includes('request_time_local') && 
+    if (firstLine.includes('restaurant_name') &&
+        firstLine.includes('request_time_local') &&
         firstLine.includes('order_price') &&
         firstLine.includes('item_name')) {
       return 'uber';
@@ -150,10 +150,10 @@ export class CsvImportService {
   async parseDoorDashCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
     const results: DoorDashCsvRow[] = [];
     const errors: string[] = [];
-    
+
     return new Promise((resolve, reject) => {
       const stream = Readable.from(csvBuffer.toString());
-      
+
       stream
         .pipe(csv())
         .on('data', (row: DoorDashCsvRow) => {
@@ -170,7 +170,7 @@ export class CsvImportService {
               errors.push(`Invalid subtotal: ${row.SUBTOTAL}`);
               return;
             }
-            
+
             results.push(row);
           } catch (error) {
             errors.push(`Error parsing row: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -180,7 +180,7 @@ export class CsvImportService {
           try {
             const receipts = this.convertDoorDashRowsToReceipts(results, userId);
             const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
-            
+
             resolve({
               success: errors.length === 0,
               totalOrders: this.getUniqueDoorDashOrderCount(results),
@@ -206,10 +206,10 @@ export class CsvImportService {
   private convertDoorDashRowsToReceipts(rows: DoorDashCsvRow[], userId: string): Receipt[] {
     // Group rows by order (store + created_at + delivery_time)
     const orderGroups = new Map<string, DoorDashCsvRow[]>();
-    
+
     for (const row of rows) {
       const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
-      
+
       if (!orderGroups.has(orderKey)) {
         orderGroups.set(orderKey, []);
       }
@@ -217,10 +217,10 @@ export class CsvImportService {
     }
 
     const receipts: Receipt[] = [];
-    
+
     for (const [orderKey, orderRows] of orderGroups) {
       const firstRow = orderRows[0];
-      
+
       // Parse order date (CREATED_AT is when order was placed)
       let orderDate: Date | undefined;
       try {
@@ -279,12 +279,12 @@ export class CsvImportService {
    */
   private getUniqueDoorDashOrderCount(rows: DoorDashCsvRow[]): number {
     const uniqueOrders = new Set<string>();
-    
+
     for (const row of rows) {
       const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
       uniqueOrders.add(orderKey);
     }
-    
+
     return uniqueOrders.size;
   }
 
@@ -390,32 +390,36 @@ export class CsvImportService {
     await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
     
     if (receipts.length === 0) return;
-    
+
     // Batch insert for performance (much faster than individual inserts)
     // Process in chunks of 50 to avoid query size limits and ensure reliability
     const batchSize = 50;
     for (let i = 0; i < receipts.length; i += batchSize) {
       const batch = receipts.slice(i, i + batchSize);
-      
+
       // Build values array and placeholders for batch insert
       const values: any[] = [];
       const placeholders: string[] = [];
-      
+
       batch.forEach((receipt, index) => {
+          // Truncate restaurant name to fit VARCHAR(255) constraint
+      const truncatedRestaurantName = receipt.restaurantName
+          ? receipt.restaurantName.substring(0, 255)
+          : receipt.restaurantName;
         const paramIndex = index * 8 + 1; // PostgreSQL uses $1, $2, $3, etc.
         placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7})`);
         values.push(
           userId, // Use the userId parameter, not receipt.userId, to ensure consistency
           receipt.receiptType,
           receipt.dataSource,
-          receipt.restaurantName,
+          truncatedRestaurantName,
           receipt.orderDate,
           receipt.amountSpent,
           receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
           receipt.deliveryTime || null
         );
       });
-      
+
       // Execute batch insert with error handling
       try {
         await this.postgres.query(`

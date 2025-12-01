@@ -1,202 +1,126 @@
 import { Receipt, ReceiptType, ReceiptItem, DataSource } from '../../models/Receipt';
 import { Email } from '../email/Email';
+import { 
+  ReceiptExtractor, 
+  RawEmail, 
+  ServiceType, 
+  ExtractedReceiptData 
+} from '../extraction';
 
 /**
  * Service responsible for parsing emails into receipts
- * Separated from Email class to follow single responsibility principle
+ * Uses the new ReceiptExtractor for accurate data extraction
  */
 export class ReceiptParserService {
+  private extractor: ReceiptExtractor;
+  
+  constructor() {
+    this.extractor = new ReceiptExtractor();
+  }
   
   /**
    * Parse an email into a receipt
    */
   parseEmailToReceipt(email: Email): Receipt | null {
+    // Convert to RawEmail format for the extractor
+    const rawEmail: RawEmail = {
+      userId: email.userId,
+      from: email.from,
+      to: email.to,
+      body: email.body,
+      subject: email.subject
+    };
+    
+    // Use the new extraction system
+    const result = this.extractor.extract(rawEmail);
+    
     // Only convert to receipt if it's actually a receipt
-    if (!email.isReceipt()) {
+    if (!result.classification.isReceipt || !result.data) {
       return null;
     }
     
-    const body = email.body.toLowerCase();
-    const subject = email.subject?.toLowerCase() || '';
-    
-    // Detect receipt type
-    const receiptType = this.detectReceiptType(email.from, subject, body);
-    
-    // Parse based on receipt type
-    switch (receiptType) {
-      case ReceiptType.UBER_EATS:
-        return this.parseUberEatsReceipt(email);
-      case ReceiptType.DOORDASH:
-        return this.parseDoorDashReceipt(email);
-      default:
-        return this.parseGenericReceipt(email);
-    }
+    return this.convertToReceipt(email.userId, result.data);
   }
 
-  private detectReceiptType(from: string, subject: string, body: string): ReceiptType {
-    const fromLower = from.toLowerCase();
-    const combined = `${fromLower} ${subject} ${body}`;
+  /**
+   * Parse multiple emails and return receipts
+   */
+  parseEmailsToReceipts(emails: Email[]): Receipt[] {
+    const rawEmails: RawEmail[] = emails.map(email => ({
+      userId: email.userId,
+      from: email.from,
+      to: email.to,
+      body: email.body,
+      subject: email.subject
+    }));
 
-    if (combined.includes('uber') || combined.includes('ubereats')) {
-      return ReceiptType.UBER_EATS;
-    }
-    if (combined.includes('doordash')) {
-      return ReceiptType.DOORDASH;
-    }
-    if (combined.includes('grubhub')) {
-      return ReceiptType.GRUBHUB;
-    }
-    if (combined.includes('postmates')) {
-      return ReceiptType.POSTMATES;
-    }
-    if (combined.includes('caviar')) {
-      return ReceiptType.CAVIAR;
-    }
+    const results = this.extractor.extractReceipts(rawEmails);
     
-    return ReceiptType.UNKNOWN;
+    return results
+      .filter(r => r.data !== null)
+      .map((r, i) => this.convertToReceipt(emails[i].userId, r.data!))
+      .filter((receipt): receipt is Receipt => receipt !== null);
   }
 
-  private parseUberEatsReceipt(email: Email): Receipt {
-    const body = email.body;
+  /**
+   * Check if an email is likely a receipt
+   */
+  isReceipt(email: Email): boolean {
+    const rawEmail: RawEmail = {
+      userId: email.userId,
+      from: email.from,
+      to: email.to,
+      body: email.body,
+      subject: email.subject
+    };
+    return this.extractor.isReceipt(rawEmail);
+  }
+
+  /**
+   * Convert extracted data to Receipt model
+   */
+  private convertToReceipt(
+    userId: string, 
+    data: ExtractedReceiptData
+  ): Receipt {
     const items: ReceiptItem[] = [];
-    let totalAmount = 0;
-    let restaurantName = '';
-    let orderDate: Date | undefined;
-    let subtotal = 0;
-    let tax = 0;
-    let tip = 0;
-    let deliveryFee = 0;
-    let serviceFee = 0;
-
-    // Extract restaurant name
-    const restaurantMatch = body.match(/from\s+([^,\n]+)/i) || body.match(/at\s+([^,\n]+)/i);
-    if (restaurantMatch) {
-      restaurantName = restaurantMatch[1].trim();
-    }
-
-    // Extract order date
-    const dateMatch = body.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
-    if (dateMatch) {
-      orderDate = new Date(dateMatch[1]);
-    }
-
-    // Extract total amount (look for "Total" or "Order Total")
-    // Handle various currency formats: $30.87, CA$30.87, Total $30.87, Total CA$30.87
-    const totalMatch = body.match(/total[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (totalMatch) {
-      totalAmount = parseFloat(totalMatch[1]);
-    }
-
-    // Extract subtotal
-    const subtotalMatch = body.match(/subtotal[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (subtotalMatch) {
-      subtotal = parseFloat(subtotalMatch[1]);
-    }
-
-    // Extract tax
-    const taxMatch = body.match(/tax[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (taxMatch) {
-      tax = parseFloat(taxMatch[1]);
-    }
-
-    // Extract tip
-    const tipMatch = body.match(/tip[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (tipMatch) {
-      tip = parseFloat(tipMatch[1]);
-    }
-
-    // Extract delivery fee
-    const deliveryMatch = body.match(/delivery[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (deliveryMatch) {
-      deliveryFee = parseFloat(deliveryMatch[1]);
-    }
-
-    // Extract service fee
-    const serviceMatch = body.match(/service[:\s]*(?:[A-Z]{2}\$)?\$?(\d+\.?\d*)/i);
-    if (serviceMatch) {
-      serviceFee = parseFloat(serviceMatch[1]);
-    }
-
-    // Extract items (look for item patterns) - but skip for forwarded emails to avoid parsing HTML/URLs
-    if (!body.includes('---------- Forwarded message ---------')) {
-      const itemMatches = body.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/gi);
-      if (itemMatches) {
-        for (const match of itemMatches) {
-          const parts = match.match(/(\d+)\s*x\s*([^$]+)\s*\$?(\d+\.?\d*)/i);
-          if (parts) {
-            items.push({
-              name: parts[2].trim(),
-              quantity: parseInt(parts[1]),
-              price: parseFloat(parts[3])
-            });
-          }
-        }
-      }
-    }
-
-    // If no structured items found, try to extract from common patterns
-    if (items.length === 0) {
-      const commonItems = ['latte', 'muffin', 'burger', 'fries', 'burrito', 'chips', 'coffee', 'sandwich', 'pizza', 'salad'];
-      for (const item of commonItems) {
-        if (body.includes(item)) {
-          items.push({
-            name: item,
-            quantity: 1,
-            price: 0 // We don't have individual prices
-          });
-        }
-      }
-    }
-
+    
+    // Note: Individual items are not extracted from email receipts
+    // as they require more sophisticated parsing. The total represents
+    // the order as a single "item" for now.
+    
+    const receiptType = this.mapServiceToReceiptType(data.service);
+    
+    // Use "Unknown Restaurant" as default if merchant is not extracted
+    const restaurantName = data.merchant || 'Unknown Restaurant';
+    
     return new Receipt(
-      email.userId,
+      userId,
       items,
-      totalAmount,
-      ReceiptType.UBER_EATS,
+      data.total ?? 0,
+      receiptType,
       restaurantName,
-      orderDate,
+      data.parsedDate ?? undefined,
       DataSource.EMAIL
     );
   }
 
-  private parseDoorDashReceipt(email: Email): Receipt {
-    // Similar parsing logic for DoorDash
-    return this.parseGenericReceipt(email);
-  }
-
-  private parseGenericReceipt(email: Email): Receipt {
-    // Fallback parsing for unknown receipt types
-    const body = email.body.toLowerCase();
-    const items: ReceiptItem[] = [];
-    let totalAmount = 0;
-
-    // Extract total amount
-    const totalMatch = email.body.match(/\$(\d+\.?\d*)/g);
-    if (totalMatch && totalMatch.length > 0) {
-      const lastAmount = totalMatch[totalMatch.length - 1];
-      totalAmount = parseFloat(lastAmount.replace('$', ''));
+  /**
+   * Map ServiceType to ReceiptType
+   */
+  private mapServiceToReceiptType(service: ServiceType): ReceiptType {
+    switch (service) {
+      case ServiceType.UBER_EATS:
+        return ReceiptType.UBER_EATS;
+      case ServiceType.DOORDASH:
+        return ReceiptType.DOORDASH;
+      case ServiceType.GRUBHUB:
+        return ReceiptType.GRUBHUB;
+      case ServiceType.UBER_RIDE:
+      case ServiceType.UBER_OTHER:
+      case ServiceType.OTHER:
+      default:
+        return ReceiptType.UNKNOWN;
     }
-
-    // Extract basic items
-    const commonItems = ['latte', 'muffin', 'burger', 'fries', 'burrito', 'chips', 'coffee', 'sandwich'];
-    for (const item of commonItems) {
-      if (body.includes(item)) {
-        items.push({
-          name: item,
-          quantity: 1,
-          price: 0
-        });
-      }
-    }
-
-    return new Receipt(
-      email.userId,
-      items,
-      totalAmount,
-      ReceiptType.UNKNOWN,
-      undefined,
-      undefined,
-      DataSource.EMAIL
-    );
   }
 }
