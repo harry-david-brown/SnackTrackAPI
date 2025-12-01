@@ -552,7 +552,7 @@ export class WrappedAnalyticsService {
     if (totalSpent === 0) return undefined;
 
     const comparisons = [
-      { item: "Used Honda Civic", price: 10000, unit: "car" },
+      { item: "Used Honda Civic", price: 5000, unit: "car" },
       { item: "Round-trip flights to Europe", price: 1200, unit: "trip" },
       { item: "Months of groceries", price: 300, unit: "month" },
       { item: "iPhone 15 Pro Max", price: 1199, unit: "phone" },
