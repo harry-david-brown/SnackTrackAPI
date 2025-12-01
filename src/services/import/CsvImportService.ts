@@ -138,13 +138,13 @@ export class CsvImportService {
           try {
             // Check if we have any valid data rows
             if (rowCount === 0) {
-              // File only has headers, no data rows
+              // File only has headers, no data rows (account with no orders)
               resolve({
                 success: false,
                 totalOrders: 0,
                 totalReceipts: 0,
                 totalAmount: 0,
-                errors: ['CSV file contains only headers with no order data. Please ensure your Uber Eats data export includes completed orders.'],
+                errors: ['CSV file contains no valid order data. All rows are missing required fields (Restaurant_Name, Request_Time_Local) or have invalid values.'],
                 receipts: []
               });
               return;
@@ -157,7 +157,7 @@ export class CsvImportService {
                 totalOrders: 0,
                 totalReceipts: 0,
                 totalAmount: 0,
-                errors: ['CSV file contains no valid completed orders. All orders are either incomplete, refunded, or missing required fields (Restaurant_Name, Request_Time_Local).'],
+                errors: ['CSV file contains no valid order data. All rows are missing required fields (Restaurant_Name, Request_Time_Local) or have invalid values.'],
                 receipts: []
               });
               return;

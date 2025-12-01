@@ -55,6 +55,17 @@ export class ZipExtractor {
         return 'uber';
       }
 
+      // Check for Uber ZIP structure even if CSV doesn't exist (account with no orders)
+      // Look for "Uber Data" folder structure
+      const hasUberStructure = zipEntries.some(entry => {
+        const path = entry.entryName.toLowerCase();
+        return path.includes('uber data') || path.includes('uber_data');
+      });
+
+      if (hasUberStructure) {
+        return 'uber';
+      }
+
       return 'unknown';
     } catch (error) {
       return 'unknown';
@@ -190,10 +201,15 @@ export class ZipExtractor {
           };
         }
 
-        throw new ValidationError(
-          'Could not find Uber Eats CSV in ZIP file. Expected path: [any]/Uber Data/Eats/user_orders-0.csv',
-          'file'
-        );
+        // No CSV found - this is a valid Uber ZIP but account has no orders
+        // Create an empty CSV with headers so the parser can handle "no orders" case
+        const emptyCsv = 'Restaurant_Name,Request_Time_Local,Order_Status,Item_Name,Item_quantity,Item_Price,Order_Price\n';
+        return {
+          content: Buffer.from(emptyCsv),
+          filename: 'user_orders-0.csv',
+          path: 'Uber Data/Eats/user_orders-0.csv',
+          platform: 'uber'
+        };
       }
 
       const content = csvEntry.getData();
