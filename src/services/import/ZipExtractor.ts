@@ -27,11 +27,12 @@ export class ZipExtractor {
       const zip = new AdmZip(zipBuffer);
       const zipEntries = zip.getEntries();
 
-      // Check for DoorDash pattern: data_archive/consumer_order_details.csv or consumer_order_details.csv at root
+      // Check for DoorDash pattern: consumer_order_details.csv or consumer_profile_details.csv
+      // (profile_details is sent when account has no orders yet)
       const doorDashEntry = zipEntries.find(entry => {
         const path = entry.entryName.toLowerCase();
         return (
-          path.includes('consumer_order_details') &&
+          (path.includes('consumer_order_details') || path.includes('consumer_profile_details')) &&
           path.endsWith('.csv') &&
           !entry.isDirectory
         );
@@ -79,23 +80,28 @@ export class ZipExtractor {
   }
 
   /**
-   * Extract consumer_order_details.csv from DoorDash data ZIP
+   * Extract CSV from DoorDash data ZIP
    * 
-   * Searches for the file in the DoorDash data structure:
-   * data_archive/consumer_order_details.csv
+   * Searches for either:
+   * - consumer_order_details.csv (contains order data)
+   * - consumer_profile_details.csv (profile data, may not have orders yet)
+   * 
+   * Both are valid DoorDash exports. If profile_details doesn't have order data,
+   * the CSV parser will detect this and return an appropriate error.
    */
   extractDoorDashCSV(zipBuffer: Buffer): ExtractedFile {
     try {
       const zip = new AdmZip(zipBuffer);
       const zipEntries = zip.getEntries();
 
-      // Search for consumer_order_details.csv (can be in data_archive/ or at root)
+      // Search for either consumer_order_details.csv or consumer_profile_details.csv
+      // (can be in data_archive/ or at root)
       const csvEntry = zipEntries.find(entry => {
         const path = entry.entryName.toLowerCase();
         
-        // Match pattern: consumer_order_details.csv (at root or in data_archive/)
+        // Match pattern: consumer_order_details.csv or consumer_profile_details.csv
         return (
-          path.includes('consumer_order_details') &&
+          (path.includes('consumer_order_details') || path.includes('consumer_profile_details')) &&
           path.endsWith('.csv') &&
           !entry.isDirectory
         );
@@ -103,7 +109,7 @@ export class ZipExtractor {
 
       if (!csvEntry) {
         throw new ValidationError(
-          'Could not find DoorDash CSV in ZIP file. Expected file: consumer_order_details.csv',
+          'Could not find DoorDash CSV in ZIP file. Expected file: consumer_order_details.csv or consumer_profile_details.csv',
           'file'
         );
       }
