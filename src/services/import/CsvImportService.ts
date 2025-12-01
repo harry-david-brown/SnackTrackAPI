@@ -92,6 +92,7 @@ export class CsvImportService {
   async parseUberEatsCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
     const results: UberCsvRow[] = [];
     const errors: string[] = [];
+    let rowCount = 0;
     
     return new Promise((resolve, reject) => {
       const stream = Readable.from(csvBuffer.toString());
@@ -99,10 +100,11 @@ export class CsvImportService {
       stream
         .pipe(csv())
         .on('data', (row: UberCsvRow) => {
+          rowCount++;
           try {
             // Validate required fields (Order_Price can be empty for refunded orders)
             if (!row.Restaurant_Name || !row.Request_Time_Local) {
-              errors.push(`Invalid row: Missing required fields - ${JSON.stringify(row)}`);
+              // Skip rows with missing required fields (likely empty/invalid rows)
               return;
             }
             
@@ -118,11 +120,39 @@ export class CsvImportService {
             
             results.push(row);
           } catch (error) {
-            errors.push(`Error parsing row: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            // Skip rows that cause parsing errors
+            return;
           }
         })
         .on('end', () => {
           try {
+            // Check if we have any valid data rows
+            if (rowCount === 0) {
+              // File only has headers, no data rows
+              resolve({
+                success: false,
+                totalOrders: 0,
+                totalReceipts: 0,
+                totalAmount: 0,
+                errors: ['CSV file contains only headers with no order data. Please ensure your Uber Eats data export includes completed orders.'],
+                receipts: []
+              });
+              return;
+            }
+
+            if (results.length === 0) {
+              // File has rows but none are valid (all incomplete/refunded or missing required fields)
+              resolve({
+                success: false,
+                totalOrders: 0,
+                totalReceipts: 0,
+                totalAmount: 0,
+                errors: ['CSV file contains no valid completed orders. All orders are either incomplete, refunded, or missing required fields (Restaurant_Name, Request_Time_Local).'],
+                receipts: []
+              });
+              return;
+            }
+
             const receipts = this.convertUberEatsRowsToReceipts(results, userId);
             const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
             
@@ -150,6 +180,7 @@ export class CsvImportService {
   async parseDoorDashCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
     const results: DoorDashCsvRow[] = [];
     const errors: string[] = [];
+    let rowCount = 0;
 
     return new Promise((resolve, reject) => {
       const stream = Readable.from(csvBuffer.toString());
@@ -157,27 +188,65 @@ export class CsvImportService {
       stream
         .pipe(csv())
         .on('data', (row: DoorDashCsvRow) => {
+          rowCount++;
           try {
-            // Validate required fields
-            if (!row.STORE_NAME || !row.CREATED_AT) {
-              errors.push(`Invalid row: Missing required fields - ${JSON.stringify(row)}`);
+            // Validate required fields (check for empty strings after trimming)
+            const storeName = row.STORE_NAME?.trim();
+            const createdAt = row.CREATED_AT?.trim();
+            if (!storeName || !createdAt) {
+              // Skip rows with missing required fields (likely empty/invalid rows)
               return;
             }
 
             // Validate subtotal
             const subtotal = parseFloat(row.SUBTOTAL);
             if (isNaN(subtotal) || subtotal < 0) {
-              errors.push(`Invalid subtotal: ${row.SUBTOTAL}`);
+              // Skip rows with invalid subtotals
+              return;
+            }
+
+            // Validate UNIT_PRICE is a valid number (catches malformed CSV rows)
+            const unitPrice = parseFloat(row.UNIT_PRICE);
+            if (isNaN(unitPrice) || unitPrice < 0) {
+              // Skip rows with invalid unit prices (likely malformed CSV)
               return;
             }
 
             results.push(row);
           } catch (error) {
-            errors.push(`Error parsing row: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            // Skip rows that cause parsing errors
+            return;
           }
         })
         .on('end', () => {
           try {
+            // Check if we have any valid data rows
+            if (rowCount === 0) {
+              // File only has headers, no data rows
+              resolve({
+                success: false,
+                totalOrders: 0,
+                totalReceipts: 0,
+                totalAmount: 0,
+                errors: ['CSV file contains only headers with no order data. Please ensure your DoorDash data export includes completed orders.'],
+                receipts: []
+              });
+              return;
+            }
+
+            if (results.length === 0) {
+              // File has rows but none are valid
+              resolve({
+                success: false,
+                totalOrders: 0,
+                totalReceipts: 0,
+                totalAmount: 0,
+                errors: ['CSV file contains no valid order data. All rows are missing required fields (STORE_NAME, CREATED_AT, SUBTOTAL) or have invalid values.'],
+                receipts: []
+              });
+              return;
+            }
+
             const receipts = this.convertDoorDashRowsToReceipts(results, userId);
             const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
 
@@ -223,18 +292,32 @@ export class CsvImportService {
 
       // Parse order date (CREATED_AT is when order was placed)
       let orderDate: Date | undefined;
-      try {
-        orderDate = new Date(firstRow.CREATED_AT);
-      } catch (error) {
-        console.warn(`Invalid date format: ${firstRow.CREATED_AT}`);
+      if (firstRow.CREATED_AT) {
+        try {
+          const parsedDate = new Date(firstRow.CREATED_AT);
+          if (!isNaN(parsedDate.getTime())) {
+            orderDate = parsedDate;
+          } else {
+            console.warn(`Invalid date format: ${firstRow.CREATED_AT}`);
+          }
+        } catch (error) {
+          console.warn(`Invalid date format: ${firstRow.CREATED_AT}`);
+        }
       }
 
       // Parse delivery time (DELIVERY_TIME is when order was delivered)
       let deliveryTime: Date | undefined;
-      try {
-        deliveryTime = new Date(firstRow.DELIVERY_TIME);
-      } catch (error) {
-        console.warn(`Invalid delivery time format: ${firstRow.DELIVERY_TIME}`);
+      if (firstRow.DELIVERY_TIME) {
+        try {
+          const parsedTime = new Date(firstRow.DELIVERY_TIME);
+          if (!isNaN(parsedTime.getTime())) {
+            deliveryTime = parsedTime;
+          } else {
+            console.warn(`Invalid delivery time format: ${firstRow.DELIVERY_TIME}`);
+          }
+        } catch (error) {
+          console.warn(`Invalid delivery time format: ${firstRow.DELIVERY_TIME}`);
+        }
       }
 
       // Calculate order total by summing SUBTOTAL
@@ -245,6 +328,18 @@ export class CsvImportService {
 
       if (isNaN(orderTotal) || orderTotal <= 0) {
         console.warn(`Invalid order total for order: ${orderKey}`);
+        continue;
+      }
+
+      // Skip orders without valid CREATED_AT (required field)
+      if (!orderDate) {
+        console.warn(`Skipping order with invalid CREATED_AT: ${orderKey}`);
+        continue;
+      }
+
+      // Skip orders without valid STORE_NAME (required field)
+      if (!firstRow.STORE_NAME || !firstRow.STORE_NAME.trim()) {
+        console.warn(`Skipping order with invalid STORE_NAME: ${orderKey}`);
         continue;
       }
 

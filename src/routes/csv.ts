@@ -181,6 +181,15 @@ router.post('/import', authenticateToken, validateOwnership, csvImportRateLimit,
     // Process CSV synchronously
     const importResult = await csvImportService.parseCsvFile(csvBuffer, userId);
     
+    // Check if we have any valid receipts to import
+    if (importResult.receipts.length === 0) {
+      return res.status(400).json({
+        error: 'No valid orders found in file',
+        details: importResult.errors.length > 0 ? importResult.errors : ['File contains no valid order data'],
+        hint: 'Please ensure your data export includes completed orders. If you just placed an order, wait a few minutes for it to appear in your data export.'
+      });
+    }
+    
     if (importResult.success && importResult.receipts.length > 0) {
       await csvImportService.importReceipts(importResult.receipts, userId);
       
