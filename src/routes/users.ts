@@ -320,6 +320,11 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     // Cache the summary for future requests
     await cacheService.cacheUserSummary(cacheKey, summary);
 
+    // Prevent HTTP caching to ensure fresh data after imports
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
     res.json(summary);
   } catch (error) {
     if (error instanceof NotFoundError) throw error;

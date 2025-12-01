@@ -25,6 +25,11 @@ export class ReceiptRepository {
   }
 
   async save(receipt: Receipt): Promise<void> {
+    // Truncate restaurant name to fit VARCHAR(255) constraint
+    const truncatedRestaurantName = receipt.restaurantName 
+      ? receipt.restaurantName.substring(0, 255)
+      : receipt.restaurantName;
+
     await this.postgres.query(`
       INSERT INTO receipts (
         user_id, receipt_type, data_source, restaurant_name, order_date, 
@@ -34,7 +39,7 @@ export class ReceiptRepository {
       receipt.userId,
       receipt.receiptType,
       receipt.dataSource,
-      receipt.restaurantName,
+      truncatedRestaurantName,
       receipt.orderDate,
       receipt.amountSpent,
       receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',

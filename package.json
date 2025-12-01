@@ -26,6 +26,7 @@
     "express-slow-down": "^3.0.0",
     "googleapis": "^133.0.0",
     "helmet": "^8.1.0",
+    "html-entities": "^2.6.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "nodemailer": "^6.9.7",

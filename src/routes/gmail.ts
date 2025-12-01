@@ -28,7 +28,7 @@ const getOAuth2Client = (platform: 'web' | 'mobile' = 'mobile'): OAuth2Client =>
 
   // Choose redirect URI based on platform
   const REDIRECT_URI = platform === 'web' 
-    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8082/oauth-callback')
+    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8081/oauth-callback')
     : (process.env.MOBILE_REDIRECT_URI || 'snacktrack://oauth/callback');
 
   return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);

@@ -1,11 +1,13 @@
 import { User } from '../../models/User';
-import { Receipt } from '../../models/Receipt';
+import { Receipt, ReceiptType } from '../../models/Receipt';
 import { GmailClient } from '../email/GmailClient';
 import { EmailFilterService } from '../email/EmailFilterService';
 import { ReceiptParserService } from '../receipt/ReceiptParserService';
 import { ReceiptService } from '../receipt/ReceiptService';
 import { PostgresService } from '../data/PostgresService';
 import { cacheService } from '../core/CacheService';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface GmailImportResult {
   success: boolean;
@@ -69,9 +71,13 @@ export class GmailImportService {
 
       // Parse emails to receipts
       const receipts: Receipt[] = [];
+      const emailReceiptPairs: Array<{ email: typeof receiptEmails[0], receipt: Receipt | null }> = [];
+      
       for (const email of receiptEmails) {
         try {
           const receipt = this.parserService.parseEmailToReceipt(email);
+          emailReceiptPairs.push({ email, receipt });
+          
           if (receipt) {
             receipts.push(receipt);
             console.log(`✅ Parsed receipt: $${receipt.amountSpent} from ${receipt.restaurantName || 'Unknown'}`);
@@ -80,6 +86,7 @@ export class GmailImportService {
             console.log(`❌ Failed to parse email from ${email.from}`);
           }
         } catch (error) {
+          emailReceiptPairs.push({ email, receipt: null });
           const errorMsg = `Error parsing email: ${error instanceof Error ? error.message : 'Unknown error'}`;
           errors.push(errorMsg);
           console.error(errorMsg);
@@ -88,12 +95,66 @@ export class GmailImportService {
 
       console.log(`📧 Parsed ${receipts.length} receipts from emails`);
 
-      // Calculate total amount
-      const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
+      // Filter out non-food receipts (Uber rides, etc.) by checking receipt type
+      const foodReceipts = receipts.filter(r => r.receiptType !== ReceiptType.UNKNOWN);
+      const nonFoodCount = receipts.length - foodReceipts.length;
+      
+      if (nonFoodCount > 0) {
+        console.log(`⏭️  Filtered out ${nonFoodCount} non-food receipts (Uber rides, etc.)`);
+        
+        // Save debug file for non-food receipts
+        try {
+          const nonFoodReceipts = emailReceiptPairs
+            .filter(({ receipt }) => receipt && receipt.receiptType === ReceiptType.UNKNOWN)
+            .map(({ email }) => ({
+              userId: email.userId,
+              from: email.from,
+              to: email.to,
+              subject: email.subject
+              // body is intentionally excluded
+            }));
 
-      // Import receipts to database
+          if (nonFoodReceipts.length > 0) {
+            const debugDir = path.join(process.cwd(), 'debug-emails');
+            if (!fs.existsSync(debugDir)) {
+              fs.mkdirSync(debugDir, { recursive: true });
+            }
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const nonFoodFilename = `non-food-receipts-${user.id}-${timestamp}.json`;
+            const nonFoodFilepath = path.join(debugDir, nonFoodFilename);
+
+            fs.writeFileSync(nonFoodFilepath, JSON.stringify({
+              userId: user.id,
+              timestamp: new Date().toISOString(),
+              count: nonFoodReceipts.length,
+              emails: nonFoodReceipts
+            }, null, 2));
+
+            console.log(`🔍 DEBUG: Saved ${nonFoodReceipts.length} non-food receipts to ${nonFoodFilename}`);
+          }
+        } catch (debugError) {
+          console.error('❌ Failed to create non-food-receipts debug file:', debugError);
+        }
+      }
+
+      // Set default restaurant name for food receipts without one
+      for (const receipt of foodReceipts) {
+        if (!receipt.restaurantName || receipt.restaurantName === 'Unknown Restaurant') {
+          receipt.restaurantName = 'Unknown Restaurant';
+          console.log(`⚠️  Food receipt without restaurant name - setting to "Unknown Restaurant": $${receipt.amountSpent} on ${receipt.orderDate || 'unknown date'}`);
+        }
+      }
+
+      const validReceipts = foodReceipts;
+      console.log(`📧 ${validReceipts.length} food delivery receipts ready for import`);
+
+      // Calculate total amount (from valid food receipts)
+      const totalAmount = validReceipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
+
+      // Import receipts to database (only valid receipts with restaurant names)
       let importedCount = 0;
-      if (receipts.length > 0) {
+      if (validReceipts.length > 0) {
         if (replaceExisting) {
           // Delete existing email-based receipts for this user
           await this.deleteEmailReceipts(user.id);
@@ -101,14 +162,15 @@ export class GmailImportService {
         }
 
         // Import new receipts
-        for (const receipt of receipts) {
+        for (const receipt of validReceipts) {
           try {
-            await this.receiptService.createReceipt(receipt);
+            const receiptId = await this.receiptService.createReceipt(receipt);
             importedCount++;
+            console.log(`✅ Saved receipt #${importedCount}: ${receipt.restaurantName} - $${receipt.amountSpent.toFixed(2)} on ${receipt.orderDate?.toISOString().split('T')[0] || 'unknown date'} (ID: ${receiptId})`);
           } catch (error) {
-            const errorMsg = `Error importing receipt: ${error instanceof Error ? error.message : 'Unknown error'}`;
+            const errorMsg = `Error importing receipt from ${receipt.restaurantName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
             errors.push(errorMsg);
-            console.error(errorMsg);
+            console.error(`❌ ${errorMsg}`);
           }
         }
 
@@ -124,7 +186,7 @@ export class GmailImportService {
         totalReceiptsImported: importedCount,
         totalAmount,
         errors,
-        receipts
+        receipts: validReceipts
       };
 
     } catch (error) {

@@ -28,6 +28,15 @@ export class ReceiptService {
   async createReceipt(receipt: Receipt): Promise<string> {
     const receiptId = uuidv4();
     
+    // Truncate restaurant name to fit VARCHAR(255) constraint
+    const truncatedRestaurantName = receipt.restaurantName 
+      ? receipt.restaurantName.substring(0, 255)
+      : receipt.restaurantName;
+
+    if (receipt.restaurantName && receipt.restaurantName.length > 255) {
+      console.warn(`⚠️  Restaurant name truncated from ${receipt.restaurantName.length} to 255 chars: ${receipt.restaurantName.substring(0, 50)}...`);
+    }
+    
     await this.postgres.query(`
       INSERT INTO receipts (
         id, user_id, receipt_type, data_source, restaurant_name, order_date, 
@@ -38,7 +47,7 @@ export class ReceiptService {
       receipt.userId,
       receipt.receiptType,
       receipt.dataSource,
-      receipt.restaurantName,
+      truncatedRestaurantName,
       receipt.orderDate,
       receipt.amountSpent,
       JSON.stringify(receipt.items),
@@ -294,7 +303,7 @@ export class ReceiptService {
   // Helper method to map database row to Receipt object
   private mapRowToReceipt(row: any): Receipt {
     // Handle both old and new item formats
-    let items: any[] = [];
+    let items: ReceiptItem[] = [];
     if (row.items) {
       try {
         // Try to parse as JSON first (new format)
@@ -302,18 +311,35 @@ export class ReceiptService {
           items = JSON.parse(row.items);
         } else if (Array.isArray(row.items)) {
           // Handle old TEXT[] format - convert to ReceiptItem format
-          items = row.items.map((item: string) => ({
-            name: item,
-            quantity: 1,
-            price: 0
-          }));
+          items = row.items.map((item: any) => {
+            // If item is a string, convert to ReceiptItem
+            if (typeof item === 'string') {
+              return {
+                name: item,
+                quantity: 1,
+                price: 0
+              };
+            }
+            // If item is already an object, ensure it has required properties
+            return {
+              name: item?.name || 'Unknown item',
+              quantity: typeof item?.quantity === 'number' ? item.quantity : 1,
+              price: typeof item?.price === 'number' ? item.price : 0
+            };
+          });
         } else {
           items = row.items;
         }
       } catch (error) {
+        console.error('Error parsing receipt items:', error);
         // If parsing fails, treat as empty array
         items = [];
       }
+    }
+
+    // Ensure items is always an array
+    if (!Array.isArray(items)) {
+      items = [];
     }
 
     return new Receipt(
