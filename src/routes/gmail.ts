@@ -16,9 +16,9 @@ const router = Router();
 
 /**
  * Gmail OAuth Configuration
- * Returns OAuth2Client with proper redirect URI based on platform
+ * Returns OAuth2Client for Gmail API access
  */
-const getOAuth2Client = (platform: 'web' | 'mobile' = 'mobile'): OAuth2Client => {
+const getOAuth2Client = (): OAuth2Client => {
   const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
   const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
   
@@ -26,82 +26,69 @@ const getOAuth2Client = (platform: 'web' | 'mobile' = 'mobile'): OAuth2Client =>
     throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
   }
 
-  // Choose redirect URI based on platform
-  const REDIRECT_URI = platform === 'web' 
-    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8081/oauth-callback')
-    : (process.env.MOBILE_REDIRECT_URI || 'snacktrack://oauth/callback');
-
-  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
 };
+
+// Note: /gmail/auth-url endpoint removed - OAuth is now handled by expo-auth-session on the frontend
 
 /**
  * @swagger
- * /gmail/auth-url:
+ * /gmail/oauth/callback:
  *   get:
- *     summary: Get Gmail OAuth URL (for mobile apps)
- *     description: Returns OAuth URL without redirect - suitable for mobile apps
+ *     summary: OAuth callback endpoint for mobile
+ *     description: Receives OAuth code from Google and redirects to mobile app
  *     tags: [Gmail Integration]
- *     security:
- *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         schema:
+ *           type: string
+ *         description: OAuth authorization code from Google
+ *       - in: query
+ *         name: state
+ *         schema:
+ *           type: string
+ *         description: State parameter for CSRF protection
  *     responses:
- *       200:
- *         description: OAuth URL returned successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 authUrl:
- *                   type: string
- *                   example: https://accounts.google.com/o/oauth2/v2/auth?...
- *                 state:
- *                   type: string
- *                   example: user-id-123
- *       401:
- *         description: Unauthorized - missing or invalid token
- *       500:
- *         description: Internal server error
+ *       302:
+ *         description: Redirects to mobile app with OAuth code
  */
-router.get('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user?.userId;
+router.get('/oauth/callback', asyncHandler(async (req: Request, res: Response) => {
+  const { code, state, error } = req.query;
   
-  if (!userId) {
-    throw new ValidationError('User ID not found in token');
-  }
-
-  // Get platform from query parameter (web or mobile)
-  const platform = (req.query.platform as string)?.toLowerCase() === 'web' ? 'web' : 'mobile';
+  console.log('📱 Received OAuth callback:', { code: !!code, state, error });
   
-  // Create OAuth2Client with platform-specific redirect URI
-  const oAuth2Client = getOAuth2Client(platform);
-  const redirectUri = platform === 'web' 
-    ? (process.env.WEB_REDIRECT_URI || 'http://localhost:8082/oauth-callback')
-    : (process.env.MOBILE_REDIRECT_URI || 'snacktrack://oauth/callback');
-
-  // Generate OAuth URL
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/gmail.readonly'],
-    state: userId,
-  });
-
-  console.log(`🔐 Gmail OAuth initiated - User: ${userId} | Platform: ${platform} | Redirect: ${redirectUri}`);
+  // Build the deep link to redirect back to the app
+  const deepLink = `snacktrack://oauth/callback?${new URLSearchParams({
+    ...(code && { code: code as string }),
+    ...(state && { state: state as string }),
+    ...(error && { error: error as string }),
+  }).toString()}`;
   
-  res.json({
-    authUrl,
-    state: userId,
-    platform,
-    redirectUri // For debugging
-  });
+  // For web, show a simple HTML page that redirects
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Redirecting...</title>
+        <meta http-equiv="refresh" content="0;url=${deepLink}">
+      </head>
+      <body>
+        <p>Redirecting back to app...</p>
+        <p>If you're not redirected, <a href="${deepLink}">click here</a>.</p>
+      </body>
+    </html>
+  `;
+  
+  res.send(html);
 }));
 
 /**
  * @swagger
  * /gmail/exchange-token:
  *   post:
- *     summary: Exchange authorization code for tokens (mobile flow)
- *     description: Mobile apps send the authorization code here to complete OAuth
+ *     summary: Exchange OAuth access token for Gmail connection
+ *     description: Frontend sends OAuth access token from expo-auth-session
  *     tags: [Gmail Integration]
  *     security:
  *       - BearerAuth: []
@@ -112,11 +99,11 @@ router.get('/auth-url', authenticateToken, asyncHandler(async (req: Request, res
  *           schema:
  *             type: object
  *             required:
- *               - code
+ *               - accessToken
  *             properties:
- *               code:
+ *               accessToken:
  *                 type: string
- *                 description: Authorization code from Google OAuth
+ *                 description: OAuth access token from Google
  *     responses:
  *       200:
  *         description: Gmail connected successfully
@@ -135,18 +122,18 @@ router.get('/auth-url', authenticateToken, asyncHandler(async (req: Request, res
  *                   type: boolean
  *                   example: true
  *       400:
- *         description: Bad request - missing code
+ *         description: Bad request - missing access token
  *       401:
  *         description: Unauthorized - missing or invalid token
  *       500:
  *         description: Internal server error
  */
 router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const { code } = req.body;
+  const { accessToken } = req.body;
   const userId = req.user?.userId;
 
-  if (!code) {
-    throw new ValidationError('Authorization code is required');
+  if (!accessToken) {
+    throw new ValidationError('Access token is required');
   }
 
   if (!userId) {
@@ -154,35 +141,36 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
   }
 
   try {
-    const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
-    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+    console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`);
     
-    // Use mobile redirect URI if configured, otherwise use web redirect URI
-    const REDIRECT_URI = process.env.MOBILE_REDIRECT_URI || process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/gmail/callback';
-
-    if (!CLIENT_ID || !CLIENT_SECRET) {
-      throw new Error('Gmail OAuth credentials not configured');
+    // We don't need to create an OAuth2Client to verify the token
+    // The access token from expo-auth-session is already valid
+    // We just need to verify it by making a Google API call
+    
+    // Create a simple OAuth2Client with just the access token
+    const oAuth2Client = new google.auth.OAuth2();
+    oAuth2Client.setCredentials({ access_token: accessToken });
+    
+    // Verify the token by getting user info
+    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+    const userInfo = await oauth2.userinfo.get();
+    
+    if (!userInfo.data.email) {
+      throw new Error('Could not retrieve user email from Google');
     }
 
-    const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-    
-    // Exchange authorization code for tokens
-    const { tokens } = await oAuth2Client.getToken(code);
-    
-    if (!tokens.refresh_token) {
-      throw new Error('No refresh token received. User may have already authorized this app.');
-    }
-
-    console.log(`✅ Received Gmail OAuth tokens for user: ${userId}`);
+    console.log(`✅ Received Gmail OAuth token for user: ${userId} (${userInfo.data.email})`);
 
     // Store tokens in database
+    // Note: We're storing the access token. For long-term access, we'd need a refresh token
+    // which requires server-side OAuth flow. For now, this works for immediate Gmail access.
     const userRepository = container.userRepository;
-    const expiryDate = tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1000);
+    const expiryDate = new Date(Date.now() + 3600 * 1000); // 1 hour expiry
     
     await userRepository.updateGmailTokens(
       userId,
-      tokens.refresh_token,
-      tokens.access_token || '',
+      accessToken, // Using access token as refresh token for now
+      accessToken,
       expiryDate
     );
 
@@ -193,8 +181,14 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       message: 'Gmail connected successfully',
       connected: true
     });
-  } catch (error) {
-    console.error('Error in token exchange:', error);
+  } catch (error: any) {
+    console.error('❌ Error in token exchange:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data
+    });
     throw new ValidationError('Failed to connect Gmail. Please try again.');
   }
 }));
