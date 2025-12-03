@@ -58,29 +58,83 @@ router.get('/oauth/callback', asyncHandler(async (req: Request, res: Response) =
   
   console.log('📱 Received OAuth callback:', { code: !!code, state, error });
   
-  // Build the deep link to redirect back to the app
-  const deepLink = `snacktrack://oauth/callback?${new URLSearchParams({
-    ...(code && { code: code as string }),
-    ...(state && { state: state as string }),
-    ...(error && { error: error as string }),
-  }).toString()}`;
+  if (error) {
+    // OAuth error - redirect back with error
+    const deepLink = `snacktrack://oauth/callback?error=${encodeURIComponent(error as string)}`;
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Authorization Failed</title>
+          <script>
+            window.location.href = '${deepLink}';
+          </script>
+        </head>
+        <body>
+          <p>Authorization failed. Redirecting back to app...</p>
+          <p>If you're not redirected, <a href="${deepLink}">click here</a>.</p>
+        </body>
+      </html>
+    `);
+  }
   
-  // For web, show a simple HTML page that redirects
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Redirecting...</title>
-        <meta http-equiv="refresh" content="0;url=${deepLink}">
-      </head>
-      <body>
-        <p>Redirecting back to app...</p>
-        <p>If you're not redirected, <a href="${deepLink}">click here</a>.</p>
-      </body>
-    </html>
-  `;
+  if (!code) {
+    return res.status(400).send('Missing authorization code');
+  }
   
-  res.send(html);
+  try {
+    // Exchange code for tokens
+    const oAuth2Client = getOAuth2Client();
+    const { tokens } = await oAuth2Client.getToken(code as string);
+    
+    console.log('✅ Exchanged code for tokens');
+    
+    // Redirect back to app with access token
+    const deepLink = `snacktrack://oauth/callback?${new URLSearchParams({
+      access_token: tokens.access_token!,
+      ...(state && { state: state as string }),
+    }).toString()}`;
+    
+    // Show success page with auto-redirect
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Success!</title>
+          <script>
+            // Try to redirect
+            setTimeout(function() {
+              window.location.href = '${deepLink}';
+            }, 500);
+          </script>
+        </head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h2>✅ Authorization Successful!</h2>
+          <p>Redirecting back to SnackTrack...</p>
+          <p><a href="${deepLink}" style="color: #4CAF50; text-decoration: none; font-weight: bold;">Click here if you're not redirected automatically</a></p>
+          <p style="margin-top: 30px; color: #666; font-size: 14px;">You can close this window and return to the app.</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('❌ Error exchanging code for tokens:', error);
+    const deepLink = `snacktrack://oauth/callback?error=${encodeURIComponent('token_exchange_failed')}`;
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Error</title>
+          <script>
+            window.location.href = '${deepLink}';
+          </script>
+        </head>
+        <body>
+          <p>Failed to complete authorization. Redirecting back to app...</p>
+          <p>If you're not redirected, <a href="${deepLink}">click here</a>.</p>
+        </body>
+      </html>
+    `);
+  }
 }));
 
 /**
