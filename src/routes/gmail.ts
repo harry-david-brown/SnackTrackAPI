@@ -54,9 +54,20 @@ const getOAuth2Client = (): OAuth2Client => {
  *         description: Redirects to mobile app with OAuth code
  */
 router.get('/oauth/callback', asyncHandler(async (req: Request, res: Response) => {
-  const { code, state, error, app_redirect } = req.query;
+  const { code, state, error } = req.query;
   
-  console.log('📱 Received OAuth callback:', { code: !!code, state, error, app_redirect });
+  // Decode the state parameter to get the app redirect URI
+  let appRedirect: string | undefined;
+  if (state) {
+    try {
+      const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+      appRedirect = decoded.appRedirect;
+    } catch (e) {
+      console.log('Could not decode state parameter, will show manual copy page');
+    }
+  }
+  
+  console.log('📱 Received OAuth callback:', { code: !!code, state: !!state, error, appRedirect });
   
   if (error) {
     console.error('❌ OAuth error:', error);
@@ -90,10 +101,10 @@ router.get('/oauth/callback', asyncHandler(async (req: Request, res: Response) =
     console.log('✅ Exchanged code for tokens');
     
     // Build the redirect URL with the access token
-    // If app_redirect is provided (from frontend), use it
+    // If appRedirect is provided (from state parameter), use it
     // Otherwise, show manual copy page
-    if (app_redirect) {
-      const redirectUrl = app_redirect as string;
+    if (appRedirect) {
+      const redirectUrl = appRedirect;
       const separator = redirectUrl.includes('?') ? '&' : '?';
       const finalUrl = `${redirectUrl}${separator}access_token=${encodeURIComponent(tokens.access_token!)}${state ? `&state=${encodeURIComponent(state as string)}` : ''}`;
       
