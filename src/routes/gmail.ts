@@ -33,6 +33,58 @@ const getOAuth2Client = (): OAuth2Client => {
 
 /**
  * @swagger
+ * /gmail/oauth/callback:
+ *   get:
+ *     summary: OAuth callback endpoint for mobile
+ *     description: Receives OAuth code from Google and redirects to mobile app
+ *     tags: [Gmail Integration]
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         schema:
+ *           type: string
+ *         description: OAuth authorization code from Google
+ *       - in: query
+ *         name: state
+ *         schema:
+ *           type: string
+ *         description: State parameter for CSRF protection
+ *     responses:
+ *       302:
+ *         description: Redirects to mobile app with OAuth code
+ */
+router.get('/oauth/callback', asyncHandler(async (req: Request, res: Response) => {
+  const { code, state, error } = req.query;
+  
+  console.log('📱 Received OAuth callback:', { code: !!code, state, error });
+  
+  // Build the deep link to redirect back to the app
+  const deepLink = `snacktrack://oauth/callback?${new URLSearchParams({
+    ...(code && { code: code as string }),
+    ...(state && { state: state as string }),
+    ...(error && { error: error as string }),
+  }).toString()}`;
+  
+  // For web, show a simple HTML page that redirects
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Redirecting...</title>
+        <meta http-equiv="refresh" content="0;url=${deepLink}">
+      </head>
+      <body>
+        <p>Redirecting back to app...</p>
+        <p>If you're not redirected, <a href="${deepLink}">click here</a>.</p>
+      </body>
+    </html>
+  `;
+  
+  res.send(html);
+}));
+
+/**
+ * @swagger
  * /gmail/exchange-token:
  *   post:
  *     summary: Exchange OAuth access token for Gmail connection
