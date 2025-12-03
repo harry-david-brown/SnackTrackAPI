@@ -89,12 +89,17 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
   }
 
   try {
-    const oAuth2Client = getOAuth2Client();
+    console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`);
     
-    // Set the access token
+    // We don't need to create an OAuth2Client to verify the token
+    // The access token from expo-auth-session is already valid
+    // We just need to verify it by making a Google API call
+    
+    // Create a simple OAuth2Client with just the access token
+    const oAuth2Client = new google.auth.OAuth2();
     oAuth2Client.setCredentials({ access_token: accessToken });
     
-    // Get user info to verify the token and get email
+    // Verify the token by getting user info
     const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
     const userInfo = await oauth2.userinfo.get();
     
@@ -124,8 +129,14 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       message: 'Gmail connected successfully',
       connected: true
     });
-  } catch (error) {
-    console.error('Error in token exchange:', error);
+  } catch (error: any) {
+    console.error('❌ Error in token exchange:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data
+    });
     throw new ValidationError('Failed to connect Gmail. Please try again.');
   }
 }));
