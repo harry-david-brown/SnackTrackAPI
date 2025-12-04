@@ -24,9 +24,17 @@ export class GmailClient implements EmailClient {
     }
 
     // Use real Gmail API with user-specific tokens
+    // IMPORTANT: Use the same OAuth client credentials that were used to issue the refresh token
+    // For mobile OAuth, this is the web client ID (GMAIL_CLIENT_ID)
     const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
     const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
     const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/gmail/callback';
+
+    if (!CLIENT_ID || CLIENT_ID === 'your_client_id_here' || !CLIENT_SECRET || CLIENT_SECRET === 'your_client_secret_here') {
+      const errorMsg = 'Gmail OAuth client credentials not configured';
+      console.error(`❌ ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
 
     // Use user's refresh token if available, otherwise fall back to env var (for backward compatibility)
     const REFRESH_TOKEN = user.gmailRefreshToken || process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
@@ -45,8 +53,38 @@ export class GmailClient implements EmailClient {
       return this.getMockEmails(user);
     }
 
+    // Create OAuth2Client with the same credentials used to issue the token
+    // This must match the web client ID used in the mobile app's GoogleSignin.configure()
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-    oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
+    
+    // Try to determine if this is an access token or refresh token
+    // Access tokens typically start with "ya29." or are shorter
+    // Refresh tokens are longer and don't have a specific prefix
+    // However, the safest approach is to try refresh first, and if it fails, use as access token
+    const looksLikeAccessToken = REFRESH_TOKEN.startsWith('ya29.') || 
+                                  REFRESH_TOKEN.startsWith('1//') === false && REFRESH_TOKEN.length < 150;
+    
+    if (looksLikeAccessToken) {
+      // This looks like an access token - use it directly (don't try to refresh)
+      console.log(`🔐 Using access token directly (expires in ~1 hour)`);
+      oAuth2Client.setCredentials({ access_token: REFRESH_TOKEN });
+    } else {
+      // This looks like a refresh token - use it to get access tokens
+      console.log(`🔐 Using refresh token to get access tokens`);
+      try {
+        oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
+        // Try to get an access token to verify it works
+        await oAuth2Client.getAccessToken();
+      } catch (error: any) {
+        // If refresh fails with "unauthorized_client", it might actually be an access token
+        if (error.message?.includes('unauthorized_client') || error.message?.includes('invalid_grant')) {
+          console.log(`⚠️ Refresh token failed, trying as access token instead`);
+          oAuth2Client.setCredentials({ access_token: REFRESH_TOKEN });
+        } else {
+          throw error;
+        }
+      }
+    }
 
     const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
     const emailList: Email[] = [];

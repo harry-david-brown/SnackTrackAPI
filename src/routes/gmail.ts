@@ -78,7 +78,7 @@ const getOAuth2Client = (): OAuth2Client => {
  *         description: Internal server error
  */
 router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const { accessToken } = req.body;
+  const { accessToken, refreshToken } = req.body;
   const userId = req.user?.userId;
 
   if (!accessToken) {
@@ -90,14 +90,21 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
   }
 
   try {
-    console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`);
+    console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`, {
+      hasRefreshToken: !!refreshToken
+    });
     
-    // We don't need to create an OAuth2Client to verify the token
-    // The access token from expo-auth-session is already valid
-    // We just need to verify it by making a Google API call
+    // Create OAuth2Client with proper credentials to verify the token
+    const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
     
-    // Create a simple OAuth2Client with just the access token
-    const oAuth2Client = new google.auth.OAuth2();
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+      throw new Error('Gmail OAuth credentials not configured');
+    }
+    
+    // Create OAuth2Client with credentials and verify the access token
+    // IMPORTANT: Use the same CLIENT_ID that was used in the mobile app (webClientId)
+    const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
     oAuth2Client.setCredentials({ access_token: accessToken });
     
     // Verify the token by getting user info
@@ -111,19 +118,28 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
     const gmailEmail = userInfo.data.email;
     console.log(`✅ Received Gmail OAuth token for user: ${userId} (${gmailEmail})`);
 
-    // Store tokens in database
-    // Note: We're storing the access token. For long-term access, we'd need a refresh token
-    // which requires server-side OAuth flow. For now, this works for immediate Gmail access.
     const userRepository = container.userRepository;
-    const expiryDate = new Date(Date.now() + 3600 * 1000); // 1 hour expiry
+    
+    // Use refresh token if provided, otherwise fall back to access token
+    // Refresh tokens are long-lived, access tokens expire in ~1 hour
+    const tokenToStore = refreshToken || accessToken;
+    const expiryDate = refreshToken 
+      ? new Date(Date.now() + 365 * 24 * 3600 * 1000) // 1 year if refresh token
+      : new Date(Date.now() + 3600 * 1000); // 1 hour if only access token
     
     await userRepository.updateGmailTokens(
       userId,
-      accessToken, // Using access token as refresh token for now
+      tokenToStore, // Store refresh token if available, otherwise access token
       accessToken,
       expiryDate,
       gmailEmail // Store the connected Gmail email address
     );
+    
+    if (refreshToken) {
+      console.log(`✅ Stored refresh token for long-term access`);
+    } else {
+      console.log(`⚠️  Stored access token (expires in 1 hour). Users will need to reconnect when it expires.`);
+    }
 
     console.log(`✅ Stored Gmail tokens for user: ${userId}`);
 
