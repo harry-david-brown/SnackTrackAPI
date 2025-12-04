@@ -207,6 +207,9 @@ export class PostgresService {
         await this.query(`
           ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_connected BOOLEAN DEFAULT FALSE
         `);
+        await this.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_email VARCHAR(255)
+        `);
         console.log('✅ Gmail OAuth columns migration completed');
       } catch (error) {
         console.log('Gmail OAuth columns already exist or migration failed');

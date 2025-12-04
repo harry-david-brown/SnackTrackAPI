@@ -108,7 +108,8 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       throw new Error('Could not retrieve user email from Google');
     }
 
-    console.log(`✅ Received Gmail OAuth token for user: ${userId} (${userInfo.data.email})`);
+    const gmailEmail = userInfo.data.email;
+    console.log(`✅ Received Gmail OAuth token for user: ${userId} (${gmailEmail})`);
 
     // Store tokens in database
     // Note: We're storing the access token. For long-term access, we'd need a refresh token
@@ -120,7 +121,8 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       userId,
       accessToken, // Using access token as refresh token for now
       accessToken,
-      expiryDate
+      expiryDate,
+      gmailEmail // Store the connected Gmail email address
     );
 
     console.log(`✅ Stored Gmail tokens for user: ${userId}`);
@@ -232,7 +234,7 @@ router.get('/status', authenticateToken, asyncHandler(async (req: Request, res: 
 
   res.json({
     connected: user.gmailConnected || false,
-    email: user.email
+    email: user.gmailEmail || user.email // Return connected Gmail email, fallback to user email
   });
 }));
 

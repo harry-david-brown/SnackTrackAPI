@@ -159,16 +159,17 @@ export class UserRepository {
   /**
    * Update Gmail OAuth tokens for a user
    */
-  async updateGmailTokens(userId: string, refreshToken: string, accessToken: string, expiryDate: Date): Promise<void> {
+  async updateGmailTokens(userId: string, refreshToken: string, accessToken: string, expiryDate: Date, gmailEmail?: string): Promise<void> {
     await this.postgres.query(
       `UPDATE users SET 
         gmail_refresh_token = $1, 
         gmail_access_token = $2, 
         gmail_token_expiry = $3,
         gmail_connected = TRUE,
+        gmail_email = $4,
         updated_at = NOW() 
-      WHERE id = $4`,
-      [refreshToken, accessToken, expiryDate, userId]
+      WHERE id = $5`,
+      [refreshToken, accessToken, expiryDate, gmailEmail || null, userId]
     );
   }
 
@@ -178,7 +179,7 @@ export class UserRepository {
   async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
     const result = await this.postgres.query(
       `SELECT id, email, email_verified, gmail_refresh_token, gmail_access_token, 
-              gmail_token_expiry, gmail_connected, created_at 
+              gmail_token_expiry, gmail_connected, gmail_email, created_at 
        FROM users WHERE id = $1`,
       [userId]
     );
@@ -194,6 +195,7 @@ export class UserRepository {
       gmailAccessToken: row.gmail_access_token,
       gmailTokenExpiry: row.gmail_token_expiry,
       gmailConnected: row.gmail_connected || false,
+      gmailEmail: row.gmail_email,
       createdAt: row.created_at
     };
   }
@@ -208,6 +210,7 @@ export class UserRepository {
         gmail_access_token = NULL, 
         gmail_token_expiry = NULL,
         gmail_connected = FALSE,
+        gmail_email = NULL,
         updated_at = NOW() 
       WHERE id = $1`,
       [userId]

@@ -11,6 +11,7 @@ export interface User {
   gmailAccessToken?: string; // Gmail OAuth access token
   gmailTokenExpiry?: string; // When the access token expires
   gmailConnected?: boolean; // Whether Gmail is connected
+  gmailEmail?: string; // The email address of the connected Gmail account
   createdAt?: string;
 }
 
