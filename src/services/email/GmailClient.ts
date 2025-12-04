@@ -17,8 +17,9 @@ function decodeBase64Gmail(str: string): string {
 export class GmailClient implements EmailClient {
   async getEmails(user: User): Promise<Email[]> {
     // Use centralized config to determine data source
-    if (config.shouldUseMockData()) {
-      console.log('🧪 Using mock Uber emails for testing.');
+    // NEVER use mock data in production
+    if (config.shouldUseMockData() && !config.isProduction()) {
+      console.log('🧪 Using mock Uber emails for testing (development mode).');
       return this.loadEmailsFromDebugFolder(user);
     }
 
@@ -31,7 +32,16 @@ export class GmailClient implements EmailClient {
     const REFRESH_TOKEN = user.gmailRefreshToken || process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
 
     if (!REFRESH_TOKEN || REFRESH_TOKEN === 'your_refresh_token_here') {
-      console.log('❌ No Gmail refresh token available for user');
+      const errorMsg = 'No Gmail refresh token available for user';
+      console.error(`❌ ${errorMsg}`);
+      
+      // In production, throw an error instead of falling back to mock data
+      if (config.isProduction()) {
+        throw new Error(errorMsg);
+      }
+      
+      // In development, fall back to mock data for testing
+      console.log('⚠️ Falling back to mock data (development mode)');
       return this.getMockEmails(user);
     }
 
@@ -206,7 +216,16 @@ export class GmailClient implements EmailClient {
       return emailList;
     } catch (error) {
       console.error('Gmail API error:', error);
-      console.log('Falling back to mock data...');
+      
+      // In production, throw the error instead of falling back to mock data
+      if (config.isProduction()) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown Gmail API error';
+        console.error(`❌ Gmail API error in production: ${errorMsg}`);
+        throw new Error(`Failed to fetch emails from Gmail: ${errorMsg}`);
+      }
+      
+      // In development, fall back to mock data for testing
+      console.log('⚠️ Falling back to mock data (development mode)');
       return this.getMockEmails(user);
     }
   }

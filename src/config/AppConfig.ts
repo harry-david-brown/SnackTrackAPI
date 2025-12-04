@@ -90,11 +90,13 @@ class ConfigManager {
   }
 
   private hasGmailCredentials(): boolean {
+    // Only check for OAuth client credentials (needed for OAuth flow)
+    // Don't check for refresh token - that's user-specific and stored in database
     const clientId = process.env.GMAIL_CLIENT_ID;
-    const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
-    return !!(clientId && refreshToken && 
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+    return !!(clientId && clientSecret && 
               clientId !== 'your_client_id_here' && 
-              refreshToken !== 'your_refresh_token_here');
+              clientSecret !== 'your_client_secret_here');
   }
 
   public getConfig(): AppConfig {
