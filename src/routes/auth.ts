@@ -158,6 +158,42 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * @swagger
+ * /auth/google:
+ *   post:
+ *     summary: Login with Google
+ *     description: Authenticate user with Google ID token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - idToken
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ * */
+router.post('/google', asyncHandler(async (req: Request, res: Response) => {
+  console.log('Received Google Login request');
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    throw new ValidationError('ID token is required');
+  }
+
+  const authService = container.get<AuthService>('authService');
+  const result = await authService.loginWithGoogle(idToken);
+
+  res.status(200).json(result);
+}));
+
+/**
+ * @swagger
  * /auth/refresh:
  *   post:
  *     summary: Refresh access token
@@ -245,7 +281,7 @@ router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
 
   // TODO: Implement token blacklist/revocation in Phase 2
   // For now, just return success
-  
+
   res.status(200).json({
     success: true,
     message: 'Logged out successfully. Please discard your tokens.'

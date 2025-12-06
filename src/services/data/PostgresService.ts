@@ -230,6 +230,28 @@ export class PostgresService {
         )
       `);
 
+      // Create oauth_accounts table
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS oauth_accounts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          provider VARCHAR(50) NOT NULL,
+          provider_user_id VARCHAR(255) NOT NULL,
+          email VARCHAR(255),
+          access_token TEXT,
+          refresh_token TEXT,
+          token_expiry TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(provider, provider_user_id)
+        )
+      `);
+
+      // Create indexes for oauth_accounts
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user_id ON oauth_accounts(user_id)
+      `);
+
       // Create indexes for verification_codes
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_verification_email_type 

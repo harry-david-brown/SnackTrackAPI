@@ -11,6 +11,7 @@ import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
 import { OtpService } from '../OtpService';
 import { EmailSenderService } from '../email/EmailSender';
 import { AlertingService } from '../monitoring/AlertingService';
+import { OAuthRepository } from '../data/OAuthRepository';
 
 /**
  * Simple service container for dependency injection
@@ -37,14 +38,18 @@ export class ServiceContainer {
   private initializeServices(): void {
     // Core services
     this.services.set('postgres', new PostgresService());
-    
+
     // Repositories
     this.services.set('userRepository', new UserRepository(this.get('postgres')));
+    this.services.set('oauthRepository', new OAuthRepository(this.get('postgres')));
     this.services.set('receiptRepository', new ReceiptRepository(this.get('postgres')));
-    
+
     // Authentication service
-    this.services.set('authService', new AuthService(this.get('userRepository')));
-    
+    this.services.set('authService', new AuthService(
+      this.get('userRepository'),
+      this.get('oauthRepository')
+    ));
+
     // Business services
     this.services.set('receiptLookupService', new ReceiptLookupService());
     this.services.set('databaseService', new DatabaseService(
@@ -52,19 +57,19 @@ export class ServiceContainer {
       this.get('userRepository'),
       this.get('receiptRepository')
     ));
-    
+
     // Utility services
     this.services.set('csvImportService', new CsvImportService(this.get('postgres')));
     this.services.set('receiptParserService', new ReceiptParserService());
     this.services.set('emailFilterService', new EmailFilterService());
-    
+
     // Analytics services
     this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
-    
+
     // OTP and Email services
     this.services.set('otpService', new OtpService(this.get('postgres')));
     this.services.set('emailSender', new EmailSenderService());
-    
+
     // Monitoring services
     this.services.set('alertingService', new AlertingService(this.get('postgres')));
   }
