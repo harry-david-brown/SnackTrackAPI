@@ -6,17 +6,17 @@ export class PostgresService {
 
   constructor() {
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     this.pool = new Pool({
       connectionString: config.getDatabaseConnectionString(),
       ssl: config.shouldUseDatabaseSSL(),
-      
+
       // Connection pool configuration for performance
       max: isProduction ? 20 : 10, // Maximum connections (20 in prod, 10 in dev)
       min: 2, // Minimum connections to keep open
       idleTimeoutMillis: 30000, // Close idle connections after 30s
       connectionTimeoutMillis: 10000, // Timeout if can't connect within 10s
-      
+
       // Query configuration
       statement_timeout: 30000, // Kill queries running longer than 30s
       query_timeout: 30000, // Same as statement_timeout
@@ -33,7 +33,7 @@ export class PostgresService {
       this.pool.on('connect', () => {
         console.log('📊 PostgreSQL client connected to pool');
       });
-      
+
       this.pool.on('remove', () => {
         console.log('📊 PostgreSQL client removed from pool');
       });
@@ -128,7 +128,7 @@ export class PostgresService {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_user_id ON receipts(user_id)
       `);
-      
+
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts(created_at)
       `);
@@ -245,7 +245,7 @@ export class PostgresService {
 
       // Phase 2: Performance Optimization Indexes
       console.log('📊 Adding performance optimization indexes...');
-      
+
       // Composite index for user analytics queries (most common query pattern)
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_user_date_composite 
@@ -331,6 +331,23 @@ export class PostgresService {
       if (error.code !== '42701') { // 42701 = duplicate_column
         console.error('❌ Delivery time column migration failed:', error.message);
         throw error; // Re-throw critical errors
+      }
+    }
+
+    // 3.5 Add external_id column for receipt deduplication (Uber UUIDs)
+    try {
+      await this.query(`
+        ALTER TABLE receipts 
+        ADD COLUMN IF NOT EXISTS external_id TEXT
+      `);
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_receipts_external_id ON receipts(external_id)
+      `);
+      console.log('✅ External ID column and index added (or already exists)');
+    } catch (error: any) {
+      if (error.code !== '42701') { // 42701 = duplicate_column
+        console.error('❌ External ID column migration failed:', error.message);
+        throw error;
       }
     }
 

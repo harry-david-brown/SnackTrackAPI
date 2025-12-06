@@ -9,7 +9,7 @@ export type Environment = 'development' | 'production';
 
 export interface AppConfig {
   environment: Environment;
-  
+
   // Gmail Configuration
   gmail: {
     useRealApi: boolean;
@@ -17,29 +17,30 @@ export interface AppConfig {
     includeForwardedReceipts: boolean;
     forwardedReceiptEmail: string;
   };
-  
+
   // Database Configuration
   database: {
     useSSL: boolean;
     connectionString: string;
   };
-  
+
   // Email Filtering Configuration
   emailFilter: {
     allowForwardedReceipts: boolean;
     forwardedReceiptSender: string;
   };
-  
+
   // Server Configuration
   server: {
     port: number;
     host: string;
   };
-  
+
   // Debug Configuration
   debug: {
     enableDetailedLogging: boolean;
     showEmailContent: boolean;
+    saveDebugEmails: boolean;
   };
 }
 
@@ -57,34 +58,35 @@ class ConfigManager {
 
     return {
       environment,
-      
+
       gmail: {
         // In development: use real API if credentials are configured, otherwise mock
         // In production: always use real API
         useRealApi: isProduction || this.hasGmailCredentials(),
-        useMockData: isDevelopment && !this.hasGmailCredentials(),
+        useMockData: false, //isDevelopment && !this.hasGmailCredentials(),
         includeForwardedReceipts: isDevelopment,
         forwardedReceiptEmail: process.env.FORWARDED_EMAIL || ''
       },
-      
+
       database: {
         useSSL: false, // Disabled for local testing - can be enabled for cloud deployments
         connectionString: process.env.DATABASE_URL || 'postgresql://snacktrack:password@localhost:5432/snacktrack_dev'
       },
-      
+
       emailFilter: {
         allowForwardedReceipts: isDevelopment,
         forwardedReceiptSender: process.env.FORWARDED_EMAIL || ''
       },
-      
+
       server: {
         port: parseInt(process.env.PORT || '3000'),
         host: process.env.HOST || 'localhost'
       },
-      
+
       debug: {
         enableDetailedLogging: isDevelopment,
-        showEmailContent: isDevelopment
+        showEmailContent: isDevelopment,
+        saveDebugEmails: isDevelopment && (process.env.SAVE_DEBUG_EMAILS === 'true' || true) // Default to true in dev for now, or make configurable
       }
     };
   }
@@ -94,9 +96,9 @@ class ConfigManager {
     // Don't check for refresh token - that's user-specific and stored in database
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-    return !!(clientId && clientSecret && 
-              clientId !== 'your_client_id_here' && 
-              clientSecret !== 'your_client_secret_here');
+    return !!(clientId && clientSecret &&
+      clientId !== 'your_client_id_here' &&
+      clientSecret !== 'your_client_secret_here');
   }
 
   public getConfig(): AppConfig {
@@ -113,11 +115,11 @@ class ConfigManager {
 
   public getGmailSearchQuery(): string {
     const baseQuery = 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com';
-    
+
     if (this.config.gmail.includeForwardedReceipts) {
       return `${baseQuery} OR from:${this.config.gmail.forwardedReceiptEmail}`;
     }
-    
+
     return baseQuery;
   }
 
@@ -153,6 +155,10 @@ class ConfigManager {
     return this.config.debug.showEmailContent;
   }
 
+  public shouldSaveDebugEmails(): boolean {
+    return this.config.debug.saveDebugEmails;
+  }
+
   public getServerPort(): number {
     return this.config.server.port;
   }
@@ -174,6 +180,7 @@ class ConfigManager {
 🔄 Forwarded Receipts: ${this.config.gmail.includeForwardedReceipts ? 'Enabled' : 'Disabled'}
 🗄️  Database SSL: ${this.config.database.useSSL ? 'Enabled' : 'Disabled'}
 🐛 Debug Logging: ${this.config.debug.enableDetailedLogging ? 'Enabled' : 'Disabled'}
+💾 Save Debug Emails: ${this.config.debug.saveDebugEmails ? 'Enabled' : 'Disabled'}
     `.trim();
   }
 }
@@ -194,6 +201,7 @@ export const config = {
   getDatabaseConnectionString: () => appConfig.getDatabaseConnectionString(),
   shouldEnableDetailedLogging: () => appConfig.shouldEnableDetailedLogging(),
   shouldShowEmailContent: () => appConfig.shouldShowEmailContent(),
+  shouldSaveDebugEmails: () => appConfig.shouldSaveDebugEmails(),
   getServerPort: () => appConfig.getServerPort(),
   getServerHost: () => appConfig.getServerHost(),
   getEnvironmentInfo: () => appConfig.getEnvironmentInfo(),

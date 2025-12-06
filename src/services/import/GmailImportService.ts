@@ -43,7 +43,7 @@ export class GmailImportService {
    */
   async importFromGmail(user: User, replaceExisting: boolean = false): Promise<GmailImportResult> {
     const errors: string[] = [];
-    
+
     try {
       // Validate user has Gmail connected
       if (!user.gmailRefreshToken) {
@@ -72,12 +72,12 @@ export class GmailImportService {
       // Parse emails to receipts
       const receipts: Receipt[] = [];
       const emailReceiptPairs: Array<{ email: typeof receiptEmails[0], receipt: Receipt | null }> = [];
-      
+
       for (const email of receiptEmails) {
         try {
           const receipt = this.parserService.parseEmailToReceipt(email);
           emailReceiptPairs.push({ email, receipt });
-          
+
           if (receipt) {
             receipts.push(receipt);
             console.log(`✅ Parsed receipt: $${receipt.amountSpent} from ${receipt.restaurantName || 'Unknown'}`);
@@ -98,10 +98,10 @@ export class GmailImportService {
       // Filter out non-food receipts (Uber rides, etc.) by checking receipt type
       const foodReceipts = receipts.filter(r => r.receiptType !== ReceiptType.UNKNOWN);
       const nonFoodCount = receipts.length - foodReceipts.length;
-      
+
       if (nonFoodCount > 0) {
         console.log(`⏭️  Filtered out ${nonFoodCount} non-food receipts (Uber rides, etc.)`);
-        
+
         // Save debug file for non-food receipts
         try {
           const nonFoodReceipts = emailReceiptPairs
@@ -161,12 +161,82 @@ export class GmailImportService {
           console.log(`🗑️  Deleted existing email-based receipts for user ${user.id}`);
         }
 
-        // Import new receipts
+        // Deduplicate receipts before saving
+        // Strategy: Group by externalId (Uber UUID), keep the one with highest total (Tip Update)
+        // Calculate Naive Total (Pre-dedupe)
+        const naiveTotal = validReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
+        console.log(`💰 DEBUG: Naive Total (All Receipts): $${naiveTotal.toFixed(2)}`);
+
+        const uniqueReceipts = new Map<string, Receipt>();
+        const validReceiptsList: Receipt[] = [];
+
+        // DEBUG: Analyze how many receipts have externalIds
+        const totalWithId = validReceipts.filter(r => r.externalId).length;
+        const totalUber = validReceipts.filter(r =>
+          r.receiptType === 'uber_eats' ||
+          (r.restaurantName && r.restaurantName.toLowerCase().includes('uber'))
+        ).length;
+
+        console.log(`🔍 DEBUG: Found ${validReceipts.length} valid receipts.`);
+        console.log(`🔍 DEBUG: ${totalUber} look like Uber receipts.`);
+        console.log(`🔍 DEBUG: ${totalWithId} have extracted Order UUIDs.`);
+
+        if (totalWithId > 0) {
+          console.log(`🔍 DEBUG: Sample UUID: ${validReceipts.find(r => r.externalId)?.externalId}`);
+        } else if (totalUber > 0) {
+          console.log(`⚠️ DEBUG WARNING: Uber receipts found but 0 UUIDs extracted. Extraction logic failure suspected.`);
+        }
+
+        let duplicatesFound = 0;
+        let higherAmountReplacements = 0;
+
         for (const receipt of validReceipts) {
+          if (receipt.externalId) {
+            const existing = uniqueReceipts.get(receipt.externalId);
+            if (!existing) {
+              uniqueReceipts.set(receipt.externalId, receipt);
+            } else {
+              duplicatesFound++;
+              // Conflict: Same Order UUID. Keep the one with higher total (Tip Update)
+              if (receipt.amountSpent > existing.amountSpent) {
+                higherAmountReplacements++;
+                uniqueReceipts.set(receipt.externalId, receipt);
+                console.log(`♻️  Replacing receipt for order ${receipt.externalId} with higher amount ($${receipt.amountSpent} vs $${existing.amountSpent})`);
+              } else {
+                console.log(`Start skipping duplicate for order ${receipt.externalId} ($${receipt.amountSpent} vs $${existing.amountSpent})`);
+              }
+            }
+          } else {
+            // No UUID? Keep it (legacy behavior)
+            validReceiptsList.push(receipt);
+          }
+        }
+
+        // Merge deduped UUID receipts back into list
+        for (const r of uniqueReceipts.values()) {
+          validReceiptsList.push(r);
+        }
+
+        // Calculate Final Total
+        const finalTotal = validReceiptsList.reduce((sum, r) => sum + r.amountSpent, 0);
+
+        console.log(`📊 DEBUG: Analysis Complete`);
+        console.log(`   - Original Count: ${validReceipts.length}`);
+        console.log(`   - Unique Count:   ${validReceiptsList.length}`);
+        console.log(`   - Duplicates:     ${duplicatesFound}`);
+        console.log(`   - Replacements:   ${higherAmountReplacements} (Tip Updates)`);
+        console.log(`   - Naive Total:    $${naiveTotal.toFixed(2)}`);
+        console.log(`   - Final Total:    $${finalTotal.toFixed(2)}`);
+        console.log(`   - Difference:     $${(naiveTotal - finalTotal).toFixed(2)}`);
+
+        console.log(`Analyzed ${validReceipts.length} receipts. Found ${validReceiptsList.length} unique orders.`);
+
+        // Import new receipts
+        for (const receipt of validReceiptsList) {
           try {
             const receiptId = await this.receiptService.createReceipt(receipt);
             importedCount++;
-            console.log(`✅ Saved receipt #${importedCount}: ${receipt.restaurantName} - $${receipt.amountSpent.toFixed(2)} on ${receipt.orderDate?.toISOString().split('T')[0] || 'unknown date'} (ID: ${receiptId})`);
+            console.log(`✅ Saved receipt #${importedCount}: ${receipt.restaurantName} - $${receipt.amountSpent.toFixed(2)} on ${receipt.orderDate?.toISOString().split('T')[0] || 'unknown date'} (ID: ${receiptId}, OrderUUID: ${receipt.externalId || 'none'})`);
           } catch (error) {
             const errorMsg = `Error importing receipt from ${receipt.restaurantName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
             errors.push(errorMsg);
@@ -177,22 +247,34 @@ export class GmailImportService {
         // Invalidate cache for this user
         await cacheService.invalidateAllUserCaches(user.id);
         console.log(`✅ Imported ${importedCount} receipts for user ${user.id}`);
+
+        // Return the correct final total
+        return {
+          success: errors.length === 0,
+          totalEmailsFound: emails.length,
+          totalReceiptsProcessed: receiptEmails.length,
+          totalReceiptsImported: importedCount,
+          totalAmount: finalTotal, // Use deduped total
+          errors,
+          receipts: validReceiptsList // return deduped list
+        };
       }
 
+      // Fallback if loop was skipped (should satisfy TS)
       return {
         success: errors.length === 0,
         totalEmailsFound: emails.length,
         totalReceiptsProcessed: receiptEmails.length,
         totalReceiptsImported: importedCount,
-        totalAmount,
+        totalAmount: 0,
         errors,
-        receipts: validReceipts
+        receipts: []
       };
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Gmail import error:', errorMsg);
-      
+
       return {
         success: false,
         totalEmailsFound: 0,

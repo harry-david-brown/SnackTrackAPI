@@ -17,26 +17,32 @@ import { decode } from 'html-entities';
 const PATTERNS = {
   // Money patterns: CA$20.33, US$15.00, $30.87, €25.00, £18.50
   money: /(?<currency>CA\$|US\$|\$|€|£)\s*(?<amount>\d+(?:\.\d{2})?)/g,
-  
+
   // Date patterns: November 15, 2022 | Nov 14, 2025 | 11/16/25
   dateWords: /(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}/gi,
   dateNumeric: /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/g,
-  
+
   // Time patterns: 8:17 PM, 9:56 AM, 10:14 am
   time: /\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?|AM|PM)/gi,
-  
+
   // Restaurant/merchant patterns
   orderFrom: /(?:order(?:ed)?\s+from|receipt\s+from|your\s+order\s+from)\s+([^,.]+)/gi,
   restaurantName: /Here's your receipt for ([^.]+)\./i,
-  
+
   // Address patterns
   deliveryAddress: /(?:delivered?\s+to|delivery\s+to)[:\s]*([^<\n]+)/gi,
-  
+
   // Payment method patterns  
   paymentCard: /(Visa|Mastercard|Amex|American Express|Discover)\s*[•·…\*]+\s*(\d{4})/gi,
-  
+
   // Savings patterns
-  savings: /(?:saved?|savings?)[:\s]*(?:CA\$|US\$|\$|€|£)?\s*(\d+(?:\.\d{2})?)/gi
+  // Savings patterns
+  savings: /(?:saved?|savings?)[:\s]*(?:CA\$|US\$|\$|€|£)?\s*(\d+(?:\.\d{2})?)/gi,
+
+  // Uber UUID patterns
+  uuid: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  orderUuidParam: /(?:order_uuid|eats_order_uuid|uuid)=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+  uberLinkUuid: /https?:\/\/[^\s"'<>]*uber[^\s"'<>]*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
 };
 
 // Currency symbol to enum mapping
@@ -65,16 +71,19 @@ export class ReceiptDataExtractor {
   ): ExtractedReceiptData {
     const plainText = this.textExtractor.htmlToText(htmlBody);
     const warnings: string[] = [];
-    
+
     // Detect service type
     const service = this.detectService(subject, from, plainText);
-    
+
+    // Extract orderId
+    const orderId = this.extractOrderId(htmlBody, plainText, service);
+
     // Extract merchant/restaurant name
     const merchant = this.extractMerchant(htmlBody, plainText, subject);
-    
+
     // Extract date and time
     const { orderDate, orderTime, parsedDate } = this.extractDateTime(plainText, htmlBody);
-    
+
     // Extract monetary values
     const total = this.extractAmountNear('total', plainText, htmlBody);
     const subtotal = this.extractAmountNear('subtotal', plainText, htmlBody);
@@ -83,16 +92,16 @@ export class ReceiptDataExtractor {
     const deliveryFee = this.extractAmountNear('delivery fee', plainText, htmlBody);
     const serviceFee = this.extractAmountNear('service fee', plainText, htmlBody);
     const savings = this.extractSavings(plainText);
-    
+
     // Determine currency from extracted values
     const currency = this.determineCurrency(
       total, subtotal, tax, tip, deliveryFee, serviceFee
     );
-    
+
     // Extract additional metadata
     const deliveryAddress = this.extractDeliveryAddress(plainText, htmlBody);
     const paymentMethod = this.extractPaymentMethod(plainText, htmlBody);
-    
+
     // Calculate confidence based on extracted data
     const extractionConfidence = this.calculateConfidence({
       hasTotal: total !== null,
@@ -108,6 +117,7 @@ export class ReceiptDataExtractor {
     if (parsedDate === null) warnings.push('Could not extract order date');
 
     return {
+      orderId,
       service,
       merchant,
       orderDate,
@@ -144,8 +154,8 @@ export class ReceiptDataExtractor {
     }
     if (combined.includes('uber')) {
       // Check context - if it mentions food/restaurant, it's likely Uber Eats
-      if (combined.includes('order') || combined.includes('delivery') || 
-          combined.includes('restaurant') || combined.includes('food')) {
+      if (combined.includes('order') || combined.includes('delivery') ||
+        combined.includes('restaurant') || combined.includes('food')) {
         return ServiceType.UBER_EATS;
       }
       return ServiceType.UBER_OTHER;
@@ -248,7 +258,7 @@ export class ReceiptDataExtractor {
     const timeMatch = text.match(PATTERNS.time);
     if (timeMatch) {
       orderTime = timeMatch[0];
-      
+
       // If we have both date and time, combine them
       if (parsedDate && orderTime) {
         const timeParts = orderTime.match(/(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?|AM|PM)/i);
@@ -256,10 +266,10 @@ export class ReceiptDataExtractor {
           let hours = parseInt(timeParts[1]);
           const minutes = parseInt(timeParts[2]);
           const isPM = /p\.?m\.?/i.test(timeParts[3]);
-          
+
           if (isPM && hours !== 12) hours += 12;
           if (!isPM && hours === 12) hours = 0;
-          
+
           parsedDate.setHours(hours, minutes, 0, 0);
         }
       }
@@ -362,7 +372,7 @@ export class ReceiptDataExtractor {
   private extractDeliveryAddress(text: string, html: string): string | null {
     // Try data attribute
     const dataAddr = this.textExtractor.extractDataAttribute(
-      html, 
+      html,
       'address_point_1_address'
     );
     if (dataAddr) return dataAddr;
@@ -425,6 +435,45 @@ export class ReceiptDataExtractor {
     }
 
     return Math.round(score * 100) / 100;
+  }
+
+  /**
+   * Extract Uber orderId from email content
+   */
+  private extractOrderId(html: string, text: string, service: ServiceType): string | null {
+    // Only try for Uber-related services
+    if (
+      service !== ServiceType.UBER_EATS &&
+      service !== ServiceType.UBER_RIDE &&
+      service !== ServiceType.UBER_OTHER
+    ) {
+      return null;
+    }
+
+    // 1) Strongest signal: explicit order_uuid or uuid query param
+    const paramMatch = html.match(PATTERNS.orderUuidParam);
+    if (paramMatch) {
+      return paramMatch[1].toLowerCase();
+    }
+
+    // 2) Next: UUID embedded in an Uber URL
+    const linkMatch = html.match(PATTERNS.uberLinkUuid);
+    if (linkMatch) {
+      return linkMatch[1].toLowerCase();
+    }
+
+    // 3) Fallback: first UUID in the HTML, but only if Uber-related
+    // Note: We use the generic UUID pattern here but scoped to the UBER check above
+    const genericMatch = html.match(PATTERNS.uuid);
+    if (genericMatch) {
+      return genericMatch[0].toLowerCase();
+    }
+
+    // 4) Last fallback: order number pattern (text based)
+    const orderNum = text.match(/order\s*(number|no\.?)\s*[:#]\s*([A-Z0-9\-]+)/i);
+    if (orderNum) return orderNum[2].trim();
+
+    return null;
   }
 }
 

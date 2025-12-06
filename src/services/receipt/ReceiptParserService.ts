@@ -1,10 +1,10 @@
 import { Receipt, ReceiptType, ReceiptItem, DataSource } from '../../models/Receipt';
 import { Email } from '../email/Email';
-import { 
-  ReceiptExtractor, 
-  RawEmail, 
-  ServiceType, 
-  ExtractedReceiptData 
+import {
+  ReceiptExtractor,
+  RawEmail,
+  ServiceType,
+  ExtractedReceiptData
 } from '../extraction';
 
 /**
@@ -13,11 +13,11 @@ import {
  */
 export class ReceiptParserService {
   private extractor: ReceiptExtractor;
-  
+
   constructor() {
     this.extractor = new ReceiptExtractor();
   }
-  
+
   /**
    * Parse an email into a receipt
    */
@@ -30,15 +30,15 @@ export class ReceiptParserService {
       body: email.body,
       subject: email.subject
     };
-    
+
     // Use the new extraction system
     const result = this.extractor.extract(rawEmail);
-    
+
     // Only convert to receipt if it's actually a receipt
     if (!result.classification.isReceipt || !result.data) {
       return null;
     }
-    
+
     return this.convertToReceipt(email.userId, result.data);
   }
 
@@ -55,7 +55,7 @@ export class ReceiptParserService {
     }));
 
     const results = this.extractor.extractReceipts(rawEmails);
-    
+
     return results
       .filter(r => r.data !== null)
       .map((r, i) => this.convertToReceipt(emails[i].userId, r.data!))
@@ -80,20 +80,20 @@ export class ReceiptParserService {
    * Convert extracted data to Receipt model
    */
   private convertToReceipt(
-    userId: string, 
+    userId: string,
     data: ExtractedReceiptData
   ): Receipt {
     const items: ReceiptItem[] = [];
-    
+
     // Note: Individual items are not extracted from email receipts
     // as they require more sophisticated parsing. The total represents
     // the order as a single "item" for now.
-    
+
     const receiptType = this.mapServiceToReceiptType(data.service);
-    
+
     // Use "Unknown Restaurant" as default if merchant is not extracted
     const restaurantName = data.merchant || 'Unknown Restaurant';
-    
+
     return new Receipt(
       userId,
       items,
@@ -101,7 +101,9 @@ export class ReceiptParserService {
       receiptType,
       restaurantName,
       data.parsedDate ?? undefined,
-      DataSource.EMAIL
+      DataSource.EMAIL,
+      undefined, // delivery time
+      data.orderId ?? undefined // externalId
     );
   }
 

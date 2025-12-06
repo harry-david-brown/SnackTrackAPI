@@ -22,26 +22,26 @@ export interface ReceiptAnalytics {
 }
 
 export class ReceiptService {
-  constructor(private postgres: PostgresService) {}
+  constructor(private postgres: PostgresService) { }
 
   // CREATE - Add a new receipt
   async createReceipt(receipt: Receipt): Promise<string> {
     const receiptId = uuidv4();
-    
+
     // Truncate restaurant name to fit VARCHAR(255) constraint
-    const truncatedRestaurantName = receipt.restaurantName 
+    const truncatedRestaurantName = receipt.restaurantName
       ? receipt.restaurantName.substring(0, 255)
       : receipt.restaurantName;
 
     if (receipt.restaurantName && receipt.restaurantName.length > 255) {
       console.warn(`⚠️  Restaurant name truncated from ${receipt.restaurantName.length} to 255 chars: ${receipt.restaurantName.substring(0, 50)}...`);
     }
-    
+
     await this.postgres.query(`
       INSERT INTO receipts (
         id, user_id, receipt_type, data_source, restaurant_name, order_date, 
-        amount_spent, items, delivery_time
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        amount_spent, items, delivery_time, external_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `, [
       receiptId,
       receipt.userId,
@@ -51,7 +51,8 @@ export class ReceiptService {
       receipt.orderDate,
       receipt.amountSpent,
       JSON.stringify(receipt.items),
-      receipt.deliveryTime || null
+      receipt.deliveryTime || null,
+      receipt.externalId || null
     ]);
 
     return receiptId;
@@ -350,7 +351,8 @@ export class ReceiptService {
       row.restaurant_name,
       row.order_date ? new Date(row.order_date) : undefined,
       (row.data_source as DataSource) || DataSource.CSV,
-      row.delivery_time ? new Date(row.delivery_time) : undefined
+      row.delivery_time ? new Date(row.delivery_time) : undefined,
+      row.external_id || undefined
     );
   }
 }

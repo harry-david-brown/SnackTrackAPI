@@ -42,12 +42,12 @@ export class GmailClient implements EmailClient {
     if (!REFRESH_TOKEN || REFRESH_TOKEN === 'your_refresh_token_here') {
       const errorMsg = 'No Gmail refresh token available for user';
       console.error(`❌ ${errorMsg}`);
-      
+
       // In production, throw an error instead of falling back to mock data
       if (config.isProduction()) {
         throw new Error(errorMsg);
       }
-      
+
       // In development, fall back to mock data for testing
       console.log('⚠️ Falling back to mock data (development mode)');
       return this.getMockEmails(user);
@@ -56,14 +56,14 @@ export class GmailClient implements EmailClient {
     // Create OAuth2Client with the same credentials used to issue the token
     // This must match the web client ID used in the mobile app's GoogleSignin.configure()
     const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-    
+
     // Try to determine if this is an access token or refresh token
     // Access tokens typically start with "ya29." or are shorter
     // Refresh tokens are longer and don't have a specific prefix
     // However, the safest approach is to try refresh first, and if it fails, use as access token
-    const looksLikeAccessToken = REFRESH_TOKEN.startsWith('ya29.') || 
-                                  REFRESH_TOKEN.startsWith('1//') === false && REFRESH_TOKEN.length < 150;
-    
+    const looksLikeAccessToken = REFRESH_TOKEN.startsWith('ya29.') ||
+      REFRESH_TOKEN.startsWith('1//') === false && REFRESH_TOKEN.length < 150;
+
     if (looksLikeAccessToken) {
       // This looks like an access token - use it directly (don't try to refresh)
       console.log(`🔐 Using access token directly (expires in ~1 hour)`);
@@ -92,16 +92,16 @@ export class GmailClient implements EmailClient {
     try {
       // Use centralized config for Gmail search query
       const searchQuery = config.getGmailSearchQuery();
-      
+
       if (config.shouldEnableDetailedLogging()) {
         console.log('🔍 Gmail API: Searching for Uber emails with query:', searchQuery);
         console.log(config.getEnvironmentInfo());
       }
-      
+
       // Helper function to process a batch of messages
       const processMessages = async (messages: Array<{ id?: string | null }> | undefined) => {
         if (!messages) return;
-        
+
         for (const msg of messages) {
           console.log('📨 Gmail API: Processing email ID:', msg.id);
           // Fetch the full message
@@ -120,16 +120,7 @@ export class GmailClient implements EmailClient {
           }
           console.log('📧 Email from:', from, 'to:', to);
           // Get the body (handle multipart)
-          if (payload?.body?.data) {
-            body = decodeBase64Gmail(payload.body.data);
-          } else if (payload?.parts) {
-            for (const part of payload.parts) {
-              if (part.mimeType === 'text/plain' && part.body?.data) {
-                body = decodeBase64Gmail(part.body.data);
-                break;
-              }
-            }
-          }
+          body = this.extractBody(payload);
           emailList.push(new Email(user.id, from, to, body, subject));
         }
       };
@@ -148,10 +139,10 @@ export class GmailClient implements EmailClient {
           maxResults: 500, // Maximum allowed by Gmail API
           pageToken: nextPageToken || undefined,
         });
-        
+
         const messagesInPage = listRes.data.messages?.length || 0;
         totalMessagesFound += messagesInPage;
-        
+
         console.log(`📧 Gmail API: Page ${pageCount} - Found ${messagesInPage} Uber emails (Total so far: ${totalMessagesFound})`);
 
         // Process messages from this page
@@ -159,17 +150,17 @@ export class GmailClient implements EmailClient {
 
         // Check if there are more pages
         nextPageToken = listRes.data.nextPageToken || null;
-        
+
         if (!nextPageToken) {
           break; // No more pages
         }
-        
+
         console.log(`📄 Gmail API: More pages available, fetching next page...`);
       }
 
       console.log(`📧 Gmail API: Completed pagination - Found ${totalMessagesFound} total Uber emails across ${pageCount} page(s)`);
 
-      if (true) {
+      if (config.shouldSaveDebugEmails()) {
         // Save emails to JSON for debugging
         try {
           const debugDir = path.join(process.cwd(), 'debug-emails');
@@ -208,7 +199,7 @@ export class GmailClient implements EmailClient {
               };
 
               const result = extractor.extract(rawEmail);
-              
+
               // Check if it's a receipt but merchant is unknown/null
               if (result.classification.isReceipt && (!result.data?.merchant || result.data.merchant === 'Unknown')) {
                 unknownRestaurantEmails.push({
@@ -230,14 +221,14 @@ export class GmailClient implements EmailClient {
             if (unknownRestaurantEmails.length > 0) {
               const unknownFilename = `unknown-restaurants-${user.id}-${timestamp}.json`;
               const unknownFilepath = path.join(debugDir, unknownFilename);
-              
+
               fs.writeFileSync(unknownFilepath, JSON.stringify({
                 userId: user.id,
                 timestamp: new Date().toISOString(),
                 count: unknownRestaurantEmails.length,
                 emails: unknownRestaurantEmails
               }, null, 2));
-              
+
               console.log(`🔍 DEBUG: Saved ${unknownRestaurantEmails.length} unknown restaurant emails to ${unknownFilepath}`);
             } else {
               console.log(`✅ All restaurants identified successfully!`);
@@ -254,14 +245,14 @@ export class GmailClient implements EmailClient {
       return emailList;
     } catch (error) {
       console.error('Gmail API error:', error);
-      
+
       // In production, throw the error instead of falling back to mock data
       if (config.isProduction()) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown Gmail API error';
         console.error(`❌ Gmail API error in production: ${errorMsg}`);
         throw new Error(`Failed to fetch emails from Gmail: ${errorMsg}`);
       }
-      
+
       // In development, fall back to mock data for testing
       console.log('⚠️ Falling back to mock data (development mode)');
       return this.getMockEmails(user);
@@ -270,7 +261,7 @@ export class GmailClient implements EmailClient {
 
   private loadEmailsFromDebugFolder(user: User): Email[] {
     const debugDir = path.join(process.cwd(), 'debug-emails');
-    
+
     if (!fs.existsSync(debugDir)) {
       console.log(`⚠️ Debug-emails folder not found at ${debugDir}, falling back to generated mock emails`);
       return this.getMockEmails(user);
@@ -343,15 +334,71 @@ export class GmailClient implements EmailClient {
   private getMockEmails(user: User): Email[] {
     console.log(`📧 Generating mock Uber emails for user: ${user.email}`);
     return [
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
         'Your Tuesday evening order with Uber Eats\nTotal CA$30.87\nNovember 15, 2022\nThanks for ordering!\nHere\'s your receipt from Sushi Shop (South Keys) and Uber Eats.\nYou ordered from Sushi Shop (South Keys)\nDelivered to Ottawa, ON\nSubtotal: $25.00\nTax: $3.25\nTip: $2.50\nDelivery Fee: $0.12',
         'Your Tuesday evening order with Uber Eats'),
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
         'Your Friday lunch order with Uber Eats\nTotal CA$18.50\nNovember 18, 2022\nThanks for ordering!\nHere\'s your receipt from McDonald\'s and Uber Eats.\nYou ordered from McDonald\'s\nDelivered to Ottawa, ON\nSubtotal: $15.00\nTax: $1.95\nTip: $1.50\nDelivery Fee: $0.05',
         'Your Friday lunch order with Uber Eats'),
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email, 
+      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
         'Your Sunday brunch order with Uber Eats\nTotal CA$42.30\nNovember 20, 2022\nThanks for ordering!\nHere\'s your receipt from Tim Hortons and Uber Eats.\nYou ordered from Tim Hortons\nDelivered to Ottawa, ON\nSubtotal: $35.00\nTax: $4.55\nTip: $2.75\nDelivery Fee: $0.00',
         'Your Sunday brunch order with Uber Eats')
     ];
   }
-} 
+
+  private extractBody(part: any): string {
+    if (!part) return '';
+
+    // 1. Direct match: HTML
+    if (part.mimeType === 'text/html' && part.body?.data) {
+      return decodeBase64Gmail(part.body.data);
+    }
+
+    // 2. Multipart: Search children with priority
+    if (part.parts) {
+      // Pass 1: Strictly look for HTML in children
+      for (const p of part.parts) {
+        // Optimization: check direct child first
+        if (p.mimeType === 'text/html') {
+          return this.extractBody(p);
+        }
+        // Recurse strictly for HTML
+        if (p.parts) {
+          const html = this.extractHtmlOnly(p);
+          if (html) return html;
+        }
+      }
+
+      // Pass 2: If no HTML found, look for any content (Text)
+      for (const p of part.parts) {
+        const content = this.extractBody(p);
+        if (content) return content;
+      }
+    }
+
+    // 3. Fallback: Plain Text
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      return decodeBase64Gmail(part.body.data);
+    }
+
+    return '';
+  }
+
+  // Helper to strictly find HTML content
+  private extractHtmlOnly(part: any): string | null {
+    if (!part) return null;
+
+    if (part.mimeType === 'text/html' && part.body?.data) {
+      return decodeBase64Gmail(part.body.data);
+    }
+
+    if (part.parts) {
+      for (const p of part.parts) {
+        const html = this.extractHtmlOnly(p);
+        if (html) return html;
+      }
+    }
+
+    return null;
+  }
+}

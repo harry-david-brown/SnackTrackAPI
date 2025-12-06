@@ -11,7 +11,8 @@ import {
   ExtractedReceiptData,
   EmailClassification,
   ExtractorConfig,
-  DEFAULT_EXTRACTOR_CONFIG
+  DEFAULT_EXTRACTOR_CONFIG,
+  ServiceType
 } from './types';
 import { HtmlTextExtractor } from './HtmlTextExtractor';
 import { ReceiptClassifier } from './ReceiptClassifier';
@@ -35,20 +36,20 @@ export class ReceiptExtractor {
    */
   extract(email: RawEmail): ExtractionResult {
     const { body, subject = '', from = '' } = email;
-    
+
     // Generate text representations
     const rawText = this.textExtractor.htmlToText(body);
     const coreText = this.textExtractor.extractCoreText(body);
-    
+
     // Classify the email
     const classification = this.classifier.classify(body, subject);
-    
+
     // Extract data if it's a receipt
     let data: ExtractedReceiptData | null = null;
     if (classification.isReceipt) {
       data = this.dataExtractor.extract(body, subject, from);
     }
-    
+
     return {
       classification,
       data,
@@ -90,7 +91,57 @@ export class ReceiptExtractor {
    */
   getSummary(results: ExtractionResult[]): ReceiptSummary {
     const receipts = results.filter(r => r.classification.isReceipt && r.data);
-    
+
+    const byOrder = new Map<string, ExtractedReceiptData>();
+
+    for (const r of receipts) {
+      const d = r.data!;
+      if (d.service !== ServiceType.UBER_EATS) continue;
+
+      // Primary key = extracted orderId
+      // Fallback = merchant + date + total
+      const key =
+        d.orderId ||
+        `${d.merchant || 'unknown'}|${d.parsedDate?.toISOString() || d.orderDate || 'unknown-date'}|${d.total || 'unknown-total'}`;
+
+      const existing = byOrder.get(key);
+
+      if (!existing) {
+        byOrder.set(key, d);
+      } else {
+        // CONFLICT RESOLUTION: "Tip Update" Strategy
+        // When multiple receipts share the same Order ID (UUID), we want the most "final" version.
+        // For Uber Eats, the total only increases (adding a tip). 
+        // Therefore, always prefer the receipt with the HIGHER total amount.
+
+        let shouldReplace = false;
+
+        if (d.total !== null && existing.total !== null) {
+          // Both have totals: keep the larger one (handles tip updates)
+          if (d.total > existing.total) {
+            shouldReplace = true;
+          }
+        } else if (d.total !== null && existing.total === null) {
+          // New one has total, existing doesn't: keep new
+          shouldReplace = true;
+        } else if (d.total === null && existing.total !== null) {
+          // Existing has total, new doesn't: keep existing
+          shouldReplace = false;
+        } else {
+          // Neither has total: use confidence score
+          if (d.extractionConfidence > existing.extractionConfidence) {
+            shouldReplace = true;
+          }
+        }
+
+        if (shouldReplace) {
+          byOrder.set(key, d);
+        }
+      }
+    }
+
+    const uniqueReceipts = [...byOrder.values()];
+
     let totalAmount = 0;
     let totalTax = 0;
     let totalTip = 0;
@@ -100,20 +151,20 @@ export class ReceiptExtractor {
     const merchants = new Map<string, number>();
     const dateRange = { earliest: null as Date | null, latest: null as Date | null };
 
-    for (const result of receipts) {
-      const data = result.data!;
-      
+    // Use unique receipts for stats
+    for (const data of uniqueReceipts) {
+
       if (data.total !== null) totalAmount += data.total;
       if (data.tax !== null) totalTax += data.tax;
       if (data.tip !== null) totalTip += data.tip;
       if (data.deliveryFee !== null) totalDeliveryFee += data.deliveryFee;
       if (data.serviceFee !== null) totalServiceFee += data.serviceFee;
       if (data.savings !== null) totalSavings += data.savings;
-      
+
       if (data.merchant) {
         merchants.set(data.merchant, (merchants.get(data.merchant) || 0) + 1);
       }
-      
+
       if (data.parsedDate) {
         if (!dateRange.earliest || data.parsedDate < dateRange.earliest) {
           dateRange.earliest = data.parsedDate;
@@ -138,8 +189,8 @@ export class ReceiptExtractor {
       totalDeliveryFees: Math.round(totalDeliveryFee * 100) / 100,
       totalServiceFees: Math.round(totalServiceFee * 100) / 100,
       totalSavings: Math.round(totalSavings * 100) / 100,
-      averageOrderAmount: receipts.length > 0 
-        ? Math.round((totalAmount / receipts.length) * 100) / 100 
+      averageOrderAmount: receipts.length > 0
+        ? Math.round((totalAmount / receipts.length) * 100) / 100
         : 0,
       topMerchants,
       dateRange

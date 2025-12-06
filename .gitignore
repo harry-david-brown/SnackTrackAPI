@@ -59,6 +59,8 @@ jspm_packages/
 # Docker
 .dockerignore
 
+debug-emails/
+
 # Temporary files
 tmp/
 temp/

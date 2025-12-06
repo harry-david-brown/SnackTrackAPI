@@ -64,14 +64,15 @@ export interface MonetaryAmount {
  */
 export interface ExtractedReceiptData {
   // Core identifiers
+  orderId: string | null;  // Added orderId
   service: ServiceType;
   merchant: string | null;
-  
+
   // Timestamps
   orderDate: string | null;
   orderTime: string | null;
   parsedDate: Date | null;
-  
+
   // Monetary values
   currency: Currency;
   total: number | null;
@@ -81,15 +82,15 @@ export interface ExtractedReceiptData {
   deliveryFee: number | null;
   serviceFee: number | null;
   savings: number | null;
-  
+
   // Additional metadata
   deliveryAddress: string | null;
   paymentMethod: string | null;
-  
+
   // Source info
   subject: string;
   from: string;
-  
+
   // Extraction metadata
   extractionConfidence: number;
   warnings: string[];
@@ -129,8 +130,7 @@ export const DEFAULT_EXTRACTOR_CONFIG: ExtractorConfig = {
     'thanks for your order',
     'order confirmation',
     'order completed',
-    'delivery receipt',
-    'thanks for tipping'
+    'delivery receipt'
   ],
   tableWords: ['subtotal', 'tax', 'total', 'tip', 'delivery fee', 'service fee'],
   footerWords: [
