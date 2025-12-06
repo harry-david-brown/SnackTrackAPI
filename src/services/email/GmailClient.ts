@@ -2,7 +2,6 @@ import { User } from '../../models/User';
 import { Email } from './Email';
 import { EmailClient } from './EmailClient';
 import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/AppConfig';
 import { ReceiptExtractor, RawEmail } from '../extraction';
 import * as fs from 'fs';
@@ -55,7 +54,7 @@ export class GmailClient implements EmailClient {
 
     // Create OAuth2Client with the same credentials used to issue the token
     // This must match the web client ID used in the mobile app's GoogleSignin.configure()
-    const oAuth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+    const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
     // Try to determine if this is an access token or refresh token
     // Access tokens typically start with "ya29." or are shorter

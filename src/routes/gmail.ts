@@ -5,8 +5,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
+import { google, Auth } from 'googleapis';
 import { container } from '../services/core/ServiceContainer';
 import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
@@ -18,10 +17,10 @@ const router = Router();
  * Gmail OAuth Configuration
  * Returns OAuth2Client for Gmail API access
  */
-const getOAuth2Client = (): OAuth2Client => {
+const getOAuth2Client = (): Auth.OAuth2Client => {
   const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
   const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-  
+
   if (!CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
   }
@@ -93,24 +92,24 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
     console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`, {
       hasRefreshToken: !!refreshToken
     });
-    
+
     // Create OAuth2Client with proper credentials to verify the token
     const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
     const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-    
+
     if (!CLIENT_ID || !CLIENT_SECRET) {
       throw new Error('Gmail OAuth credentials not configured');
     }
-    
+
     // Create OAuth2Client with credentials and verify the access token
     // IMPORTANT: Use the same CLIENT_ID that was used in the mobile app (webClientId)
     const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
     oAuth2Client.setCredentials({ access_token: accessToken });
-    
+
     // Verify the token by getting user info
     const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
     const userInfo = await oauth2.userinfo.get();
-    
+
     if (!userInfo.data.email) {
       throw new Error('Could not retrieve user email from Google');
     }
@@ -119,14 +118,14 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
     console.log(`✅ Received Gmail OAuth token for user: ${userId} (${gmailEmail})`);
 
     const userRepository = container.userRepository;
-    
+
     // Use refresh token if provided, otherwise fall back to access token
     // Refresh tokens are long-lived, access tokens expire in ~1 hour
     const tokenToStore = refreshToken || accessToken;
-    const expiryDate = refreshToken 
+    const expiryDate = refreshToken
       ? new Date(Date.now() + 365 * 24 * 3600 * 1000) // 1 year if refresh token
       : new Date(Date.now() + 3600 * 1000); // 1 hour if only access token
-    
+
     await userRepository.updateGmailTokens(
       userId,
       tokenToStore, // Store refresh token if available, otherwise access token
@@ -134,7 +133,7 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       expiryDate,
       gmailEmail // Store the connected Gmail email address
     );
-    
+
     if (refreshToken) {
       console.log(`✅ Stored refresh token for long-term access`);
     } else {
