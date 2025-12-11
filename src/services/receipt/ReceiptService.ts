@@ -61,9 +61,9 @@ export class ReceiptService {
   /**
    * CREATE BATCH - Add multiple receipts in a single database transaction
    * Uses batch inserts for 10-20x performance improvement over individual inserts
-   * Automatically handles duplicates using ON CONFLICT for receipts with external_id
+   * Note: Duplicates should be handled by the caller before calling this method
    * 
-   * @param receipts Array of receipts to insert
+   * @param receipts Array of receipts to insert (should already be deduplicated)
    * @returns Array of inserted receipt IDs
    */
   async createReceiptsBatch(receipts: Receipt[]): Promise<string[]> {
@@ -109,23 +109,14 @@ export class ReceiptService {
         );
       });
 
-      try {
-        // Use ON CONFLICT to handle duplicates for receipts with external_id
-        // If a duplicate is found, update to the higher amount (handles tip updates)
-        await this.postgres.query(`
-          INSERT INTO receipts (
-            id, user_id, receipt_type, data_source, restaurant_name, order_date, 
-            amount_spent, items, delivery_time, external_id
-          ) VALUES ${placeholders.join(', ')}
-          ON CONFLICT (user_id, external_id) WHERE external_id IS NOT NULL
-          DO UPDATE SET 
-            amount_spent = GREATEST(receipts.amount_spent, EXCLUDED.amount_spent),
-            updated_at = CURRENT_TIMESTAMP
-        `, values);
-      } catch (error: any) {
-        console.error(`❌ Batch insert failed for batch ${Math.floor(i / batchSize) + 1}:`, error.message);
-        throw error;
-      }
+      // Insert directly - duplicates are already handled by GmailImportService before calling this
+      // Since we're replacing all email receipts, there shouldn't be conflicts
+      await this.postgres.query(`
+        INSERT INTO receipts (
+          id, user_id, receipt_type, data_source, restaurant_name, order_date, 
+          amount_spent, items, delivery_time, external_id
+        ) VALUES ${placeholders.join(', ')}
+      `, values);
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -133,6 +124,7 @@ export class ReceiptService {
 
     return insertedIds;
   }
+
 
   // READ - Get receipts with filters
   async getReceipts(filters: ReceiptFilters = {}, limit: number = 50, offset: number = 0): Promise<Receipt[]> {

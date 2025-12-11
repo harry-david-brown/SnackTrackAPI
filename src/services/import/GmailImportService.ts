@@ -50,6 +50,7 @@ export class GmailImportService {
    */
   async importFromGmail(user: User): Promise<GmailImportResult> {
     const errors: string[] = [];
+    const criticalErrors: string[] = []; // Errors that should mark import as failed
 
     try {
       // Validate user has Gmail connected
@@ -105,6 +106,8 @@ export class GmailImportService {
             emailReceiptPairs.push({ email, receipt });
           } else {
             emailReceiptPairs.push({ email, receipt: null });
+            // This is expected for non-receipt emails (Uber One, support emails, etc.)
+            // Don't add to critical errors - these are informational only
             errors.push(`Failed to convert extraction for email from ${email.from}`);
           }
         } else {
@@ -174,12 +177,13 @@ export class GmailImportService {
       try {
         const deletedCount = await this.deleteEmailReceipts(user.id);
         console.log(`🗑️  Deleted ${deletedCount} existing email-based receipts for user ${user.id}`);
-      } catch (error) {
-        const errorMsg = `Failed to delete existing email receipts: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        console.error(`❌ ${errorMsg}`);
-        errors.push(errorMsg);
-        // Continue with import even if deletion fails - user should be notified
-      }
+        } catch (error) {
+          const errorMsg = `Failed to delete existing email receipts: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          console.error(`❌ ${errorMsg}`);
+          errors.push(errorMsg);
+          criticalErrors.push(errorMsg); // Deletion failure is critical
+          // Continue with import even if deletion fails - user should be notified
+        }
 
       // Calculate total amount (from valid food receipts)
       const totalAmount = validReceipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
@@ -259,7 +263,7 @@ export class GmailImportService {
         console.log(`Analyzed ${validReceipts.length} receipts. Found ${validReceiptsList.length} unique orders.`);
 
         // OPTIMIZATION: Use batch insert for 10-20x faster database writes
-        // The batch insert handles duplicates via ON CONFLICT for external_id
+        // Receipts are already deduplicated above, so we can insert directly
         try {
           const insertedIds = await this.receiptService.createReceiptsBatch(validReceiptsList);
           importedCount = insertedIds.length;
@@ -278,6 +282,7 @@ export class GmailImportService {
         } catch (error) {
           const errorMsg = `Batch insert failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
           errors.push(errorMsg);
+          criticalErrors.push(errorMsg); // Database insert failure is critical
           console.error(`❌ ${errorMsg}`);
         }
 
@@ -286,8 +291,9 @@ export class GmailImportService {
         console.log(`✅ Imported ${importedCount} receipts for user ${user.id}`);
 
         // Return the correct final total
+        // Only mark as failed if there are critical errors (not conversion errors for non-receipt emails)
         return {
-          success: errors.length === 0,
+          success: criticalErrors.length === 0 && importedCount > 0,
           totalEmailsFound: emails.length,
           totalReceiptsProcessed: receipts.length, // Count of emails that were receipts
           totalReceiptsImported: importedCount,
@@ -299,7 +305,7 @@ export class GmailImportService {
 
       // Fallback if loop was skipped (should satisfy TS)
       return {
-        success: errors.length === 0,
+        success: criticalErrors.length === 0,
         totalEmailsFound: emails.length,
         totalReceiptsProcessed: receipts.length, // Count of emails that were receipts
         totalReceiptsImported: importedCount,
