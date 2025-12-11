@@ -7,15 +7,20 @@ export class PostgresService {
   constructor() {
     const isProduction = process.env.NODE_ENV === 'production';
 
+    // Configure SSL for production databases (most cloud providers require this)
+    const sslConfig = config.shouldUseDatabaseSSL() 
+      ? { rejectUnauthorized: false } // Required for most cloud databases (Railway, Heroku, etc.)
+      : false;
+
     this.pool = new Pool({
       connectionString: config.getDatabaseConnectionString(),
-      ssl: config.shouldUseDatabaseSSL(),
+      ssl: sslConfig,
 
       // Connection pool configuration for performance
       max: isProduction ? 20 : 10, // Maximum connections (20 in prod, 10 in dev)
       min: 2, // Minimum connections to keep open
       idleTimeoutMillis: 30000, // Close idle connections after 30s
-      connectionTimeoutMillis: 10000, // Timeout if can't connect within 10s
+      connectionTimeoutMillis: 30000, // Timeout if can't connect within 30s (increased for cold starts)
 
       // Query configuration
       statement_timeout: 30000, // Kill queries running longer than 30s

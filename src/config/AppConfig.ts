@@ -69,7 +69,7 @@ class ConfigManager {
       },
 
       database: {
-        useSSL: false, // Disabled for local testing - can be enabled for cloud deployments
+        useSSL: isProduction, // Enable SSL in production (required by most cloud databases)
         connectionString: process.env.DATABASE_URL || 'postgresql://snacktrack:password@localhost:5432/snacktrack_dev'
       },
 
