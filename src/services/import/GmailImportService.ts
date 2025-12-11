@@ -41,14 +41,14 @@ export class GmailImportService {
 
   /**
    * Import Uber Eats receipts from Gmail for a user
+   * Always replaces existing email-based receipts before importing new ones
    * @param user User object with Gmail OAuth tokens
-   * @param replaceExisting If true, delete existing email-based receipts before import
    * 
    * Performance optimizations:
    * - Parallel extraction with concurrency limiting (10 concurrent)
    * - Combined classification + extraction (single pass, no redundant work)
    */
-  async importFromGmail(user: User, replaceExisting: boolean = false): Promise<GmailImportResult> {
+  async importFromGmail(user: User): Promise<GmailImportResult> {
     const errors: string[] = [];
 
     try {
@@ -169,17 +169,24 @@ export class GmailImportService {
       const validReceipts = foodReceipts;
       console.log(`📧 ${validReceipts.length} food delivery receipts ready for import`);
 
+      // Always delete existing email-based receipts BEFORE processing new ones
+      // This ensures we replace all email-based receipts with fresh imports
+      try {
+        const deletedCount = await this.deleteEmailReceipts(user.id);
+        console.log(`🗑️  Deleted ${deletedCount} existing email-based receipts for user ${user.id}`);
+      } catch (error) {
+        const errorMsg = `Failed to delete existing email receipts: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        console.error(`❌ ${errorMsg}`);
+        errors.push(errorMsg);
+        // Continue with import even if deletion fails - user should be notified
+      }
+
       // Calculate total amount (from valid food receipts)
       const totalAmount = validReceipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
 
       // Import receipts to database (only valid receipts with restaurant names)
       let importedCount = 0;
       if (validReceipts.length > 0) {
-        if (replaceExisting) {
-          // Delete existing email-based receipts for this user
-          await this.deleteEmailReceipts(user.id);
-          console.log(`🗑️  Deleted existing email-based receipts for user ${user.id}`);
-        }
 
         // Deduplicate receipts before saving
         // Strategy: Group by externalId (Uber UUID), keep the one with highest total (Tip Update)
@@ -319,14 +326,16 @@ export class GmailImportService {
 
   /**
    * Delete all email-based receipts for a user
+   * @returns Number of receipts deleted
    */
-  private async deleteEmailReceipts(userId: string): Promise<void> {
+  private async deleteEmailReceipts(userId: string): Promise<number> {
     // This would be better as a method in ReceiptService, but for now we'll use direct query
     const postgres = (this.receiptService as any).postgres as PostgresService;
-    await postgres.query(
+    const result = await postgres.query(
       "DELETE FROM receipts WHERE user_id = $1 AND data_source = 'email'",
       [userId]
     );
+    return result.rowCount || 0;
   }
 
   /**

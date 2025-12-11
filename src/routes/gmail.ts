@@ -380,12 +380,10 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       throw new ValidationError('Gmail account not connected. Please connect your Gmail account first.');
     }
 
-    const replaceExisting = req.body.replaceExisting === true;
-
-    console.log(`📧 Starting Gmail import for user: ${user.email} (replaceExisting: ${replaceExisting})`);
+    console.log(`📧 Starting Gmail import for user: ${user.email} (will replace existing email receipts)`);
 
     const gmailImportService = new GmailImportService(container.postgres);
-    const result = await gmailImportService.importFromGmail(user, replaceExisting);
+    const result = await gmailImportService.importFromGmail(user);
 
     console.log(`✅ Gmail import completed for user: ${user.email}`);
     console.log(`   - Emails found: ${result.totalEmailsFound}`);
