@@ -161,6 +161,46 @@ class RedisConfigManager {
   }
 
   /**
+   * Set a value only if it doesn't exist (for distributed locking)
+   * Returns true if the lock was acquired, false if already locked
+   */
+  async setNX(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    if (!this.isAvailable()) {
+      // If Redis is not available, use in-memory fallback (see ImportLockService)
+      return false;
+    }
+
+    try {
+      // SET key value NX EX ttl - sets only if key doesn't exist, with expiry
+      const result = await this.client!.set(key, value, {
+        NX: true,
+        EX: ttlSeconds
+      });
+      return result === 'OK';
+    } catch (error) {
+      console.error(`Redis SETNX error for key ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a key exists
+   */
+  async exists(key: string): Promise<boolean> {
+    if (!this.isAvailable()) {
+      return false;
+    }
+
+    try {
+      const count = await this.client!.exists(key);
+      return count > 0;
+    } catch (error) {
+      console.error(`Redis EXISTS error for key ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Delete multiple keys by pattern
    */
   async delPattern(pattern: string): Promise<number> {

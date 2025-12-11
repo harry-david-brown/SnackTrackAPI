@@ -10,6 +10,7 @@ import { container } from '../services/core/ServiceContainer';
 import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { GmailImportService } from '../services/import/GmailImportService';
+import { ImportLockService } from '../services/import/ImportLockService';
 
 const router = Router();
 
@@ -307,45 +308,103 @@ router.get('/status', authenticateToken, asyncHandler(async (req: Request, res: 
  *       500:
  *         description: Internal server error
  */
-router.post('/import', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+/**
+ * @swagger
+ * /gmail/import/status:
+ *   get:
+ *     summary: Check if import is in progress
+ *     description: Returns whether a receipt import is currently running for the user
+ *     tags: [Gmail Integration]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Import status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 inProgress:
+ *                   type: boolean
+ *                   example: false
+ *       401:
+ *         description: Unauthorized - missing or invalid token
+ */
+router.get('/import/status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
 
   if (!userId) {
     throw new ValidationError('User ID not found in token');
   }
 
-  const userRepository = container.userRepository;
-  const user = await userRepository.findByIdWithGmailTokens(userId);
-
-  if (!user) {
-    throw new ValidationError('User not found');
-  }
-
-  if (!user.gmailConnected || !user.gmailRefreshToken) {
-    throw new ValidationError('Gmail account not connected. Please connect your Gmail account first.');
-  }
-
-  const replaceExisting = req.body.replaceExisting === true;
-
-  console.log(`📧 Starting Gmail import for user: ${user.email} (replaceExisting: ${replaceExisting})`);
-
-  const gmailImportService = new GmailImportService(container.postgres);
-  const result = await gmailImportService.importFromGmail(user, replaceExisting);
-
-  console.log(`✅ Gmail import completed for user: ${user.email}`);
-  console.log(`   - Emails found: ${result.totalEmailsFound}`);
-  console.log(`   - Receipts processed: ${result.totalReceiptsProcessed}`);
-  console.log(`   - Receipts imported: ${result.totalReceiptsImported}`);
-  console.log(`   - Total amount: $${result.totalAmount.toFixed(2)}`);
+  const inProgress = await ImportLockService.isLocked(userId);
 
   res.json({
-    success: result.success,
-    totalEmailsFound: result.totalEmailsFound,
-    totalReceiptsProcessed: result.totalReceiptsProcessed,
-    totalReceiptsImported: result.totalReceiptsImported,
-    totalAmount: result.totalAmount,
-    errors: result.errors
+    inProgress
   });
+}));
+
+router.post('/import', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  // Increase timeout to 10 minutes (600000ms) for large imports
+  req.setTimeout(600000);
+
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  // Try to acquire import lock - prevents duplicate imports for same user
+  const lockAcquired = await ImportLockService.acquireLock(userId);
+  if (!lockAcquired) {
+    // Import already in progress for this user
+    res.status(409).json({
+      success: false,
+      error: 'Import already in progress',
+      message: 'A receipt import is already running for your account. Please wait for it to complete.',
+      code: 'IMPORT_IN_PROGRESS'
+    });
+    return;
+  }
+
+  try {
+    const userRepository = container.userRepository;
+    const user = await userRepository.findByIdWithGmailTokens(userId);
+
+    if (!user) {
+      throw new ValidationError('User not found');
+    }
+
+    if (!user.gmailConnected || !user.gmailRefreshToken) {
+      throw new ValidationError('Gmail account not connected. Please connect your Gmail account first.');
+    }
+
+    const replaceExisting = req.body.replaceExisting === true;
+
+    console.log(`📧 Starting Gmail import for user: ${user.email} (replaceExisting: ${replaceExisting})`);
+
+    const gmailImportService = new GmailImportService(container.postgres);
+    const result = await gmailImportService.importFromGmail(user, replaceExisting);
+
+    console.log(`✅ Gmail import completed for user: ${user.email}`);
+    console.log(`   - Emails found: ${result.totalEmailsFound}`);
+    console.log(`   - Receipts processed: ${result.totalReceiptsProcessed}`);
+    console.log(`   - Receipts imported: ${result.totalReceiptsImported}`);
+    console.log(`   - Total amount: $${result.totalAmount.toFixed(2)}`);
+
+    res.json({
+      success: result.success,
+      totalEmailsFound: result.totalEmailsFound,
+      totalReceiptsProcessed: result.totalReceiptsProcessed,
+      totalReceiptsImported: result.totalReceiptsImported,
+      totalAmount: result.totalAmount,
+      errors: result.errors
+    });
+  } finally {
+    // Always release the lock when done (success or failure)
+    await ImportLockService.releaseLock(userId);
+  }
 }));
 
 export default router;

@@ -373,6 +373,21 @@ export class PostgresService {
       }
     }
 
+    // 3.6 Add unique constraint for user_id + external_id deduplication
+    // This enables database-level duplicate prevention for receipts with external IDs
+    try {
+      await this.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_user_external_id_unique
+        ON receipts(user_id, external_id) 
+        WHERE external_id IS NOT NULL
+      `);
+      console.log('✅ Unique constraint on user_id + external_id added (or already exists)');
+    } catch (error: any) {
+      if (error.code !== '42P07') { // 42P07 = duplicate_object (index already exists)
+        console.warn('⚠️  Unique constraint creation warning:', error.message);
+      }
+    }
+
     try {
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_receipts_year 

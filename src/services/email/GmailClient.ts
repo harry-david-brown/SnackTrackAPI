@@ -6,6 +6,7 @@ import { config } from '../../config/AppConfig';
 import { ReceiptExtractor, RawEmail } from '../extraction';
 import * as fs from 'fs';
 import * as path from 'path';
+import pLimit from 'p-limit';
 
 // Utility for base64 decoding (Gmail uses URL-safe base64)
 function decodeBase64Gmail(str: string): string {
@@ -97,16 +98,16 @@ export class GmailClient implements EmailClient {
         console.log(config.getEnvironmentInfo());
       }
 
-      // Helper function to process a batch of messages
-      const processMessages = async (messages: Array<{ id?: string | null }> | undefined) => {
-        if (!messages) return;
+      // Concurrency limiter for parallel Gmail API calls
+      // Limit to 10 concurrent requests to avoid rate limiting
+      const limit = pLimit(10);
 
-        for (const msg of messages) {
-          console.log('📨 Gmail API: Processing email ID:', msg.id);
-          // Fetch the full message
+      // Helper function to process a single message
+      const fetchSingleMessage = async (msgId: string): Promise<Email | null> => {
+        try {
           const msgRes = await gmail.users.messages.get({
             userId: 'me',
-            id: msg.id!,
+            id: msgId,
           });
           const payload = msgRes.data.payload;
           let from = '', to = '', subject = '', body = '';
@@ -117,11 +118,36 @@ export class GmailClient implements EmailClient {
               if (header.name === 'Subject') subject = header.value || '';
             }
           }
-          console.log('📧 Email from:', from, 'to:', to);
           // Get the body (handle multipart)
           body = this.extractBody(payload);
-          emailList.push(new Email(user.id, from, to, body, subject));
+          return new Email(user.id, from, to, body, subject);
+        } catch (error) {
+          console.error(`❌ Failed to fetch message ${msgId}:`, error);
+          return null;
         }
+      };
+
+      // Helper function to process a batch of messages in parallel
+      const processMessages = async (messages: Array<{ id?: string | null }> | undefined) => {
+        if (!messages || messages.length === 0) return;
+
+        console.log(`📨 Gmail API: Fetching ${messages.length} messages in parallel (concurrency: 10)...`);
+        const startTime = Date.now();
+
+        // Create limited promises for all messages
+        const promises = messages
+          .filter(msg => msg.id)
+          .map(msg => limit(() => fetchSingleMessage(msg.id!)));
+
+        // Wait for all to complete
+        const results = await Promise.all(promises);
+
+        // Filter out failed fetches and add to email list
+        const successfulEmails = results.filter((email): email is Email => email !== null);
+        emailList.push(...successfulEmails);
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.log(`✅ Gmail API: Fetched ${successfulEmails.length}/${messages.length} messages in ${duration}s`);
       };
 
       // Fetch emails with pagination
@@ -142,9 +168,9 @@ export class GmailClient implements EmailClient {
         const messagesInPage = listRes.data.messages?.length || 0;
         totalMessagesFound += messagesInPage;
 
-        console.log(`📧 Gmail API: Page ${pageCount} - Found ${messagesInPage} Uber emails (Total so far: ${totalMessagesFound})`);
+        console.log(`📧 Gmail API: Page ${pageCount} - Found ${messagesInPage} emails (Total so far: ${totalMessagesFound})`);
 
-        // Process messages from this page
+        // Process messages from this page in parallel
         await processMessages(listRes.data.messages);
 
         // Check if there are more pages
