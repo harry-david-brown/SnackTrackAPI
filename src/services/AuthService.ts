@@ -132,14 +132,21 @@ export class AuthService {
   async loginWithApple(identityToken: string, userData?: AppleUserData): Promise<AuthResponse> {
     try {
       // Verify the identity token with Apple
-      const appleClientId = process.env.APPLE_CLIENT_ID;
-      if (!appleClientId) {
+      // Support multiple client IDs: production (com.snacktrack.mobile) and Expo Go (host.exp.Exponent)
+      const appleClientIds = process.env.APPLE_CLIENT_IDS
+        ? process.env.APPLE_CLIENT_IDS.split(',').map(id => id.trim()).filter(Boolean)
+        : process.env.APPLE_CLIENT_ID
+          ? [process.env.APPLE_CLIENT_ID]
+          : ['com.snacktrack.mobile', 'host.exp.Exponent']; // Default fallback
+
+      if (appleClientIds.length === 0) {
         throw new AuthenticationError('Apple Sign In not configured');
       }
 
       // Verify token and get claims
+      // Accept both production and Expo Go audiences
       const appleData = await appleSignin.verifyIdToken(identityToken, {
-        audience: appleClientId,
+        audience: appleClientIds,
         ignoreExpiration: false,
       });
 
