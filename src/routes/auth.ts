@@ -194,6 +194,73 @@ router.post('/google', asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * @swagger
+ * /auth/apple:
+ *   post:
+ *     summary: Login with Apple
+ *     description: Authenticate user with Apple ID token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - identityToken
+ *             properties:
+ *               identityToken:
+ *                 type: string
+ *                 description: Apple identity token
+ *               user:
+ *                 type: object
+ *                 description: User data (only provided on first sign-in)
+ *                 properties:
+ *                   email:
+ *                     type: string
+ *                   name:
+ *                     type: object
+ *                     properties:
+ *                       firstName:
+ *                         type: string
+ *                       lastName:
+ *                         type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 userId:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 accessToken:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ *       401:
+ *         description: Invalid Apple token
+ */
+router.post('/apple', asyncHandler(async (req: Request, res: Response) => {
+  console.log('Received Apple Login request');
+  const { identityToken, user } = req.body;
+
+  if (!identityToken) {
+    throw new ValidationError('Identity token is required');
+  }
+
+  const authService = container.get<AuthService>('authService');
+  const result = await authService.loginWithApple(identityToken, user);
+
+  res.status(200).json(result);
+}));
+
+/**
+ * @swagger
  * /auth/refresh:
  *   post:
  *     summary: Refresh access token

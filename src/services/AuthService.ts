@@ -14,8 +14,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { OAuth2Client } from 'google-auth-library';
 import { OAuthRepository } from './data/OAuthRepository';
+import appleSignin from 'apple-signin-auth';
 
 // ... imports
+
+interface AppleUserData {
+  email?: string;
+  name?: {
+    firstName?: string;
+    lastName?: string;
+  };
+}
 
 export class AuthService {
   private googleClient: OAuth2Client;
@@ -114,6 +123,106 @@ export class AuthService {
     } catch (error) {
       console.error("Google Login Error:", error);
       throw new AuthenticationError('Google authentication failed');
+    }
+  }
+
+  /**
+   * Login with Apple ID Token
+   */
+  async loginWithApple(identityToken: string, userData?: AppleUserData): Promise<AuthResponse> {
+    try {
+      // Verify the identity token with Apple
+      const appleClientId = process.env.APPLE_CLIENT_ID;
+      if (!appleClientId) {
+        throw new AuthenticationError('Apple Sign In not configured');
+      }
+
+      // Verify token and get claims
+      const appleData = await appleSignin.verifyIdToken(identityToken, {
+        audience: appleClientId,
+        ignoreExpiration: false,
+      });
+
+      if (!appleData) {
+        throw new AuthenticationError('Invalid Apple token');
+      }
+
+      const appleUserId = appleData.sub; // Apple's unique user identifier
+      
+      // Apple only provides email on first sign-in or if available in token
+      let email = appleData.email || userData?.email;
+
+      // 1. Check if OAuth account exists
+      let oauthAccount = await this.oauthRepository.findByProvider('apple', appleUserId);
+      let user: User | undefined;
+
+      if (oauthAccount) {
+        // Existing user - retrieve their account
+        user = await this.userRepository.findById(oauthAccount.userId);
+        
+        // Use cached email from oauth_account if not provided in current token
+        if (!email && oauthAccount.email) {
+          email = oauthAccount.email;
+        }
+      } else {
+        // New Apple Sign In - need email
+        if (!email) {
+          throw new AuthenticationError('Email not provided by Apple. Please try again or use a different sign-in method.');
+        }
+
+        // 2. Check if user exists by email
+        user = await this.userRepository.findByEmail(email);
+
+        if (!user) {
+          // 3. Create new user
+          const userId = await this.userRepository.createUser(email, 'America/New_York'); // Default timezone
+          user = await this.userRepository.findById(userId);
+        }
+
+        if (!user) throw new Error("Failed to create or find user");
+
+        // 4. Create OAuth Link - cache email for future sign-ins
+        await this.oauthRepository.create({
+          userId: user.id,
+          provider: 'apple',
+          providerUserId: appleUserId,
+          email: email, // Important: cache email as Apple won't provide it next time
+          accessToken: undefined,
+          refreshToken: undefined,
+          tokenExpiry: undefined
+        });
+
+        // Apple verifies emails, so mark as verified
+        if (!user.emailVerified) {
+          await this.userRepository.updateEmailVerified(email, true);
+        }
+      }
+
+      if (!user) {
+        throw new AuthenticationError('User not found after successful Apple auth');
+      }
+
+      const tokens = await this.generateTokens(user);
+
+      return {
+        userId: user.id,
+        email: user.email,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          emailVerified: user.emailVerified || false,
+          createdAt: user.createdAt || new Date().toISOString()
+        }
+      };
+
+    } catch (error: any) {
+      console.error("Apple Login Error:", error);
+      if (error instanceof AuthenticationError) {
+        throw error;
+      }
+      throw new AuthenticationError('Apple authentication failed');
     }
   }
 
