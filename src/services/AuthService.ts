@@ -133,11 +133,20 @@ export class AuthService {
     try {
       // Verify the identity token with Apple
       // Support multiple client IDs: production (com.snacktrack.mobile) and Expo Go (host.exp.Exponent)
-      const appleClientIds = process.env.APPLE_CLIENT_IDS
-        ? process.env.APPLE_CLIENT_IDS.split(',').map(id => id.trim()).filter(Boolean)
-        : process.env.APPLE_CLIENT_ID
-          ? [process.env.APPLE_CLIENT_ID]
-          : ['com.snacktrack.mobile', 'host.exp.Exponent']; // Default fallback
+      let appleClientIds: string[] = [];
+      
+      if (process.env.APPLE_CLIENT_IDS) {
+        // Use explicit list if provided
+        appleClientIds = process.env.APPLE_CLIENT_IDS.split(',').map(id => id.trim()).filter(Boolean);
+      } else if (process.env.APPLE_CLIENT_ID) {
+        // If only APPLE_CLIENT_ID is set, ensure we include both production and Expo Go
+        appleClientIds = [process.env.APPLE_CLIENT_ID, 'host.exp.Exponent'];
+        // Remove duplicates in case APPLE_CLIENT_ID is already 'host.exp.Exponent'
+        appleClientIds = [...new Set(appleClientIds)];
+      } else {
+        // Default fallback: support both production and Expo Go
+        appleClientIds = ['com.snacktrack.mobile', 'host.exp.Exponent'];
+      }
 
       if (appleClientIds.length === 0) {
         throw new AuthenticationError('Apple Sign In not configured');
