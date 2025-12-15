@@ -411,7 +411,7 @@ export class ReceiptService {
       items = [];
     }
 
-    return new Receipt(
+    const receipt = new Receipt(
       row.user_id,
       items,
       parseFloat(row.amount_spent || 0),
@@ -422,5 +422,10 @@ export class ReceiptService {
       row.delivery_time ? new Date(row.delivery_time) : undefined,
       row.external_id || undefined
     );
+    
+    // Set the id property so toApiResponse() can access it
+    (receipt as any).id = row.id;
+    
+    return receipt;
   }
 }
