@@ -9,6 +9,7 @@ import { authenticateToken, validateOwnership } from '../middleware/auth';
 import { ZipExtractor } from '../services/import/ZipExtractor';
 import { ValidationError } from '../middleware/errorHandler';
 import { cacheService } from '../services/core/CacheService';
+import { concurrencyLimiter } from '../middleware/concurrencyLimiter';
 
 const router = Router();
 const csvImportService = container.csvImportService;
@@ -131,6 +132,7 @@ const upload = multer({
 router.post('/import',
   authenticateToken,
   csvImportRateLimit,
+  concurrencyLimiter,
   upload.single('csvFile'),
   validateOwnership,
   async (req: Request, res: Response) => {

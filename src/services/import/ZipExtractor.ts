@@ -29,7 +29,7 @@ export type Platform = 'uber' | 'doordash' | 'unknown';
 
 export class ZipExtractor {
   // Configurable limits
-  private static MAX_UNCOMPRESSED_SIZE = 250 * 1024 * 1024; // 250MB limit for uncompressed data
+  private static MAX_UNCOMPRESSED_SIZE = 100 * 1024 * 1024; // 100MB limit for uncompressed data
   private static MAX_FILE_COUNT = 1000; // Limit number of files in zip to scan
   private static MAX_COMPRESSION_RATIO = 100; // Maximum allowed compression ratio (uncompressed/compressed)
 
