@@ -346,12 +346,15 @@ router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
   // In production, you might want to maintain a blacklist of invalidated tokens
   // For now, client should simply discard the tokens
 
-  // TODO: Implement token blacklist/revocation in Phase 2
-  // For now, just return success
+  // Implement token blacklist/revocation
+  if (refreshToken) {
+    const authService = container.get<AuthService>('authService');
+    await authService.revokeRefreshToken(refreshToken);
+  }
 
   res.status(200).json({
     success: true,
-    message: 'Logged out successfully. Please discard your tokens.'
+    message: 'Logged out successfully.'
   });
 }));
 

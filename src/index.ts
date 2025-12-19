@@ -28,13 +28,13 @@ const getLogLevel = (): string => {
   }
   return config.isProduction() ? 'info' : 'debug';
 };
-import { 
-  securityHeaders, 
-  corsConfig, 
-  requestSizeLimit, 
+import {
+  securityHeaders,
+  corsConfig,
+  requestSizeLimit,
   securityLogger,
   apiRateLimit,
-  progressiveSlowDown 
+  progressiveSlowDown
 } from './middleware/security';
 import { requestLogger } from './middleware/requestLogger';
 
@@ -107,7 +107,7 @@ app.get('/', (req: Request, res: Response) => {
 // For comprehensive metrics, use /monitoring/health
 app.get('/health', async (req: Request, res: Response) => {
   const startTime = Date.now();
-  
+
   try {
     await postgresService.query('SELECT 1');
     const dbLatency = Date.now() - startTime;
@@ -145,15 +145,18 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 });
 
+import { encode } from 'html-entities';
+
 // OAuth callback handler
 app.get('/auth/callback', (req: Request, res: Response) => {
   const code = req.query.code;
-  if (code) {
+  if (code && typeof code === 'string') {
+    const sanitizedCode = encode(code);
     res.send(`
       <html>
         <body>
           <h2>✅ Authorization Successful!</h2>
-          <p>Authorization code: <code>${code}</code></p>
+          <p>Authorization code: <code>${sanitizedCode}</code></p>
           <p>Copy this code and paste it into your terminal where the script is waiting.</p>
         </body>
       </html>
@@ -189,10 +192,10 @@ async function startServer() {
   try {
     // Initialize database tables
     await postgresService.initializeTables();
-    
+
     // Initialize Redis cache (optional, won't fail if unavailable)
     await redisConfig.initialize();
-    
+
     // Start the server
     const server = app.listen(PORT, () => {
       logger.info('Server started', {
@@ -208,18 +211,18 @@ async function startServer() {
     // Graceful shutdown handling
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received, starting graceful shutdown...`);
-      
+
       server.close(async () => {
         logger.info('HTTP server closed');
-        
+
         // Close database connections
         await postgresService.close();
         logger.info('Database connections closed');
-        
+
         // Close Redis connection
         await redisConfig.close();
         logger.info('Redis connection closed');
-        
+
         logger.info('Graceful shutdown complete');
         process.exit(0);
       });
@@ -233,7 +236,7 @@ async function startServer() {
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-    
+
   } catch (error) {
     logger.error('Failed to start server', {
       error: error instanceof Error ? error.message : String(error),

@@ -16,6 +16,7 @@
     "@sendgrid/mail": "^8.1.6",
     "@sentry/node": "^10.19.0",
     "@types/multer": "^2.0.0",
+    "@types/yauzl": "^2.10.3",
     "adm-zip": "^0.5.16",
     "apple-signin-auth": "^2.0.0",
     "bcryptjs": "^3.0.2",
@@ -38,7 +39,8 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.0",
-    "winston": "^3.10.0"
+    "winston": "^3.10.0",
+    "yauzl": "^3.2.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
