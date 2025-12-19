@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
 import { OAuthRepository } from './data/OAuthRepository';
 import appleSignin from 'apple-signin-auth';
+import { redisConfig } from '../config/redis';
 
 // ... imports
 
@@ -134,7 +135,7 @@ export class AuthService {
       // Verify the identity token with Apple
       // Support multiple client IDs: production (com.snacktrack.mobile) and Expo Go (host.exp.Exponent)
       let appleClientIds: string[] = [];
-      
+
       if (process.env.APPLE_CLIENT_IDS) {
         // Use explicit list if provided
         appleClientIds = process.env.APPLE_CLIENT_IDS.split(',').map(id => id.trim()).filter(Boolean);
@@ -164,7 +165,7 @@ export class AuthService {
       }
 
       const appleUserId = appleData.sub; // Apple's unique user identifier
-      
+
       // Apple only provides email on first sign-in or if available in token
       let email = appleData.email || userData?.email;
 
@@ -175,7 +176,7 @@ export class AuthService {
       if (oauthAccount) {
         // Existing user - retrieve their account
         user = await this.userRepository.findById(oauthAccount.userId);
-        
+
         // Use cached email from oauth_account if not provided in current token
         if (!email && oauthAccount.email) {
           email = oauthAccount.email;
@@ -255,22 +256,24 @@ export class AuthService {
       type: 'access'
     };
 
-    const refreshPayload: TokenPayload = {
-      userId: user.id,
-      email: user.email,
-      type: 'refresh'
-    };
-
     const accessToken = jwt.sign(
       accessPayload,
       authConfig.getJWTSecret(),
       { expiresIn: '15m' } // 15 minutes for access token
     );
 
+    const refreshJti = uuidv4();
+    const refreshPayload: TokenPayload = {
+      userId: user.id,
+      email: user.email,
+      type: 'refresh',
+      jti: refreshJti
+    };
+
     const refreshToken = jwt.sign(
       refreshPayload,
       authConfig.getRefreshSecret(),
-      { expiresIn: '7d' } // 7 days for refresh token
+      { expiresIn: '7d' }
     );
 
     return { accessToken, refreshToken };
@@ -319,6 +322,47 @@ export class AuthService {
         throw new AuthenticationError('Invalid refresh token');
       }
       throw new AuthenticationError('Token verification failed');
+    }
+  }
+
+  /**
+   * Verified refresh token and check blacklist
+   */
+  async verifyRefreshTokenWithBlacklist(token: string): Promise<TokenPayload> {
+    const decoded = this.verifyRefreshToken(token);
+
+    // Check blacklist if Redis is enabled
+    if (decoded.jti && redisConfig.isAvailable()) {
+      const isBlacklisted = await redisConfig.exists(`blacklist:refresh:${decoded.jti}`);
+      if (isBlacklisted) {
+        throw new AuthenticationError('Refresh token has been revoked');
+      }
+    }
+
+    return decoded;
+  }
+
+  /**
+   * Revoke a refresh token by adding its JTI to the blacklist
+   */
+  async revokeRefreshToken(token: string): Promise<void> {
+    try {
+      // Decode without verifying signature first to get payload (we want to revoke even if expired/invalid signature technically)
+      // BUT for security, we should probably verify it's signed by us before blacklisting random strings.
+      // However, if we can't verify it, we can't trust the JTI either.
+      // So let's use verifyRefreshToken.
+      const decoded = this.verifyRefreshToken(token);
+
+      if (decoded.jti && decoded.exp && redisConfig.isAvailable()) {
+        const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+        if (ttl > 0) {
+          await redisConfig.set(`blacklist:refresh:${decoded.jti}`, 'revoked', ttl);
+          console.log(`🚫 Revoked refresh token for user ${decoded.userId} (JTI: ${decoded.jti})`);
+        }
+      }
+    } catch (error) {
+      // Ignore errors during revocation (e.g. token already expired)
+      console.warn('Error revoking token (might be already expired):', error);
     }
   }
 
@@ -431,8 +475,8 @@ export class AuthService {
    * Refresh access token using a valid refresh token
    */
   async refreshAccessToken(refreshToken: string): Promise<AuthTokens> {
-    // Verify refresh token
-    const decoded = this.verifyRefreshToken(refreshToken);
+    // Verify refresh token and check blacklist
+    const decoded = await this.verifyRefreshTokenWithBlacklist(refreshToken);
 
     // Find user
     const user = await this.userRepository.findById(decoded.userId);

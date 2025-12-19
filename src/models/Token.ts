@@ -8,6 +8,7 @@ export interface TokenPayload {
   type: 'access' | 'refresh';
   iat?: number; // issued at
   exp?: number; // expiration
+  jti?: string; // JWT ID for revocation
 }
 
 export interface AuthTokens {
