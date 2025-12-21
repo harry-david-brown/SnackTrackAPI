@@ -12,6 +12,7 @@ import { OtpService } from '../OtpService';
 import { EmailSenderService } from '../email/EmailSender';
 import { AlertingService } from '../monitoring/AlertingService';
 import { OAuthRepository } from '../data/OAuthRepository';
+import { CacheService } from './CacheService';
 
 /**
  * Simple service container for dependency injection
@@ -44,10 +45,15 @@ export class ServiceContainer {
     this.services.set('oauthRepository', new OAuthRepository(this.get('postgres')));
     this.services.set('receiptRepository', new ReceiptRepository(this.get('postgres')));
 
+    // Cache service
+    this.services.set('cacheService', new CacheService());
+
     // Authentication service
     this.services.set('authService', new AuthService(
       this.get('userRepository'),
-      this.get('oauthRepository')
+      this.get('oauthRepository'),
+      this.get('receiptRepository'),
+      this.get('cacheService')
     ));
 
     // Business services

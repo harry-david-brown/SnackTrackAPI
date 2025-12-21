@@ -230,4 +230,16 @@ export class UserRepository {
     return result.rows[0].gmail_connected || false;
   }
 
+  /**
+   * Delete a user by ID
+   * Note: This should only be called after deleting all related data (receipts, OAuth accounts, etc.)
+   */
+  async deleteUser(userId: string): Promise<boolean> {
+    const result = await this.postgres.query(
+      'DELETE FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rowCount > 0;
+  }
+
 }

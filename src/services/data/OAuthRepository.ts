@@ -63,6 +63,13 @@ export class OAuthRepository {
         );
     }
 
+    async deleteByUserId(userId: string): Promise<void> {
+        await this.postgres.query(
+            'DELETE FROM oauth_accounts WHERE user_id = $1',
+            [userId]
+        );
+    }
+
     private mapRowToModel(row: any): OAuthAccount {
         return {
             id: row.id,

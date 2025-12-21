@@ -9,6 +9,7 @@ import { container } from '../services/core/ServiceContainer';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { userCreationRateLimit } from '../middleware/security';
 import { validateEmail } from '../middleware/validation';
+import { authenticateToken } from '../middleware/auth';
 import { AuthService } from '../services/AuthService';
 import { LoginRequest, RegisterRequest, RefreshTokenRequest } from '../models/Token';
 import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
@@ -355,6 +356,61 @@ router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: 'Logged out successfully.'
+  });
+}));
+
+/**
+ * @swagger
+ * /auth/delete-account:
+ *   delete:
+ *     summary: Delete user account
+ *     description: Permanently delete the authenticated user's account and all associated data (receipts, OAuth accounts, etc.)
+ *     tags: [Authentication]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 description: Optional refresh token to revoke before deletion
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Account deleted successfully
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *       404:
+ *         description: User not found
+ */
+router.delete('/delete-account', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { refreshToken } = req.body;
+
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  const authService = container.get<AuthService>('authService');
+  await authService.deleteAccount(userId, refreshToken);
+
+  res.status(200).json({
+    success: true,
+    message: 'Account deleted successfully'
   });
 }));
 

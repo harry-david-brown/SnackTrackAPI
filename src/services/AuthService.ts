@@ -14,6 +14,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { OAuth2Client } from 'google-auth-library';
 import { OAuthRepository } from './data/OAuthRepository';
+import { ReceiptRepository } from './data/ReceiptRepository';
+import { CacheService } from './core/CacheService';
 import appleSignin from 'apple-signin-auth';
 import { redisConfig } from '../config/redis';
 
@@ -32,7 +34,9 @@ export class AuthService {
 
   constructor(
     private userRepository: UserRepository,
-    private oauthRepository: OAuthRepository
+    private oauthRepository: OAuthRepository,
+    private receiptRepository?: ReceiptRepository,
+    private cacheService?: CacheService
   ) {
     // We can use any client ID here as we'll verify the listener
     // Ideally these should be in config
@@ -493,6 +497,56 @@ export class AuthService {
    */
   async validateUser(userId: string): Promise<User | undefined> {
     return this.userRepository.findById(userId);
+  }
+
+  /**
+   * Delete a user account and all associated data
+   * This permanently deletes:
+   * - All receipts
+   * - All OAuth accounts
+   * - User record
+   * - Invalidates cache
+   * - Optionally revokes refresh token
+   */
+  async deleteAccount(userId: string, refreshToken?: string): Promise<void> {
+    // Verify user exists
+    const user = await this.userRepository.findById(userId);
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    // Revoke refresh token if provided (add to blacklist)
+    if (refreshToken) {
+      try {
+        await this.revokeRefreshToken(refreshToken);
+      } catch (error) {
+        // Log but don't fail if token revocation fails
+        console.warn(`⚠️  Failed to revoke refresh token during account deletion: ${error}`);
+      }
+    }
+
+    // Delete all receipts for this user
+    if (this.receiptRepository) {
+      await this.receiptRepository.deleteByUserId(userId);
+      console.log(`🗑️  Deleted all receipts for user: ${userId}`);
+    }
+
+    // Delete all OAuth accounts for this user
+    await this.oauthRepository.deleteByUserId(userId);
+    console.log(`🗑️  Deleted all OAuth accounts for user: ${userId}`);
+
+    // Invalidate all caches for this user
+    if (this.cacheService) {
+      await this.cacheService.invalidateAllUserCaches(userId);
+    }
+
+    // Finally, delete the user record
+    const deleted = await this.userRepository.deleteUser(userId);
+    if (!deleted) {
+      throw new Error('Failed to delete user record');
+    }
+
+    console.log(`✅ Account deleted successfully for user: ${userId}`);
   }
 }
 
