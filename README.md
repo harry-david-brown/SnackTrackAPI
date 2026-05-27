@@ -231,25 +231,25 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
   - Form data: `csvFile` (file), `userId` (string)
 
 #### Gmail Integration (NEW! 🎉)
-**Mobile OAuth Flow:**
-- `GET /gmail/auth-url` - Get OAuth URL for mobile apps
+**Connection Flow:**
+- `POST /gmail/exchange-token` - Store a Google-issued Gmail token after frontend OAuth
   - **Requires:** `Authorization: Bearer {token}`
-  - Returns: `{"authUrl": string, "state": string}`
-- `POST /gmail/exchange-token` - Exchange authorization code for tokens
-  - **Requires:** `Authorization: Bearer {token}`
-  - Body: `{"code": string}` - Authorization code from Google
+  - Body: `{"accessToken": string, "refreshToken"?: string}`
 
 **Import & Management:**
 - `GET /gmail/status` - Check Gmail connection status
   - **Requires:** `Authorization: Bearer {token}`
-  - Returns: `{"connected": boolean, "email": string}`
+  - Returns connection mode and import readiness state
+- `GET /gmail/import/status` - Check whether an import is already in progress
+  - **Requires:** `Authorization: Bearer {token}`
 - `POST /gmail/import` - Import Uber Eats receipts from Gmail
   - **Requires:** `Authorization: Bearer {token}`
-  - Body: `{"replaceExisting": boolean}` (optional)
 - `POST /gmail/disconnect` - Disconnect Gmail account
   - **Requires:** `Authorization: Bearer {token}`
 
-📱 **Designed for React Native - See [MOBILE_INTEGRATION_GUIDE.md](./MOBILE_INTEGRATION_GUIDE.md)**
+Setup docs:
+- [GMAIL_INTEGRATION.md](./GMAIL_INTEGRATION.md)
+- [docs/GMAIL_OAUTH_SETUP.md](./docs/GMAIL_OAUTH_SETUP.md)
 
 ### Users
 - `GET /users/:id/totalSpent` - Get total spending for user

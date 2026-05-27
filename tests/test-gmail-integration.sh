@@ -94,14 +94,10 @@ else
     echo "$RESPONSE_BODY"
 fi
 
-# Test 4: Get connection URL
-print_header "Test 4: Gmail Connect URL"
-print_info "To connect Gmail, open this URL in a browser (while logged in):"
-echo -e "\n   ${GREEN}$BASE_URL/gmail/connect${NC}"
-echo -e "\n   Or use curl to get the redirect URL:"
-echo -e "   curl -i -H \"Authorization: Bearer $ACCESS_TOKEN\" \"$BASE_URL/gmail/connect\"\n"
-
-print_info "Since this is a test environment, we'll simulate a connection..."
+# Test 4: Connection guidance
+print_header "Test 4: Gmail Connection Guidance"
+print_info "Gmail connection now starts in the frontend app, not through /gmail/connect."
+print_info "Complete the Gmail OAuth flow in SnackTrack first, then re-run this script."
 
 # Test 5: Simulate Gmail import with mock data (if mock mode is enabled)
 print_header "Test 5: Test Import with Mock Data"
@@ -186,13 +182,11 @@ echo "  ✅ POST /gmail/disconnect"
 echo "  ✅ Authentication requirements"
 echo ""
 echo "Manual test required:"
-echo "  ⚠️  GET  /gmail/connect (requires browser interaction)"
-echo "  ⚠️  GET  /gmail/callback (automatic redirect)"
+echo "  ⚠️  Complete Gmail OAuth flow from the frontend app"
 echo ""
 print_info "For full integration testing with real Gmail:"
 echo "  1. Configure GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env"
-echo "  2. Visit $BASE_URL/gmail/connect (while logged in)"
-echo "  3. Authorize the application"
+echo "  2. Connect Gmail from the SnackTrack frontend"
+echo "  3. Re-run this script"
 echo "  4. Run: POST /gmail/import"
 echo ""
-

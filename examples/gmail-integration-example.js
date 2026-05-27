@@ -70,16 +70,19 @@ async function main() {
     const status = await statusResponse.json();
     console.log('   Gmail Connected:', status.connected);
     console.log('   Email:', status.email);
+    console.log('   Can Import:', status.canImport);
+    console.log('   Needs Reconnect:', status.needsReconnect);
 
     if (!status.connected) {
-      console.log('\n⚠️  Gmail not connected. To connect:');
-      console.log(`   1. Open: ${BASE_URL}/gmail/connect (in a browser while logged in)`);
-      console.log('   2. Authorize SnackTrack in Google OAuth screen');
-      console.log('   3. Wait for success page');
-      console.log('   4. Re-run this script\n');
-      
-      console.log('🔗 Connection URL: ${BASE_URL}/gmail/connect');
-      console.log('   (Make sure to add Authorization header with your token)\n');
+      console.log('\n⚠️  Gmail not connected.');
+      console.log('   Complete the Gmail OAuth flow from the SnackTrack frontend first,');
+      console.log('   then re-run this script.\n');
+      return;
+    }
+
+    if (!status.canImport) {
+      console.log('\n⚠️  Gmail is connected but not import-ready.');
+      console.log('   Status:', status.statusMessage || 'Reconnect Gmail from the frontend.');
       return;
     }
 
@@ -182,4 +185,3 @@ async function main() {
 
 // Run the demo
 main().catch(console.error);
-

@@ -15,6 +15,23 @@ function decodeBase64Gmail(str: string): string {
 }
 
 export class GmailClient implements EmailClient {
+  private hasUsableAccessToken(user: User): boolean {
+    if (!user.gmailAccessToken) {
+      return false;
+    }
+
+    if (!user.gmailTokenExpiry) {
+      return true;
+    }
+
+    const expiry = new Date(user.gmailTokenExpiry).getTime();
+    if (Number.isNaN(expiry)) {
+      return false;
+    }
+
+    return expiry > Date.now();
+  }
+
   async getEmails(user: User): Promise<Email[]> {
     // Use centralized config to determine data source
     // NEVER use mock data in production
@@ -36,11 +53,11 @@ export class GmailClient implements EmailClient {
       throw new Error(errorMsg);
     }
 
-    // Use user's refresh token if available, otherwise fall back to env var (for backward compatibility)
-    const REFRESH_TOKEN = user.gmailRefreshToken || process.env.GMAIL_REFRESH_TOKEN || 'your_refresh_token_here';
+    const hasRefreshToken = !!user.gmailRefreshToken;
+    const hasAccessToken = this.hasUsableAccessToken(user);
 
-    if (!REFRESH_TOKEN || REFRESH_TOKEN === 'your_refresh_token_here') {
-      const errorMsg = 'No Gmail refresh token available for user';
+    if (!hasRefreshToken && !hasAccessToken) {
+      const errorMsg = 'No usable Gmail credentials available for user';
       console.error(`❌ ${errorMsg}`);
 
       // In production, throw an error instead of falling back to mock data
@@ -53,37 +70,16 @@ export class GmailClient implements EmailClient {
       return this.getMockEmails(user);
     }
 
-    // Create OAuth2Client with the same credentials used to issue the token
-    // This must match the web client ID used in the mobile app's GoogleSignin.configure()
+    // Create OAuth2Client with the same credentials used to issue the token.
     const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 
-    // Try to determine if this is an access token or refresh token
-    // Access tokens typically start with "ya29." or are shorter
-    // Refresh tokens are longer and don't have a specific prefix
-    // However, the safest approach is to try refresh first, and if it fails, use as access token
-    const looksLikeAccessToken = REFRESH_TOKEN.startsWith('ya29.') ||
-      REFRESH_TOKEN.startsWith('1//') === false && REFRESH_TOKEN.length < 150;
-
-    if (looksLikeAccessToken) {
-      // This looks like an access token - use it directly (don't try to refresh)
-      console.log(`🔐 Using access token directly (expires in ~1 hour)`);
-      oAuth2Client.setCredentials({ access_token: REFRESH_TOKEN });
+    if (hasRefreshToken) {
+      console.log('🔐 Using refresh token for Gmail API access');
+      oAuth2Client.setCredentials({ refresh_token: user.gmailRefreshToken! });
+      await oAuth2Client.getAccessToken();
     } else {
-      // This looks like a refresh token - use it to get access tokens
-      console.log(`🔐 Using refresh token to get access tokens`);
-      try {
-        oAuth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
-        // Try to get an access token to verify it works
-        await oAuth2Client.getAccessToken();
-      } catch (error: any) {
-        // If refresh fails with "unauthorized_client", it might actually be an access token
-        if (error.message?.includes('unauthorized_client') || error.message?.includes('invalid_grant')) {
-          console.log(`⚠️ Refresh token failed, trying as access token instead`);
-          oAuth2Client.setCredentials({ access_token: REFRESH_TOKEN });
-        } else {
-          throw error;
-        }
-      }
+      console.log('🔐 Using stored access token for Gmail API access');
+      oAuth2Client.setCredentials({ access_token: user.gmailAccessToken! });
     }
 
     const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });

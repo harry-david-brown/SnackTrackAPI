@@ -11,8 +11,14 @@ import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { GmailImportService } from '../services/import/GmailImportService';
 import { ImportLockService } from '../services/import/ImportLockService';
+import { User } from '../models/User';
 
 const router = Router();
+const REQUIRED_GMAIL_SCOPES = new Set([
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://mail.google.com/',
+]);
 
 /**
  * Gmail OAuth Configuration
@@ -27,6 +33,83 @@ const getOAuth2Client = (): Auth.OAuth2Client => {
   }
 
   return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
+};
+
+const normalizeScopes = (scopes: string[] | string | undefined | null): string[] => {
+  if (!scopes) {
+    return [];
+  }
+
+  if (Array.isArray(scopes)) {
+    return scopes.filter(Boolean);
+  }
+
+  return scopes
+    .split(' ')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+};
+
+const hasRequiredGmailScope = (scopes: string[]): boolean => {
+  return scopes.some((scope) => REQUIRED_GMAIL_SCOPES.has(scope));
+};
+
+const getConnectionMode = (user: User): 'temporary' | 'offline' | 'none' => {
+  if (user.gmailConnectionMode === 'offline' || user.gmailConnectionMode === 'temporary') {
+    return user.gmailConnectionMode;
+  }
+  if (user.gmailRefreshToken) {
+    return 'offline';
+  }
+  if (user.gmailAccessToken) {
+    return 'temporary';
+  }
+  return 'none';
+};
+
+const getExpiryDate = (user: User): Date | null => {
+  if (!user.gmailTokenExpiry) {
+    return null;
+  }
+
+  const expiry = new Date(user.gmailTokenExpiry);
+  return Number.isNaN(expiry.getTime()) ? null : expiry;
+};
+
+const buildGmailStatus = (user: User) => {
+  const scopes = user.gmailScopes || [];
+  const connectionMode = getConnectionMode(user);
+  const expiryDate = getExpiryDate(user);
+  const hasRequiredScope = hasRequiredGmailScope(scopes);
+  const hasRefreshToken = !!user.gmailRefreshToken;
+  const hasAccessToken = !!user.gmailAccessToken;
+  const accessTokenUsable = hasAccessToken && (!expiryDate || expiryDate.getTime() > Date.now());
+  const canImport = hasRequiredScope && (hasRefreshToken || accessTokenUsable);
+  const connected = !!user.gmailConnected && connectionMode !== 'none';
+  const needsReconnect = connected && !canImport;
+
+  let statusMessage = 'Connect your Gmail account to import receipts.';
+  if (connected && connectionMode === 'offline') {
+    statusMessage = 'Gmail is connected with durable access. Imports can refresh automatically.';
+  } else if (connected && connectionMode === 'temporary' && canImport && expiryDate) {
+    statusMessage = `Gmail is connected with temporary access until ${expiryDate.toISOString()}.`;
+  } else if (connected && connectionMode === 'temporary') {
+    statusMessage = 'Gmail is connected with temporary access. Reconnect when the token expires.';
+  } else if (needsReconnect) {
+    statusMessage = 'Gmail needs to be reconnected before imports can run.';
+  }
+
+  return {
+    connected,
+    canImport,
+    needsReconnect,
+    email: user.gmailEmail || user.email,
+    connectionMode,
+    scopes,
+    hasRequiredScope,
+    expiresAt: expiryDate?.toISOString() || null,
+    statusMessage,
+  };
 };
 
 // Note: OAuth is now handled entirely by expo-auth-session on the frontend
@@ -94,18 +177,15 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       hasRefreshToken: !!refreshToken
     });
 
-    // Create OAuth2Client with proper credentials to verify the token
-    const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
-    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-
-    if (!CLIENT_ID || !CLIENT_SECRET) {
-      throw new Error('Gmail OAuth credentials not configured');
-    }
-
-    // Create OAuth2Client with credentials and verify the access token
-    // IMPORTANT: Use the same CLIENT_ID that was used in the mobile app (webClientId)
-    const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
+    const oAuth2Client = getOAuth2Client();
     oAuth2Client.setCredentials({ access_token: accessToken });
+
+    const tokenInfo = await oAuth2Client.getTokenInfo(accessToken);
+    const scopes = normalizeScopes(tokenInfo.scopes);
+
+    if (!hasRequiredGmailScope(scopes)) {
+      throw new ValidationError('Gmail access was granted without a supported Gmail read scope. Please reconnect and approve Gmail access.');
+    }
 
     // Verify the token by getting user info
     const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
@@ -119,34 +199,40 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
     console.log(`✅ Received Gmail OAuth token for user: ${userId} (${gmailEmail})`);
 
     const userRepository = container.userRepository;
-
-    // Use refresh token if provided, otherwise fall back to access token
-    // Refresh tokens are long-lived, access tokens expire in ~1 hour
-    const tokenToStore = refreshToken || accessToken;
-    const expiryDate = refreshToken
-      ? new Date(Date.now() + 365 * 24 * 3600 * 1000) // 1 year if refresh token
-      : new Date(Date.now() + 3600 * 1000); // 1 hour if only access token
+    const connectionMode: 'temporary' | 'offline' = refreshToken ? 'offline' : 'temporary';
+    const expiryDate = typeof (tokenInfo as any).expiry_date === 'number'
+      ? new Date((tokenInfo as any).expiry_date)
+      : new Date(Date.now() + 3600 * 1000);
 
     await userRepository.updateGmailTokens(
       userId,
-      tokenToStore, // Store refresh token if available, otherwise access token
-      accessToken,
-      expiryDate,
-      gmailEmail // Store the connected Gmail email address
+      {
+        refreshToken: refreshToken || null,
+        accessToken,
+        expiryDate,
+        gmailEmail,
+        scopes,
+        connectionMode,
+      }
     );
 
     if (refreshToken) {
       console.log(`✅ Stored refresh token for long-term access`);
     } else {
-      console.log(`⚠️  Stored access token (expires in 1 hour). Users will need to reconnect when it expires.`);
+      console.log(`⚠️  Stored access token only. Users will need to reconnect when it expires.`);
     }
 
     console.log(`✅ Stored Gmail tokens for user: ${userId}`);
 
     res.json({
       success: true,
-      message: 'Gmail connected successfully',
-      connected: true
+      message: connectionMode === 'offline'
+        ? 'Gmail connected successfully'
+        : 'Gmail connected with temporary access',
+      connected: true,
+      connectionMode,
+      expiresAt: expiryDate.toISOString(),
+      scopes,
     });
   } catch (error: any) {
     console.error('❌ Error in token exchange:', error);
@@ -156,6 +242,9 @@ router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Reque
       status: error.response?.status,
       data: error.response?.data
     });
+    if (error instanceof ValidationError) {
+      throw error;
+    }
     throw new ValidationError('Failed to connect Gmail. Please try again.');
   }
 }));
@@ -249,8 +338,7 @@ router.get('/status', authenticateToken, asyncHandler(async (req: Request, res: 
   }
 
   res.json({
-    connected: user.gmailConnected || false,
-    email: user.gmailEmail || user.email // Return connected Gmail email, fallback to user email
+    ...buildGmailStatus(user)
   });
 }));
 
@@ -376,8 +464,13 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       throw new ValidationError('User not found');
     }
 
-    if (!user.gmailConnected || !user.gmailRefreshToken) {
-      throw new ValidationError('Gmail account not connected. Please connect your Gmail account first.');
+    const gmailStatus = buildGmailStatus(user);
+    if (!gmailStatus.canImport) {
+      throw new ValidationError(
+        gmailStatus.needsReconnect
+          ? 'Gmail needs to be reconnected before imports can run.'
+          : 'Gmail account not connected. Please connect your Gmail account first.'
+      );
     }
 
     console.log(`📧 Starting Gmail import for user: ${user.email} (will replace existing email receipts)`);
@@ -406,4 +499,3 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
 }));
 
 export default router;
-

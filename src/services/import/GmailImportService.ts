@@ -53,9 +53,13 @@ export class GmailImportService {
     const criticalErrors: string[] = []; // Errors that should mark import as failed
 
     try {
-      // Validate user has Gmail connected
-      if (!user.gmailRefreshToken) {
-        throw new Error('User does not have Gmail connected');
+      const hasRefreshToken = !!user.gmailRefreshToken;
+      const hasAccessToken = !!user.gmailAccessToken;
+      const tokenExpiry = user.gmailTokenExpiry ? new Date(user.gmailTokenExpiry).getTime() : null;
+      const accessTokenUsable = hasAccessToken && (!tokenExpiry || (!Number.isNaN(tokenExpiry) && tokenExpiry > Date.now()));
+
+      if (!hasRefreshToken && !accessTokenUsable) {
+        throw new Error('User does not have a usable Gmail connection');
       }
 
       // Fetch emails from Gmail (already parallelized in GmailClient)
@@ -424,4 +428,3 @@ export class GmailImportService {
     return receipt;
   }
 }
-

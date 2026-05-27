@@ -9,6 +9,13 @@ import { v4 as uuidv4 } from 'uuid';
 export class UserRepository {
   constructor(private postgres: PostgresService) {}
 
+  private normalizeGmailConnectionMode(mode?: string | null): User['gmailConnectionMode'] {
+    if (mode === 'temporary' || mode === 'offline') {
+      return mode;
+    }
+    return 'none';
+  }
+
   async createUser(email: string, timezone?: string): Promise<string> {
     // First check if user already exists
     const existingUser = await this.findByEmail(email);
@@ -159,7 +166,24 @@ export class UserRepository {
   /**
    * Update Gmail OAuth tokens for a user
    */
-  async updateGmailTokens(userId: string, refreshToken: string, accessToken: string, expiryDate: Date, gmailEmail?: string): Promise<void> {
+  async updateGmailTokens(
+    userId: string,
+    {
+      refreshToken,
+      accessToken,
+      expiryDate,
+      gmailEmail,
+      scopes,
+      connectionMode,
+    }: {
+      refreshToken?: string | null;
+      accessToken: string;
+      expiryDate: Date;
+      gmailEmail?: string;
+      scopes: string[];
+      connectionMode: 'temporary' | 'offline';
+    }
+  ): Promise<void> {
     await this.postgres.query(
       `UPDATE users SET 
         gmail_refresh_token = $1, 
@@ -167,9 +191,19 @@ export class UserRepository {
         gmail_token_expiry = $3,
         gmail_connected = TRUE,
         gmail_email = $4,
+        gmail_scopes = $5,
+        gmail_connection_mode = $6,
         updated_at = NOW() 
-      WHERE id = $5`,
-      [refreshToken, accessToken, expiryDate, gmailEmail || null, userId]
+      WHERE id = $7`,
+      [
+        refreshToken || null,
+        accessToken,
+        expiryDate,
+        gmailEmail || null,
+        scopes,
+        connectionMode,
+        userId
+      ]
     );
   }
 
@@ -179,7 +213,8 @@ export class UserRepository {
   async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
     const result = await this.postgres.query(
       `SELECT id, email, email_verified, gmail_refresh_token, gmail_access_token, 
-              gmail_token_expiry, gmail_connected, gmail_email, created_at 
+              gmail_token_expiry, gmail_connected, gmail_email, gmail_scopes,
+              gmail_connection_mode, created_at 
        FROM users WHERE id = $1`,
       [userId]
     );
@@ -196,6 +231,8 @@ export class UserRepository {
       gmailTokenExpiry: row.gmail_token_expiry,
       gmailConnected: row.gmail_connected || false,
       gmailEmail: row.gmail_email,
+      gmailScopes: row.gmail_scopes || [],
+      gmailConnectionMode: this.normalizeGmailConnectionMode(row.gmail_connection_mode),
       createdAt: row.created_at
     };
   }
@@ -211,6 +248,8 @@ export class UserRepository {
         gmail_token_expiry = NULL,
         gmail_connected = FALSE,
         gmail_email = NULL,
+        gmail_scopes = ARRAY[]::TEXT[],
+        gmail_connection_mode = 'none',
         updated_at = NOW() 
       WHERE id = $1`,
       [userId]
