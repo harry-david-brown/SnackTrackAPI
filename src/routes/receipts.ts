@@ -4,8 +4,9 @@ import { ReceiptType } from '../models/Receipt';
 import { PostgresService } from '../services/data/PostgresService';
 import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
 import { paginationMiddleware, parsePagination, createPaginatedResponse } from '../middleware/pagination';
-import { authenticateToken, validateOwnership } from '../middleware/auth';
-import { ValidationError } from '../middleware/errorHandler';
+import { authenticateToken } from '../middleware/auth';
+import { asyncHandler, ValidationError } from '../middleware/errorHandler';
+import { cacheService } from '../services/core/CacheService';
 
 const router = Router();
 const postgresService = container.postgres;
@@ -205,5 +206,69 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * @swagger
+ * /receipts:
+ *   delete:
+ *     summary: Delete all receipts for the authenticated user
+ *     description: Permanently delete all receipts belonging to the authenticated user. The userId query parameter must match the authenticated user.
+ *     tags: [Receipts]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: User ID (required, must match authenticated user)
+ *     responses:
+ *       200:
+ *         description: Receipts deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Deleted 42 receipts
+ *                 deletedCount:
+ *                   type: integer
+ *                   example: 42
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       500:
+ *         description: Internal server error
+ */
+router.delete('/', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const requestedUserId = req.query.userId as string | undefined;
+
+  if (!requestedUserId) {
+    throw new ValidationError('userId query parameter is required');
+  }
+
+  if (req.user?.userId !== requestedUserId) {
+    throw new ValidationError('You can only delete your own receipts');
+  }
+
+  const deletedCount = await receiptService.deleteReceiptsByUserId(requestedUserId);
+  await cacheService.invalidateAllUserCaches(requestedUserId);
+
+  res.json({
+    success: true,
+    message: deletedCount > 0
+      ? `Deleted ${deletedCount} receipt${deletedCount === 1 ? '' : 's'}`
+      : 'No receipts found to delete',
+    deletedCount,
+  });
+}));
 
 export default router;

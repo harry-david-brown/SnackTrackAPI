@@ -279,6 +279,16 @@ export class ReceiptService {
     return result.rowCount > 0;
   }
 
+  // DELETE - Delete all receipts for a user
+  async deleteReceiptsByUserId(userId: string): Promise<number> {
+    const result = await this.postgres.query(
+      'DELETE FROM receipts WHERE user_id = $1',
+      [userId]
+    );
+
+    return result.rowCount || 0;
+  }
+
   // ANALYTICS - Get spending analytics for a user
   async getReceiptAnalytics(userId: string, startDate?: Date, endDate?: Date): Promise<ReceiptAnalytics> {
     let dateFilter = '';
