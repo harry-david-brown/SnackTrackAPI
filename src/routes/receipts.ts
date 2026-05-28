@@ -5,7 +5,7 @@ import { PostgresService } from '../services/data/PostgresService';
 import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
 import { paginationMiddleware, parsePagination, createPaginatedResponse } from '../middleware/pagination';
 import { authenticateToken } from '../middleware/auth';
-import { asyncHandler, ValidationError } from '../middleware/errorHandler';
+import { asyncHandler, AuthenticationError, ValidationError } from '../middleware/errorHandler';
 import { cacheService } from '../services/core/CacheService';
 
 const router = Router();
@@ -212,18 +212,10 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
  * /receipts:
  *   delete:
  *     summary: Delete all receipts for the authenticated user
- *     description: Permanently delete all receipts belonging to the authenticated user. The userId query parameter must match the authenticated user.
+ *     description: Permanently delete all receipts belonging to the authenticated user.
  *     tags: [Receipts]
  *     security:
  *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: userId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: User ID (required, must match authenticated user)
  *     responses:
  *       200:
  *         description: Receipts deleted successfully
@@ -249,18 +241,14 @@ router.get('/', authenticateToken, async (req: Request, res: Response) => {
  *         description: Internal server error
  */
 router.delete('/', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const requestedUserId = req.query.userId as string | undefined;
+  const authenticatedUserId = req.user?.userId;
 
-  if (!requestedUserId) {
-    throw new ValidationError('userId query parameter is required');
+  if (!authenticatedUserId) {
+    throw new AuthenticationError('Authentication required');
   }
 
-  if (req.user?.userId !== requestedUserId) {
-    throw new ValidationError('You can only delete your own receipts');
-  }
-
-  const deletedCount = await receiptService.deleteReceiptsByUserId(requestedUserId);
-  await cacheService.invalidateAllUserCaches(requestedUserId);
+  const deletedCount = await receiptService.deleteReceiptsByUserId(authenticatedUserId);
+  await cacheService.invalidateAllUserCaches(authenticatedUserId);
 
   res.json({
     success: true,
