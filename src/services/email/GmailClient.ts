@@ -14,7 +14,34 @@ function decodeBase64Gmail(str: string): string {
   return decoded;
 }
 
+interface GmailOAuthConfig {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
 export class GmailClient implements EmailClient {
+  private getRequiredOAuthConfig(): GmailOAuthConfig {
+    const clientId = process.env.GMAIL_CLIENT_ID?.trim();
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
+    const redirectUri = process.env.GMAIL_REDIRECT_URI?.trim();
+
+    const missingVars: string[] = [];
+    if (!clientId) missingVars.push('GMAIL_CLIENT_ID');
+    if (!clientSecret) missingVars.push('GMAIL_CLIENT_SECRET');
+    if (!redirectUri) missingVars.push('GMAIL_REDIRECT_URI');
+
+    if (missingVars.length > 0) {
+      throw new Error(`Missing required Gmail OAuth environment variables: ${missingVars.join(', ')}`);
+    }
+
+    return {
+      clientId: clientId!,
+      clientSecret: clientSecret!,
+      redirectUri: redirectUri!,
+    };
+  }
+
   private hasUsableAccessToken(user: User): boolean {
     if (!user.gmailAccessToken) {
       return false;
@@ -33,25 +60,12 @@ export class GmailClient implements EmailClient {
   }
 
   async getEmails(user: User): Promise<Email[]> {
-    // Use centralized config to determine data source
-    // NEVER use mock data in production
     if (config.shouldUseMockData() && !config.isProduction()) {
-      console.log('🧪 Using mock Uber emails for testing (development mode).');
+      console.log('🧪 USE_MOCK_DATA enabled, loading emails from debug-emails folder.');
       return this.loadEmailsFromDebugFolder(user);
     }
 
-    // Use real Gmail API with user-specific tokens
-    // IMPORTANT: Use the same OAuth client credentials that were used to issue the refresh token
-    // For mobile OAuth, this is the web client ID (GMAIL_CLIENT_ID)
-    const CLIENT_ID = process.env.GMAIL_CLIENT_ID || 'your_client_id_here';
-    const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET || 'your_client_secret_here';
-    const REDIRECT_URI = process.env.GMAIL_REDIRECT_URI || 'http://localhost:3000/auth/gmail/callback';
-
-    if (!CLIENT_ID || CLIENT_ID === 'your_client_id_here' || !CLIENT_SECRET || CLIENT_SECRET === 'your_client_secret_here') {
-      const errorMsg = 'Gmail OAuth client credentials not configured';
-      console.error(`❌ ${errorMsg}`);
-      throw new Error(errorMsg);
-    }
+    const { clientId, clientSecret, redirectUri } = this.getRequiredOAuthConfig();
 
     const hasRefreshToken = !!user.gmailRefreshToken;
     const hasAccessToken = this.hasUsableAccessToken(user);
@@ -59,19 +73,10 @@ export class GmailClient implements EmailClient {
     if (!hasRefreshToken && !hasAccessToken) {
       const errorMsg = 'No usable Gmail credentials available for user';
       console.error(`❌ ${errorMsg}`);
-
-      // In production, throw an error instead of falling back to mock data
-      if (config.isProduction()) {
-        throw new Error(errorMsg);
-      }
-
-      // In development, fall back to mock data for testing
-      console.log('⚠️ Falling back to mock data (development mode)');
-      return this.getMockEmails(user);
+      throw new Error(errorMsg);
     }
 
-    // Create OAuth2Client with the same credentials used to issue the token.
-    const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 
     if (hasRefreshToken) {
       console.log('🔐 Using refresh token for Gmail API access');
@@ -266,17 +271,8 @@ export class GmailClient implements EmailClient {
       return emailList;
     } catch (error) {
       console.error('Gmail API error:', error);
-
-      // In production, throw the error instead of falling back to mock data
-      if (config.isProduction()) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown Gmail API error';
-        console.error(`❌ Gmail API error in production: ${errorMsg}`);
-        throw new Error(`Failed to fetch emails from Gmail: ${errorMsg}`);
-      }
-
-      // In development, fall back to mock data for testing
-      console.log('⚠️ Falling back to mock data (development mode)');
-      return this.getMockEmails(user);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown Gmail API error';
+      throw new Error(`Failed to fetch emails from Gmail: ${errorMsg}`);
     }
   }
 
@@ -284,8 +280,7 @@ export class GmailClient implements EmailClient {
     const debugDir = path.join(process.cwd(), 'debug-emails');
 
     if (!fs.existsSync(debugDir)) {
-      console.log(`⚠️ Debug-emails folder not found at ${debugDir}, falling back to generated mock emails`);
-      return this.getMockEmails(user);
+      throw new Error(`USE_MOCK_DATA is enabled but debug-emails folder was not found at ${debugDir}`);
     }
 
     try {
@@ -306,8 +301,7 @@ export class GmailClient implements EmailClient {
         });
 
       if (files.length === 0) {
-        console.log(`⚠️ No email JSON files found in debug-emails folder, falling back to generated mock emails`);
-        return this.getMockEmails(user);
+        throw new Error('USE_MOCK_DATA is enabled but no email JSON files were found in debug-emails');
       }
 
       // Load the most recent/preferred file
@@ -326,8 +320,7 @@ export class GmailClient implements EmailClient {
         console.log(`⚠️ File contains nested format, extracting emails array`);
         emailsJson = parsedContent.emails;
       } else {
-        console.log(`⚠️ JSON file does not contain a valid email array, falling back to generated mock emails`);
-        return this.getMockEmails(user);
+        throw new Error(`Debug email file ${selectedFile.name} does not contain a valid email array`);
       }
 
       // Convert JSON objects to Email objects
@@ -347,24 +340,8 @@ export class GmailClient implements EmailClient {
       return emails;
     } catch (error) {
       console.error('❌ Error loading emails from debug-emails folder:', error);
-      console.log('Falling back to generated mock emails');
-      return this.getMockEmails(user);
+      throw error;
     }
-  }
-
-  private getMockEmails(user: User): Email[] {
-    console.log(`📧 Generating mock Uber emails for user: ${user.email}`);
-    return [
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
-        'Your Tuesday evening order with Uber Eats\nTotal CA$30.87\nNovember 15, 2022\nThanks for ordering!\nHere\'s your receipt from Sushi Shop (South Keys) and Uber Eats.\nYou ordered from Sushi Shop (South Keys)\nDelivered to Ottawa, ON\nSubtotal: $25.00\nTax: $3.25\nTip: $2.50\nDelivery Fee: $0.12',
-        'Your Tuesday evening order with Uber Eats'),
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
-        'Your Friday lunch order with Uber Eats\nTotal CA$18.50\nNovember 18, 2022\nThanks for ordering!\nHere\'s your receipt from McDonald\'s and Uber Eats.\nYou ordered from McDonald\'s\nDelivered to Ottawa, ON\nSubtotal: $15.00\nTax: $1.95\nTip: $1.50\nDelivery Fee: $0.05',
-        'Your Friday lunch order with Uber Eats'),
-      new Email(user.id, 'Uber Receipts <noreply@uber.com>', user.email,
-        'Your Sunday brunch order with Uber Eats\nTotal CA$42.30\nNovember 20, 2022\nThanks for ordering!\nHere\'s your receipt from Tim Hortons and Uber Eats.\nYou ordered from Tim Hortons\nDelivered to Ottawa, ON\nSubtotal: $35.00\nTax: $4.55\nTip: $2.75\nDelivery Fee: $0.00',
-        'Your Sunday brunch order with Uber Eats')
-    ];
   }
 
   private extractBody(part: any): string {

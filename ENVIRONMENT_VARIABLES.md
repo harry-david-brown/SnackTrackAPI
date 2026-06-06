@@ -27,7 +27,7 @@ DB_PASSWORD=password
 ```bash
 # JWT Secrets (generate secure random strings in production)
 JWT_SECRET=your-jwt-secret-here
-REFRESH_SECRET=your-refresh-secret-here
+JWT_REFRESH_SECRET=your-refresh-secret-here
 ```
 
 ## Optional Variables
@@ -47,10 +47,16 @@ EMAIL_FROM=noreply@snacktrack.app
 ```bash
 GMAIL_CLIENT_ID=your-gmail-client-id.apps.googleusercontent.com
 GMAIL_CLIENT_SECRET=your-gmail-client-secret
-GMAIL_REDIRECT_URI=http://localhost:3000/auth/gmail/callback
+GMAIL_REDIRECT_URI=http://localhost:3000/gmail/callback
 ```
 
-**Setup Guide**: See `GMAIL_OAUTH_SETUP.md` for detailed configuration instructions.
+Important notes:
+
+- These are app-level OAuth client settings.
+- Gmail refresh tokens are **not** environment variables.
+- Gmail refresh/access tokens are issued per user during OAuth and stored on the user record in the database.
+
+**Setup Guide**: See `docs/GMAIL_OAUTH_SETUP.md` for detailed configuration instructions.
 
 ### Apple Sign In (Apple Authentication)
 ```bash
@@ -185,7 +191,7 @@ DATABASE_URL=postgresql://snacktrack:password@localhost:5432/snacktrack
 
 # Auth
 JWT_SECRET=abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
-REFRESH_SECRET=zyx987wvu654tsr321qpo098nml765kji432hgf210edc
+JWT_REFRESH_SECRET=zyx987wvu654tsr321qpo098nml765kji432hgf210edc
 
 # Gmail (optional)
 GMAIL_CLIENT_ID=123456789-abcdefg.apps.googleusercontent.com

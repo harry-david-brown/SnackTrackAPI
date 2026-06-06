@@ -33,8 +33,8 @@ class AuthConfigManager {
   private loadConfig(): AuthConfig {
     return {
       jwt: {
-        secret: process.env.JWT_SECRET || '',
-        refreshSecret: process.env.JWT_REFRESH_SECRET || '',
+        secret: process.env.JWT_SECRET?.trim() || '',
+        refreshSecret: process.env.JWT_REFRESH_SECRET?.trim() || '',
         accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
         refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY || '7d'
       },
@@ -53,32 +53,15 @@ class AuthConfigManager {
   private validateConfig(): void {
     const { jwt } = this.config;
 
-    // In production, JWT secrets are required
-    if (process.env.NODE_ENV === 'production') {
-      if (!jwt.secret || jwt.secret.length < 32) {
-        throw new Error(
-          'JWT_SECRET must be set and at least 32 characters long in production'
-        );
-      }
-      if (!jwt.refreshSecret || jwt.refreshSecret.length < 32) {
-        throw new Error(
-          'JWT_REFRESH_SECRET must be set and at least 32 characters long in production'
-        );
-      }
-    } else {
-      // In development, use default secrets with warning
-      if (!jwt.secret) {
-        console.warn(
-          '⚠️  WARNING: JWT_SECRET not set. Using insecure default for development.'
-        );
-        this.config.jwt.secret = 'dev-secret-change-this-in-production-min-32-chars';
-      }
-      if (!jwt.refreshSecret) {
-        console.warn(
-          '⚠️  WARNING: JWT_REFRESH_SECRET not set. Using insecure default for development.'
-        );
-        this.config.jwt.refreshSecret = 'dev-refresh-secret-change-this-in-production-min-32';
-      }
+    if (!jwt.secret || jwt.secret.length < 32) {
+      throw new Error(
+        'JWT_SECRET must be set and at least 32 characters long'
+      );
+    }
+    if (!jwt.refreshSecret || jwt.refreshSecret.length < 32) {
+      throw new Error(
+        'JWT_REFRESH_SECRET must be set and at least 32 characters long'
+      );
     }
   }
 
@@ -135,4 +118,3 @@ class AuthConfigManager {
 
 // Export singleton instance
 export const authConfig = new AuthConfigManager();
-

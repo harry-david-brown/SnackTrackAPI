@@ -14,20 +14,12 @@ export interface AppConfig {
   gmail: {
     useRealApi: boolean;
     useMockData: boolean;
-    includeForwardedReceipts: boolean;
-    forwardedReceiptEmail: string;
   };
 
   // Database Configuration
   database: {
     useSSL: boolean;
     connectionString: string;
-  };
-
-  // Email Filtering Configuration
-  emailFilter: {
-    allowForwardedReceipts: boolean;
-    forwardedReceiptSender: string;
   };
 
   // Server Configuration
@@ -55,27 +47,19 @@ class ConfigManager {
     const environment = (process.env.NODE_ENV as Environment) || 'development';
     const isDevelopment = environment === 'development';
     const isProduction = environment === 'production';
+    const useMockData = process.env.USE_MOCK_DATA === 'true';
 
     return {
       environment,
 
       gmail: {
-        // In development: use real API if credentials are configured, otherwise mock
-        // In production: always use real API
-        useRealApi: isProduction || this.hasGmailCredentials(),
-        useMockData: false, //isDevelopment && !this.hasGmailCredentials(),
-        includeForwardedReceipts: isDevelopment,
-        forwardedReceiptEmail: process.env.FORWARDED_EMAIL || ''
+        useRealApi: !useMockData,
+        useMockData,
       },
 
       database: {
         useSSL: isProduction, // Enable SSL in production (required by most cloud databases)
         connectionString: process.env.DATABASE_URL || 'postgresql://snacktrack:password@localhost:5432/snacktrack_dev'
-      },
-
-      emailFilter: {
-        allowForwardedReceipts: isDevelopment,
-        forwardedReceiptSender: process.env.FORWARDED_EMAIL || ''
       },
 
       server: {
@@ -86,19 +70,9 @@ class ConfigManager {
       debug: {
         enableDetailedLogging: isDevelopment,
         showEmailContent: isDevelopment,
-        saveDebugEmails: isDevelopment && (process.env.SAVE_DEBUG_EMAILS === 'true' || true) // Default to true in dev for now, or make configurable
+        saveDebugEmails: isDevelopment && process.env.SAVE_DEBUG_EMAILS === 'true'  // Default to true in dev for now, or make configurable
       }
     };
-  }
-
-  private hasGmailCredentials(): boolean {
-    // Only check for OAuth client credentials (needed for OAuth flow)
-    // Don't check for refresh token - that's user-specific and stored in database
-    const clientId = process.env.GMAIL_CLIENT_ID;
-    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-    return !!(clientId && clientSecret &&
-      clientId !== 'your_client_id_here' &&
-      clientSecret !== 'your_client_secret_here');
   }
 
   public getConfig(): AppConfig {
@@ -114,13 +88,7 @@ class ConfigManager {
   }
 
   public getGmailSearchQuery(): string {
-    const baseQuery = 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com';
-
-    if (this.config.gmail.includeForwardedReceipts) {
-      return `${baseQuery} OR from:${this.config.gmail.forwardedReceiptEmail}`;
-    }
-
-    return baseQuery;
+    return 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com';
   }
 
   public shouldUseMockData(): boolean {
@@ -129,14 +97,6 @@ class ConfigManager {
 
   public shouldUseRealGmailApi(): boolean {
     return this.config.gmail.useRealApi;
-  }
-
-  public shouldAllowForwardedReceipts(): boolean {
-    return this.config.emailFilter.allowForwardedReceipts;
-  }
-
-  public getForwardedReceiptSender(): string {
-    return this.config.emailFilter.forwardedReceiptSender;
   }
 
   public shouldUseDatabaseSSL(): boolean {
@@ -177,7 +137,7 @@ class ConfigManager {
     return `
 🌍 Environment: ${this.config.environment}
 📧 Gmail API: ${this.config.gmail.useRealApi ? 'Real API' : 'Mock Data'}
-🔄 Forwarded Receipts: ${this.config.gmail.includeForwardedReceipts ? 'Enabled' : 'Disabled'}
+🧪 Mock Data: ${this.config.gmail.useMockData ? 'Enabled' : 'Disabled'}
 🗄️  Database SSL: ${this.config.database.useSSL ? 'Enabled' : 'Disabled'}
 🐛 Debug Logging: ${this.config.debug.enableDetailedLogging ? 'Enabled' : 'Disabled'}
 💾 Save Debug Emails: ${this.config.debug.saveDebugEmails ? 'Enabled' : 'Disabled'}
@@ -195,8 +155,6 @@ export const config = {
   getGmailSearchQuery: () => appConfig.getGmailSearchQuery(),
   shouldUseMockData: () => appConfig.shouldUseMockData(),
   shouldUseRealGmailApi: () => appConfig.shouldUseRealGmailApi(),
-  shouldAllowForwardedReceipts: () => appConfig.shouldAllowForwardedReceipts(),
-  getForwardedReceiptSender: () => appConfig.getForwardedReceiptSender(),
   shouldUseDatabaseSSL: () => appConfig.shouldUseDatabaseSSL(),
   getDatabaseConnectionString: () => appConfig.getDatabaseConnectionString(),
   shouldEnableDetailedLogging: () => appConfig.shouldEnableDetailedLogging(),

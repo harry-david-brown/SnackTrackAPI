@@ -232,9 +232,10 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 
 #### Gmail Integration (NEW! 🎉)
 **Connection Flow:**
-- `POST /gmail/exchange-token` - Store a Google-issued Gmail token after frontend OAuth
+- `POST /gmail/auth-url` - Create a Google OAuth URL for the authenticated user
   - **Requires:** `Authorization: Bearer {token}`
-  - Body: `{"accessToken": string, "refreshToken"?: string}`
+  - Body: `{"redirectUri": string}`
+- `GET /gmail/callback` - OAuth callback used by Google to complete Gmail connection
 
 **Import & Management:**
 - `GET /gmail/status` - Check Gmail connection status

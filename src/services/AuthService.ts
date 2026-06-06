@@ -31,6 +31,7 @@ interface AppleUserData {
 
 export class AuthService {
   private googleClient: OAuth2Client;
+  private googleAudiences: string[];
 
   constructor(
     private userRepository: UserRepository,
@@ -38,11 +39,19 @@ export class AuthService {
     private receiptRepository?: ReceiptRepository,
     private cacheService?: CacheService
   ) {
-    // We can use any client ID here as we'll verify the listener
-    // Ideally these should be in config
-    this.googleClient = new OAuth2Client(
-      process.env.GMAIL_CLIENT_ID
-    );
+    this.googleAudiences = [
+      process.env.GMAIL_CLIENT_ID?.trim(),
+      process.env.GMAIL_IOS_CLIENT_ID?.trim(),
+      process.env.GMAIL_WEB_CLIENT_ID?.trim(),
+    ].filter((value): value is string => Boolean(value));
+
+    if (this.googleAudiences.length === 0) {
+      throw new Error(
+        'Google auth is not configured. Set at least one of GMAIL_CLIENT_ID, GMAIL_IOS_CLIENT_ID, or GMAIL_WEB_CLIENT_ID.'
+      );
+    }
+
+    this.googleClient = new OAuth2Client(this.googleAudiences[0]);
   }
 
   /**
@@ -52,11 +61,7 @@ export class AuthService {
     try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken,
-        audience: [ // Accept both web and mobile client IDs
-          process.env.GMAIL_CLIENT_ID || '',
-          process.env.GMAIL_IOS_CLIENT_ID || '',
-          process.env.GMAIL_WEB_CLIENT_ID || ''
-        ].filter(Boolean),
+        audience: this.googleAudiences,
       });
       const payload = ticket.getPayload();
 
@@ -549,4 +554,3 @@ export class AuthService {
     console.log(`✅ Account deleted successfully for user: ${userId}`);
   }
 }
-

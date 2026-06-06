@@ -1,23 +1,21 @@
 # Gmail OAuth Setup
 
-This is the current Gmail setup for SnackTrack.
+This document describes the current Gmail OAuth setup for SnackTrack.
 
 ## Current Flow
 
-1. The frontend requests Google OAuth with `https://www.googleapis.com/auth/gmail.readonly`.
-2. Google returns an access token, and sometimes a refresh token.
-3. The frontend sends that token to `POST /gmail/exchange-token`.
-4. The API verifies the token, checks that a Gmail read scope was granted, and stores:
+1. The frontend requests a backend-generated Google auth URL from `POST /gmail/auth-url`.
+2. The backend signs OAuth state and returns a Google OAuth URL.
+3. The user authenticates with Google.
+4. Google redirects to the backend `GET /gmail/callback` route.
+5. The backend exchanges the authorization code for tokens, validates Gmail scope access, and stores:
    - `gmail_access_token`
    - optional `gmail_refresh_token`
    - `gmail_token_expiry`
    - `gmail_scopes`
    - `gmail_connection_mode`
-5. `POST /gmail/import` uses:
-   - refresh token when available
-   - otherwise a still-valid access token
-
-The API does not generate Gmail OAuth URLs anymore. There is no active `/gmail/connect`, `/gmail/callback`, or `/gmail/auth-url` flow.
+6. The backend redirects back to the app callback route.
+7. The frontend continues to the upload screen and auto-starts import when appropriate.
 
 ## Google Cloud Setup
 
@@ -54,14 +52,15 @@ The backend Gmail integration uses the **Web application** client credentials.
 ```bash
 GMAIL_CLIENT_ID=your_web_oauth_client_id.apps.googleusercontent.com
 GMAIL_CLIENT_SECRET=your_web_oauth_client_secret
-GMAIL_REDIRECT_URI=http://localhost:3000/auth/gmail/callback
+GMAIL_REDIRECT_URI=http://localhost:3000/gmail/callback
 ```
 
 Notes:
 
 - `GMAIL_CLIENT_ID` must be the **Web OAuth client ID**.
 - `GMAIL_CLIENT_SECRET` must be the matching secret for that same Web OAuth client.
-- `GMAIL_REDIRECT_URI` is still part of backend OAuth client construction and should stay set consistently, even though the current frontend-led flow does not rely on backend redirect endpoints.
+- `GMAIL_REDIRECT_URI` must exactly match the redirect URI configured on that Google OAuth client.
+- These env vars are required. The API no longer falls back to placeholder values or localhost-derived callback guesses.
 
 ## Frontend Env Vars
 
@@ -75,7 +74,8 @@ EXPO_PUBLIC_GMAIL_ANDROID_CLIENT_ID=your_android_client_id.apps.googleuserconten
 
 ## Active API Endpoints
 
-- `POST /gmail/exchange-token`
+- `POST /gmail/auth-url`
+- `GET /gmail/callback`
 - `GET /gmail/status`
 - `GET /gmail/import/status`
 - `POST /gmail/import`
@@ -83,7 +83,7 @@ EXPO_PUBLIC_GMAIL_ANDROID_CLIENT_ID=your_android_client_id.apps.googleuserconten
 
 ## Status Model
 
-`GET /gmail/status` returns richer state than the old boolean-only response:
+`GET /gmail/status` returns:
 
 - `connected`
 - `canImport`
@@ -97,7 +97,8 @@ EXPO_PUBLIC_GMAIL_ANDROID_CLIENT_ID=your_android_client_id.apps.googleuserconten
 
 ## Behavior Notes
 
-- If Google only returns an access token, the API stores a `temporary` Gmail connection.
-- If a refresh token is available, the API stores an `offline` Gmail connection.
+- If Google returns a refresh token, the API stores an `offline` Gmail connection.
+- If Google returns only an access token, the API stores a `temporary` Gmail connection.
 - If the access token expires and there is no refresh token, the user must reconnect Gmail.
-- The API rejects Gmail connections that do not include a Gmail read-capable scope.
+- The API rejects Gmail connections that do not include a supported Gmail read-capable scope.
+- The API no longer accepts a separate frontend token exchange step through `/gmail/exchange-token`.

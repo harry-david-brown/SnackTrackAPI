@@ -1,5 +1,4 @@
 import { Email } from './Email';
-import { config } from '../../config/AppConfig';
 import { ReceiptClassifier, EmailClassification as ExtractorClassification } from '../extraction';
 
 export interface EmailClassification {
@@ -22,7 +21,6 @@ export class EmailFilterService {
    */
   classifyEmail(email: Email): EmailClassification {
     const from = email.from.toLowerCase();
-    const subject = email.subject?.toLowerCase() || '';
     
     // List of known Uber senders
     const uberSenders = [
@@ -54,26 +52,6 @@ export class EmailFilterService {
           reason: 'Email from Uber but no receipt indicators found - likely promotional or notification',
           receiptType: undefined
         };
-      }
-    }
-    
-    // Check for forwarded receipts if enabled in config
-    if (config.shouldAllowForwardedReceipts()) {
-      const forwardedSender = config.getForwardedReceiptSender();
-      const isFromForwardedSender = from.includes(forwardedSender);
-      
-      if (isFromForwardedSender) {
-        // Use content classification for forwarded emails
-        const contentClassification = this.contentClassifier.classify(email.body, email.subject);
-        
-        if (contentClassification.isReceipt) {
-          return {
-            isReceipt: true,
-            confidence: 0.90,
-            reason: `Forwarded email from ${forwardedSender} with receipt content in ${config.isDevelopment() ? 'development' : 'production'} mode`,
-            receiptType: 'uber'
-          };
-        }
       }
     }
     

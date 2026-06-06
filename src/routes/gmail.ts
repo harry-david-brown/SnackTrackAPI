@@ -32,21 +32,17 @@ const GOOGLE_AUTH_SCOPES = [
  * Gmail OAuth Configuration
  * Returns OAuth2Client for Gmail API access
  */
-const getCallbackRedirectUri = (req?: Request): string => {
-  if (process.env.GMAIL_REDIRECT_URI) {
-    return process.env.GMAIL_REDIRECT_URI;
+const getCallbackRedirectUri = (): string => {
+  const redirectUri = process.env.GMAIL_REDIRECT_URI?.trim();
+  if (!redirectUri) {
+    throw new Error('GMAIL_REDIRECT_URI is not configured');
   }
-
-  if (req) {
-    return `${req.protocol}://${req.get('host')}/gmail/callback`;
-  }
-
-  return 'http://localhost:3000/gmail/callback';
+  return redirectUri;
 };
 
 const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
-  const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
-  const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+  const CLIENT_ID = process.env.GMAIL_CLIENT_ID?.trim();
+  const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET?.trim();
 
   if (!CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
@@ -174,7 +170,7 @@ router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, re
     throw new ValidationError('redirectUri uses an unsupported scheme');
   }
 
-  const callbackRedirectUri = getCallbackRedirectUri(req);
+  const callbackRedirectUri = getCallbackRedirectUri();
   const oAuth2Client = getOAuth2Client(callbackRedirectUri);
   const state = signOAuthState({ userId, redirectUri });
 
@@ -217,7 +213,7 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
       throw new ValidationError('Missing authorization code');
     }
 
-    const callbackRedirectUri = getCallbackRedirectUri(req);
+    const callbackRedirectUri = getCallbackRedirectUri();
     const oAuth2Client = getOAuth2Client(callbackRedirectUri);
     const tokenResponse = await oAuth2Client.getToken(code);
     const tokens = tokenResponse.tokens;
@@ -265,142 +261,6 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
     errorRedirect.searchParams.set('gmail', 'error');
     errorRedirect.searchParams.set('error', callbackError.message || 'gmail_oauth_failed');
     res.redirect(errorRedirect.toString());
-  }
-}));
-
-// Legacy fallback endpoint. Prefer /gmail/auth-url + /gmail/callback.
-
-/**
- * @swagger
- * /gmail/exchange-token:
- *   post:
- *     summary: Exchange OAuth access token for Gmail connection
- *     description: Frontend sends OAuth access token from expo-auth-session
- *     tags: [Gmail Integration]
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - accessToken
- *             properties:
- *               accessToken:
- *                 type: string
- *                 description: OAuth access token from Google
- *     responses:
- *       200:
- *         description: Gmail connected successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Gmail connected successfully
- *                 connected:
- *                   type: boolean
- *                   example: true
- *       400:
- *         description: Bad request - missing access token
- *       401:
- *         description: Unauthorized - missing or invalid token
- *       500:
- *         description: Internal server error
- */
-router.post('/exchange-token', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const { accessToken, refreshToken } = req.body;
-  const userId = req.user?.userId;
-
-  if (!accessToken) {
-    throw new ValidationError('Access token is required');
-  }
-
-  if (!userId) {
-    throw new ValidationError('User ID not found in token');
-  }
-
-  try {
-    console.log(`🔄 Exchanging Gmail OAuth token for user: ${userId}`, {
-      hasRefreshToken: !!refreshToken
-    });
-
-    const oAuth2Client = getOAuth2Client();
-    oAuth2Client.setCredentials({ access_token: accessToken });
-
-    const tokenInfo = await oAuth2Client.getTokenInfo(accessToken);
-    const scopes = normalizeScopes(tokenInfo.scopes);
-
-    if (!hasRequiredGmailScope(scopes)) {
-      throw new ValidationError('Gmail access was granted without a supported Gmail read scope. Please reconnect and approve Gmail access.');
-    }
-
-    // Verify the token by getting user info
-    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
-    const userInfo = await oauth2.userinfo.get();
-
-    if (!userInfo.data.email) {
-      throw new Error('Could not retrieve user email from Google');
-    }
-
-    const gmailEmail = userInfo.data.email;
-    console.log(`✅ Received Gmail OAuth token for user: ${userId} (${gmailEmail})`);
-
-    const userRepository = container.userRepository;
-    const connectionMode: 'temporary' | 'offline' = refreshToken ? 'offline' : 'temporary';
-    const expiryDate = typeof (tokenInfo as any).expiry_date === 'number'
-      ? new Date((tokenInfo as any).expiry_date)
-      : new Date(Date.now() + 3600 * 1000);
-
-    await userRepository.updateGmailTokens(
-      userId,
-      {
-        refreshToken: refreshToken || null,
-        accessToken,
-        expiryDate,
-        gmailEmail,
-        scopes,
-        connectionMode,
-      }
-    );
-
-    if (refreshToken) {
-      console.log(`✅ Stored refresh token for long-term access`);
-    } else {
-      console.log(`⚠️  Stored access token only. Users will need to reconnect when it expires.`);
-    }
-
-    console.log(`✅ Stored Gmail tokens for user: ${userId}`);
-
-    res.json({
-      success: true,
-      message: connectionMode === 'offline'
-        ? 'Gmail connected successfully'
-        : 'Gmail connected with temporary access',
-      connected: true,
-      connectionMode,
-      expiresAt: expiryDate.toISOString(),
-      scopes,
-    });
-  } catch (error: any) {
-    console.error('❌ Error in token exchange:', error);
-    console.error('Error details:', {
-      message: error.message,
-      code: error.code,
-      status: error.response?.status,
-      data: error.response?.data
-    });
-    if (error instanceof ValidationError) {
-      throw error;
-    }
-    throw new ValidationError('Failed to connect Gmail. Please try again.');
   }
 }));
 
