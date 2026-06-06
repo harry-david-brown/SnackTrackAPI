@@ -257,11 +257,19 @@ export const ipWhitelist = (allowedIPs: string[]) => {
 // API key validation middleware (for sensitive endpoints)
 export const validateApiKey = (req: Request, res: Response, next: NextFunction) => {
   const apiKey = req.get('X-API-Key') || req.query.apiKey;
-  const validApiKey = process.env.API_KEY;
+  const validApiKey = process.env.API_KEY?.trim();
   
   if (!validApiKey) {
-    console.warn('⚠️ API_KEY environment variable not set - API key validation disabled');
-    return next();
+    console.error('❌ API_KEY environment variable is not configured for protected admin endpoint access');
+    return res.status(500).json({
+      error: {
+        message: 'Server misconfiguration: API key protection is not configured',
+        statusCode: 500,
+        timestamp: new Date().toISOString(),
+        path: req.originalUrl,
+        method: req.method
+      }
+    });
   }
   
   if (!apiKey || apiKey !== validApiKey) {

@@ -1,8 +1,8 @@
 // Reference Node.js types for process and environment
 /// <reference types="node" />
+import 'dotenv/config';
 // @ts-ignore
 import express, { Request, Response, NextFunction } from 'express';
-import dotenv from 'dotenv';
 import authRouter from './routes/auth';
 import authPasswordResetRouter from './routes/authPasswordReset';
 import authEmailVerificationRouter from './routes/authEmailVerification';
@@ -37,8 +37,6 @@ import {
   progressiveSlowDown
 } from './middleware/security';
 import { requestLogger } from './middleware/requestLogger';
-
-dotenv.config();
 
 const app = express();
 
