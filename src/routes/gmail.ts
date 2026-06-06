@@ -6,12 +6,14 @@
 
 import { Router, Request, Response } from 'express';
 import { google, Auth } from 'googleapis';
+import jwt from 'jsonwebtoken';
 import { container } from '../services/core/ServiceContainer';
 import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { GmailImportService } from '../services/import/GmailImportService';
 import { ImportLockService } from '../services/import/ImportLockService';
 import { User } from '../models/User';
+import { authConfig } from '../config/auth';
 
 const router = Router();
 const REQUIRED_GMAIL_SCOPES = new Set([
@@ -19,12 +21,30 @@ const REQUIRED_GMAIL_SCOPES = new Set([
   'https://www.googleapis.com/auth/gmail.modify',
   'https://mail.google.com/',
 ]);
+const GOOGLE_AUTH_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/gmail.readonly',
+] as const;
 
 /**
  * Gmail OAuth Configuration
  * Returns OAuth2Client for Gmail API access
  */
-const getOAuth2Client = (): Auth.OAuth2Client => {
+const getCallbackRedirectUri = (req?: Request): string => {
+  if (process.env.GMAIL_REDIRECT_URI) {
+    return process.env.GMAIL_REDIRECT_URI;
+  }
+
+  if (req) {
+    return `${req.protocol}://${req.get('host')}/gmail/callback`;
+  }
+
+  return 'http://localhost:3000/gmail/callback';
+};
+
+const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
   const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
   const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
 
@@ -32,7 +52,25 @@ const getOAuth2Client = (): Auth.OAuth2Client => {
     throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
   }
 
-  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
+  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, redirectUri);
+};
+
+interface GmailOAuthStatePayload {
+  userId: string;
+  redirectUri: string;
+}
+
+const signOAuthState = (payload: GmailOAuthStatePayload): string => {
+  return jwt.sign(payload, authConfig.getJWTSecret(), {
+    expiresIn: '10m',
+    issuer: 'snacktrack-gmail-oauth',
+  });
+};
+
+const verifyOAuthState = (state: string): GmailOAuthStatePayload => {
+  return jwt.verify(state, authConfig.getJWTSecret(), {
+    issuer: 'snacktrack-gmail-oauth',
+  }) as GmailOAuthStatePayload;
 };
 
 const normalizeScopes = (scopes: string[] | string | undefined | null): string[] => {
@@ -112,8 +150,125 @@ const buildGmailStatus = (user: User) => {
   };
 };
 
-// Note: OAuth is now handled entirely by expo-auth-session on the frontend
-// The frontend gets the access token directly and sends it to /gmail/exchange-token
+router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { redirectUri } = req.body;
+
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  if (!redirectUri || typeof redirectUri !== 'string') {
+    throw new ValidationError('redirectUri is required');
+  }
+
+  let parsedRedirectUri: URL;
+  try {
+    parsedRedirectUri = new URL(redirectUri);
+  } catch {
+    throw new ValidationError('redirectUri must be a valid absolute URI');
+  }
+
+  const allowedSchemes = ['snacktrack:', 'exp+snack-track:', 'https:', 'http:'];
+  if (!allowedSchemes.includes(parsedRedirectUri.protocol)) {
+    throw new ValidationError('redirectUri uses an unsupported scheme');
+  }
+
+  const callbackRedirectUri = getCallbackRedirectUri(req);
+  const oAuth2Client = getOAuth2Client(callbackRedirectUri);
+  const state = signOAuthState({ userId, redirectUri });
+
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: true,
+    scope: [...GOOGLE_AUTH_SCOPES],
+    state,
+  });
+
+  res.json({
+    success: true,
+    authUrl,
+  });
+}));
+
+router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
+  const { code, state, error } = req.query;
+
+  let appRedirectUri = 'snacktrack://oauth-callback';
+
+  try {
+    if (typeof state !== 'string') {
+      throw new ValidationError('Missing OAuth state');
+    }
+
+    const decodedState = verifyOAuthState(state);
+    appRedirectUri = decodedState.redirectUri;
+
+    if (error) {
+      const errorRedirect = new URL(appRedirectUri);
+      errorRedirect.searchParams.set('gmail', 'error');
+      errorRedirect.searchParams.set('error', String(error));
+      res.redirect(errorRedirect.toString());
+      return;
+    }
+
+    if (!code || typeof code !== 'string') {
+      throw new ValidationError('Missing authorization code');
+    }
+
+    const callbackRedirectUri = getCallbackRedirectUri(req);
+    const oAuth2Client = getOAuth2Client(callbackRedirectUri);
+    const tokenResponse = await oAuth2Client.getToken(code);
+    const tokens = tokenResponse.tokens;
+
+    if (!tokens.access_token) {
+      throw new Error('Google did not return an access token');
+    }
+
+    const scopes = normalizeScopes(tokens.scope);
+    if (!hasRequiredGmailScope(scopes)) {
+      throw new ValidationError('Gmail access was granted without a supported Gmail read scope.');
+    }
+
+    oAuth2Client.setCredentials(tokens);
+    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+    const userInfo = await oauth2.userinfo.get();
+
+    if (!userInfo.data.email) {
+      throw new Error('Could not retrieve user email from Google');
+    }
+
+    const userRepository = container.userRepository;
+    const connectionMode: 'temporary' | 'offline' = tokens.refresh_token ? 'offline' : 'temporary';
+    const expiryDate = typeof tokens.expiry_date === 'number'
+      ? new Date(tokens.expiry_date)
+      : new Date(Date.now() + 3600 * 1000);
+
+    await userRepository.updateGmailTokens(decodedState.userId, {
+      refreshToken: tokens.refresh_token || null,
+      accessToken: tokens.access_token,
+      expiryDate,
+      gmailEmail: userInfo.data.email,
+      scopes,
+      connectionMode,
+    });
+
+    const successRedirect = new URL(appRedirectUri);
+    successRedirect.searchParams.set('gmail', 'success');
+    successRedirect.searchParams.set('autoImportGmail', 'true');
+    successRedirect.searchParams.set('connectionMode', connectionMode);
+    res.redirect(successRedirect.toString());
+  } catch (callbackError: any) {
+    console.error('❌ Gmail OAuth callback failed:', callbackError);
+    const errorRedirect = new URL(appRedirectUri);
+    errorRedirect.searchParams.set('gmail', 'error');
+    errorRedirect.searchParams.set('error', callbackError.message || 'gmail_oauth_failed');
+    res.redirect(errorRedirect.toString());
+  }
+}));
+
+// Legacy fallback endpoint. Prefer /gmail/auth-url + /gmail/callback.
 
 /**
  * @swagger
