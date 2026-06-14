@@ -54,6 +54,7 @@ const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
 interface GmailOAuthStatePayload {
   userId: string;
   redirectUri: string;
+  autoImportGmail?: boolean;
 }
 
 const signOAuthState = (payload: GmailOAuthStatePayload): string => {
@@ -148,7 +149,7 @@ const buildGmailStatus = (user: User) => {
 
 router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
-  const { redirectUri } = req.body;
+  const { redirectUri, autoImportGmail = true } = req.body;
 
   if (!userId) {
     throw new ValidationError('User ID not found in token');
@@ -172,7 +173,11 @@ router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, re
 
   const callbackRedirectUri = getCallbackRedirectUri();
   const oAuth2Client = getOAuth2Client(callbackRedirectUri);
-  const state = signOAuthState({ userId, redirectUri });
+  const state = signOAuthState({
+    userId,
+    redirectUri,
+    autoImportGmail: autoImportGmail !== false,
+  });
 
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -252,7 +257,7 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
 
     const successRedirect = new URL(appRedirectUri);
     successRedirect.searchParams.set('gmail', 'success');
-    successRedirect.searchParams.set('autoImportGmail', 'true');
+    successRedirect.searchParams.set('autoImportGmail', decodedState.autoImportGmail === false ? 'false' : 'true');
     successRedirect.searchParams.set('connectionMode', connectionMode);
     res.redirect(successRedirect.toString());
   } catch (callbackError: any) {
