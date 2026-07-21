@@ -157,9 +157,28 @@ export interface DeliveryWaits {
   };
 }
 
+// Community Percentiles
+
+export interface PercentileStanding {
+  /** Share of ranked users strictly below this user, 0–100. */
+  percentile: number;
+  /** "Top X%" framing: 100 − percentile, clamped to [1, 100]. */
+  topPercent: number;
+}
+
+export interface WrappedPercentiles {
+  /** Users in the comparison pool (only accounts with enough receipts rank). */
+  sampleSize: number;
+  totalSpent?: PercentileStanding;
+  orderCount?: PercentileStanding;
+  nightOwl?: PercentileStanding;
+}
+
 // Main Wrapped Analytics Response
 
 export interface WrappedAnalytics {
+  /** Cross-user standings; omitted when the pool is too small to be meaningful. */
+  percentiles?: WrappedPercentiles;
   shame: {
     lateNightOrders?: LateNightOrders;
     laziestDay?: LaziestDay;

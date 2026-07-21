@@ -210,8 +210,9 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     const userId = req.params.id;
     const includeWrapped = req.query.includeWrapped === 'true';
     
-    // Check cache first (different cache key if wrapped analytics requested)
-    const cacheKey = includeWrapped ? `${userId}-wrapped` : userId;
+    // Check cache first (different cache key if wrapped analytics requested).
+    // v2: wrapped payload gained `percentiles` — new key skips stale caches.
+    const cacheKey = includeWrapped ? `${userId}-wrapped-v2` : userId;
     const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
       return res.json(cachedSummary);

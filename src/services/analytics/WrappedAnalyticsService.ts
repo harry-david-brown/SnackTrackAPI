@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import {
   WrappedAnalytics,
+  WrappedPercentiles,
+  PercentileStanding,
   ReceiptForAnalytics,
   LateNightOrders,
   LaziestDay,
@@ -25,6 +27,11 @@ import { getLocalDate, getLocalHour, getLocalDay } from '../../utils/timezone';
  * Calculates Spotify Wrapped-style analytics for maximum shareability
  */
 export class WrappedAnalyticsService {
+  /** Accounts need at least this many receipts to enter the percentile pool. */
+  private static readonly PERCENTILE_MIN_RECEIPTS = 3;
+  /** Below this pool size, percentiles are noise — omit them entirely. */
+  private static readonly PERCENTILE_MIN_SAMPLE = 5;
+
   constructor(private pool: Pool) {}
 
   /**
@@ -84,7 +91,12 @@ export class WrappedAnalyticsService {
       this.calculateDeliveryWaits(receipts)
     ]);
 
+    // Cross-user standings (single aggregate query; independent of the
+    // per-receipt analytics above).
+    const percentiles = await this.calculatePercentiles(userId);
+
     return {
+      percentiles,
       shame: {
         lateNightOrders,
         laziestDay,
@@ -148,6 +160,82 @@ export class WrappedAnalyticsService {
       deliveryTime: row.deliveryTime ? new Date(row.deliveryTime) : null,
       items: Array.isArray(row.items) ? row.items : []
     }));
+  }
+
+  /**
+   * Rank this user against every other account with enough data.
+   *
+   * One aggregate query: per-user totals + PERCENT_RANK window functions.
+   * night_owl_pct mirrors calculateNightOwl (share of orders at/after 10pm,
+   * in each user's own timezone; order_date is a naive UTC timestamp).
+   * Returns undefined when the user isn't in the pool (too few receipts) or
+   * the pool itself is too small for percentiles to mean anything.
+   */
+  private async calculatePercentiles(userId: string): Promise<WrappedPercentiles | undefined> {
+    const query = `
+      WITH per_user AS (
+        SELECT
+          r.user_id,
+          SUM(r.amount_spent) AS total_spent,
+          COUNT(*)::int AS order_count,
+          AVG(
+            CASE
+              WHEN r.order_date IS NOT NULL
+               AND EXTRACT(
+                     HOUR FROM (r.order_date AT TIME ZONE 'UTC')
+                       AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
+                   ) >= 22
+              THEN 1.0 ELSE 0.0
+            END
+          ) * 100 AS night_owl_pct
+        FROM receipts r
+        JOIN users u ON u.id = r.user_id
+        GROUP BY r.user_id
+        HAVING COUNT(*) >= $2
+      ),
+      ranked AS (
+        SELECT
+          user_id,
+          PERCENT_RANK() OVER (ORDER BY total_spent) AS spent_rank,
+          PERCENT_RANK() OVER (ORDER BY order_count) AS orders_rank,
+          PERCENT_RANK() OVER (ORDER BY night_owl_pct) AS night_owl_rank,
+          COUNT(*) OVER ()::int AS sample_size
+        FROM per_user
+      )
+      SELECT * FROM ranked WHERE user_id = $1
+    `;
+
+    try {
+      const result = await this.pool.query(query, [
+        userId,
+        WrappedAnalyticsService.PERCENTILE_MIN_RECEIPTS
+      ]);
+      const row = result.rows[0];
+      if (!row) return undefined;
+
+      const sampleSize = Number(row.sample_size);
+      if (sampleSize < WrappedAnalyticsService.PERCENTILE_MIN_SAMPLE) return undefined;
+
+      const standing = (rank: unknown): PercentileStanding => {
+        const fraction = Math.max(0, Math.min(1, Number(rank)));
+        return {
+          percentile: Math.round(fraction * 100),
+          topPercent: Math.min(100, Math.max(1, Math.round((1 - fraction) * 100)))
+        };
+      };
+
+      return {
+        sampleSize,
+        totalSpent: standing(row.spent_rank),
+        orderCount: standing(row.orders_rank),
+        nightOwl: standing(row.night_owl_rank)
+      };
+    } catch (error) {
+      // Percentiles are a garnish on the summary — never fail the whole
+      // analytics payload over them.
+      console.error('Error calculating wrapped percentiles:', error);
+      return undefined;
+    }
   }
 
   /**
