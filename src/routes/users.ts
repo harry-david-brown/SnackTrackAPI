@@ -211,8 +211,9 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     const includeWrapped = req.query.includeWrapped === 'true';
     
     // Check cache first (different cache key if wrapped analytics requested).
-    // v2: wrapped payload gained `percentiles` — new key skips stale caches.
-    const cacheKey = includeWrapped ? `${userId}-wrapped-v2` : userId;
+    // v3: wrapped payload gained explicit coverage metadata and a stricter
+    // percentile cohort gate — use a fresh key to skip stale cached payloads.
+    const cacheKey = includeWrapped ? `${userId}-wrapped-v3` : userId;
     const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
       return res.json(cachedSummary);
@@ -463,4 +464,4 @@ router.put('/:id/timezone', authenticateToken, validateOwnership, validateUUIDPa
   }
 }));
 
-export default router; 
+export default router;

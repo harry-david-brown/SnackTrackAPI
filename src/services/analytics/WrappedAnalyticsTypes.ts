@@ -174,9 +174,24 @@ export interface WrappedPercentiles {
   nightOwl?: PercentileStanding;
 }
 
+export interface WrappedCoverage {
+  /** Number of imported receipts represented by this Wrapped payload. */
+  orderCount: number;
+  /** Earliest known order in SnackTrack; null when no dated receipt exists. */
+  earliestOrderDate: string | null;
+  /** Latest known order in SnackTrack; null when no dated receipt exists. */
+  latestOrderDate: string | null;
+  /** Imported sources represented in the payload (for example email or csv). */
+  dataSources: string[];
+  /** True when at least one uploaded CSV/ZIP export contributed receipts. */
+  hasExportData: boolean;
+}
+
 // Main Wrapped Analytics Response
 
 export interface WrappedAnalytics {
+  /** What SnackTrack actually reviewed; never implies exhaustive history. */
+  coverage: WrappedCoverage;
   /** Cross-user standings; omitted when the pool is too small to be meaningful. */
   percentiles?: WrappedPercentiles;
   shame: {
@@ -220,4 +235,3 @@ export interface ReceiptForAnalytics {
   dataSource: string;
   deliveryTime?: Date | null; // Delivery time (for DoorDash wait time analytics)
 }
-

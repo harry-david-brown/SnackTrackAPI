@@ -30,7 +30,7 @@ export class WrappedAnalyticsService {
   /** Accounts need at least this many receipts to enter the percentile pool. */
   private static readonly PERCENTILE_MIN_RECEIPTS = 3;
   /** Below this pool size, percentiles are noise — omit them entirely. */
-  private static readonly PERCENTILE_MIN_SAMPLE = 5;
+  private static readonly PERCENTILE_MIN_SAMPLE = 100;
 
   constructor(private pool: Pool) {}
 
@@ -91,11 +91,14 @@ export class WrappedAnalyticsService {
       this.calculateDeliveryWaits(receipts)
     ]);
 
+    const coverage = this.calculateCoverage(receipts);
+
     // Cross-user standings (single aggregate query; independent of the
     // per-receipt analytics above).
     const percentiles = await this.calculatePercentiles(userId);
 
     return {
+      coverage,
       percentiles,
       shame: {
         lateNightOrders,
@@ -120,6 +123,29 @@ export class WrappedAnalyticsService {
         weekendWarrior,
         deliveryWaits
       }
+    };
+  }
+
+  /**
+   * Describe only the receipt coverage SnackTrack can verify. An uploaded
+   * export strengthens the source mix but never proves exhaustive history.
+   */
+  private calculateCoverage(receipts: ReceiptForAnalytics[]) {
+    const datedReceipts = receipts
+      .filter((receipt): receipt is ReceiptForAnalytics & { orderDate: Date } => Boolean(receipt.orderDate))
+      .sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
+    const dataSources = Array.from(new Set(
+      receipts
+        .map(receipt => receipt.dataSource)
+        .filter((source): source is string => Boolean(source))
+    )).sort();
+
+    return {
+      orderCount: receipts.length,
+      earliestOrderDate: datedReceipts[0]?.orderDate.toISOString() ?? null,
+      latestOrderDate: datedReceipts[datedReceipts.length - 1]?.orderDate.toISOString() ?? null,
+      dataSources,
+      hasExportData: dataSources.includes('csv'),
     };
   }
 
@@ -982,6 +1008,13 @@ export class WrappedAnalyticsService {
 
   private getEmptyAnalytics(): WrappedAnalytics {
     return {
+      coverage: {
+        orderCount: 0,
+        earliestOrderDate: null,
+        latestOrderDate: null,
+        dataSources: [],
+        hasExportData: false,
+      },
       shame: {},
       flex: {},
       comparative: {},
@@ -989,4 +1022,3 @@ export class WrappedAnalyticsService {
     };
   }
 }
-
