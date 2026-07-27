@@ -322,12 +322,15 @@ export class ReceiptService {
     // Get top restaurants - only actual receipts
     const restaurantsResult = await this.postgres.query(`
       SELECT 
-        restaurant_name,
+        BTRIM(restaurant_name) as restaurant_name,
         COUNT(*) as count,
         SUM(amount_spent) as total_spent
       FROM receipts 
-      WHERE user_id = $1 AND restaurant_name IS NOT NULL AND amount_spent > 0 ${dateFilter}
-      GROUP BY restaurant_name
+      WHERE user_id = $1
+        AND restaurant_name IS NOT NULL
+        AND BTRIM(restaurant_name) <> ''
+        AND amount_spent > 0 ${dateFilter}
+      GROUP BY BTRIM(restaurant_name)
       ORDER BY total_spent DESC
       LIMIT 10
     `, params);
@@ -361,11 +364,13 @@ export class ReceiptService {
       totalSpent: parseFloat(stats.total_spent),
       totalOrders: parseInt(stats.total_orders),
       averageOrderValue: parseFloat(stats.average_order_value),
-      topRestaurants: restaurantsResult.rows.map((row: any) => ({
-        name: row.restaurant_name,
-        count: parseInt(row.count),
-        totalSpent: parseFloat(row.total_spent)
-      })),
+      topRestaurants: restaurantsResult.rows
+        .map((row: any) => ({
+          name: String(row.restaurant_name).trim(),
+          count: parseInt(row.count),
+          totalSpent: parseFloat(row.total_spent)
+        }))
+        .filter((restaurant: { name: string }) => /[\p{L}\p{N}]/u.test(restaurant.name)),
       spendingByType: typesResult.rows.map((row: any) => ({
         type: row.receipt_type,
         count: parseInt(row.count),

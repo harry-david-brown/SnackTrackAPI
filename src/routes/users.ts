@@ -253,8 +253,10 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
 
     // Top restaurants
     const restaurantStats = receipts.reduce((acc, receipt) => {
-      const restaurant = receipt.restaurantName;
-      if (!restaurant) return acc;
+      const restaurant = receipt.restaurantName?.trim();
+      // Do not let blank or punctuation-only import values occupy a ranked
+      // restaurant slot. This also coalesces names with stray outer spaces.
+      if (!restaurant || !/[\p{L}\p{N}]/u.test(restaurant)) return acc;
       if (!acc[restaurant]) {
         acc[restaurant] = { count: 0, total: 0 };
       }
