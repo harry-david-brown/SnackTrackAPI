@@ -21,6 +21,12 @@ export interface ReceiptAnalytics {
   spendingByMonth: Array<{ month: string; totalSpent: number; orderCount: number }>;
 }
 
+export interface ReceiptUpsertResult {
+  newOrders: number;
+  updatedOrders: number;
+  unchangedOrders: number;
+}
+
 export class ReceiptService {
   constructor(private postgres: PostgresService) { }
 
@@ -123,6 +129,99 @@ export class ReceiptService {
     console.log(`✅ Batch inserted ${receipts.length} receipts in ${duration}s`);
 
     return insertedIds;
+  }
+
+  /** Incrementally merge Gmail receipts while preserving discovery history. */
+  async upsertEmailReceipts(receipts: Receipt[]): Promise<ReceiptUpsertResult> {
+    if (receipts.length === 0) {
+      return { newOrders: 0, updatedOrders: 0, unchangedOrders: 0 };
+    }
+
+    const identified = receipts
+      .map(receipt => ({ receipt, identity: this.getEmailSourceIdentity(receipt) }))
+      .filter((entry): entry is { receipt: Receipt; identity: string } => Boolean(entry.identity));
+    if (identified.length === 0) {
+      return { newOrders: 0, updatedOrders: 0, unchangedOrders: 0 };
+    }
+
+    const userId = identified[0].receipt.userId;
+    const identities = identified.map(entry => entry.identity);
+    const existingResult = await this.postgres.query(
+      `SELECT source_identity, amount_spent, restaurant_name, order_date, receipt_type, items
+       FROM receipts
+       WHERE user_id = $1 AND data_source = 'email' AND source_identity = ANY($2::TEXT[])`,
+      [userId, identities]
+    );
+    const existing = new Map(existingResult.rows.map((row: any) => [row.source_identity, row]));
+    let newOrders = 0;
+    let updatedOrders = 0;
+    let unchangedOrders = 0;
+
+    for (const { receipt, identity } of identified) {
+      const previous: any = existing.get(identity);
+      if (!previous) {
+        newOrders++;
+        continue;
+      }
+      const changed = Number(previous.amount_spent) !== receipt.amountSpent
+        || String(previous.restaurant_name || '') !== String(receipt.restaurantName || '')
+        || new Date(previous.order_date).getTime() !== receipt.orderDate?.getTime()
+        || String(previous.receipt_type) !== String(receipt.receiptType)
+        || JSON.stringify(previous.items || []) !== JSON.stringify(receipt.items || []);
+      if (changed) updatedOrders++;
+      else unchangedOrders++;
+    }
+
+    const batchSize = 100;
+    for (let offset = 0; offset < identified.length; offset += batchSize) {
+      const batch = identified.slice(offset, offset + batchSize);
+      const values: any[] = [];
+      const placeholders = batch.map(({ receipt, identity }, index) => {
+        const p = index * 11 + 1;
+        values.push(
+          uuidv4(), receipt.userId, receipt.receiptType, DataSource.EMAIL,
+          receipt.restaurantName?.substring(0, 255) || null, receipt.orderDate,
+          receipt.amountSpent, JSON.stringify(receipt.items), receipt.deliveryTime || null,
+          receipt.externalId || null, identity
+        );
+        return `($${p}, $${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}, $${p + 6}, $${p + 7}, $${p + 8}, $${p + 9}, $${p + 10})`;
+      });
+
+      await this.postgres.query(
+        `INSERT INTO receipts (
+           id, user_id, receipt_type, data_source, restaurant_name, order_date,
+           amount_spent, items, delivery_time, external_id, source_identity
+         ) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (user_id, data_source, source_identity)
+           WHERE source_identity IS NOT NULL
+         DO UPDATE SET
+           receipt_type = EXCLUDED.receipt_type,
+           restaurant_name = EXCLUDED.restaurant_name,
+           order_date = EXCLUDED.order_date,
+           amount_spent = EXCLUDED.amount_spent,
+           items = EXCLUDED.items,
+           delivery_time = EXCLUDED.delivery_time,
+           external_id = COALESCE(EXCLUDED.external_id, receipts.external_id),
+           last_seen_at = NOW(),
+           updated_at = CASE WHEN
+             receipts.receipt_type IS DISTINCT FROM EXCLUDED.receipt_type OR
+             receipts.restaurant_name IS DISTINCT FROM EXCLUDED.restaurant_name OR
+             receipts.order_date IS DISTINCT FROM EXCLUDED.order_date OR
+             receipts.amount_spent IS DISTINCT FROM EXCLUDED.amount_spent OR
+             receipts.items IS DISTINCT FROM EXCLUDED.items OR
+             receipts.delivery_time IS DISTINCT FROM EXCLUDED.delivery_time
+           THEN CURRENT_TIMESTAMP ELSE receipts.updated_at END`,
+        values
+      );
+    }
+
+    return { newOrders, updatedOrders, unchangedOrders };
+  }
+
+  private getEmailSourceIdentity(receipt: Receipt): string | null {
+    if (receipt.externalId) return `external:${receipt.externalId}`;
+    if (!receipt.orderDate) return null;
+    return `fallback:${receipt.restaurantName?.trim().toLowerCase() || 'unknown'}|${receipt.orderDate.toISOString().slice(0, 16)}`;
   }
 
 
@@ -281,16 +380,54 @@ export class ReceiptService {
 
   // DELETE - Delete all receipts for a user
   async deleteReceiptsByUserId(userId: string): Promise<number> {
-    const result = await this.postgres.query(
-      'DELETE FROM receipts WHERE user_id = $1',
-      [userId]
-    );
+    const client = await this.postgres.getClient();
 
-    return result.rowCount || 0;
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        'DELETE FROM receipts WHERE user_id = $1',
+        [userId]
+      );
+
+      // Clearing all receipt data starts the historical-export journey over,
+      // but deliberately leaves the user's Gmail monitoring consent intact.
+      await client.query(
+        `UPDATE user_import_preferences
+       SET export_status = 'not_started',
+             export_requested_at = NULL,
+             export_updated_at = NOW(),
+             gmail_import_status = 'never_started',
+             gmail_import_updated_at = NOW(),
+             gmail_imported_count = 0,
+             gmail_import_error_code = NULL,
+             last_check_attempt_at = NULL,
+             last_successful_check_at = NULL,
+             last_stats_updated_at = NULL,
+             last_new_order_at = NULL,
+             last_tracking_error_at = NULL,
+             last_tracking_error_code = NULL,
+             updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      await client.query('COMMIT');
+      return result.rowCount || 0;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // ANALYTICS - Get spending analytics for a user
   async getReceiptAnalytics(userId: string, startDate?: Date, endDate?: Date): Promise<ReceiptAnalytics> {
+    const timezoneResult = await this.postgres.query(
+      "SELECT COALESCE(timezone, 'America/New_York') AS timezone FROM users WHERE id = $1",
+      [userId]
+    );
+    const timezone = timezoneResult.rows[0]?.timezone || 'America/New_York';
     let dateFilter = '';
     const params: any[] = [userId];
     let paramCount = 1;
@@ -307,19 +444,20 @@ export class ReceiptService {
       params.push(endDate);
     }
 
-    // Get basic stats - only count actual receipts (amount_spent > 0)
+    // Keep order counts and averages consistent with /users/:id/summary: a
+    // completed $0/promotional order is still an imported order.
     const statsResult = await this.postgres.query(`
       SELECT 
         COALESCE(SUM(amount_spent), 0) as total_spent,
         COUNT(*) as total_orders,
         COALESCE(AVG(amount_spent), 0) as average_order_value
       FROM receipts 
-      WHERE user_id = $1 AND amount_spent > 0 ${dateFilter}
+      WHERE user_id = $1 ${dateFilter}
     `, params);
 
     const stats = statsResult.rows[0];
 
-    // Get top restaurants - only actual receipts
+    // Get top restaurants by order frequency, matching the dashboard summary.
     const restaurantsResult = await this.postgres.query(`
       SELECT 
         BTRIM(restaurant_name) as restaurant_name,
@@ -329,56 +467,58 @@ export class ReceiptService {
       WHERE user_id = $1
         AND restaurant_name IS NOT NULL
         AND BTRIM(restaurant_name) <> ''
-        AND amount_spent > 0 ${dateFilter}
+        ${dateFilter}
       GROUP BY BTRIM(restaurant_name)
-      ORDER BY total_spent DESC
+      ORDER BY count DESC, total_spent DESC, restaurant_name ASC
       LIMIT 10
     `, params);
 
-    // Get spending by type - only actual receipts
+    // Get spending by type.
     const typesResult = await this.postgres.query(`
       SELECT 
         receipt_type,
         COUNT(*) as count,
         SUM(amount_spent) as total_spent
       FROM receipts 
-      WHERE user_id = $1 AND amount_spent > 0 ${dateFilter}
+      WHERE user_id = $1 ${dateFilter}
       GROUP BY receipt_type
       ORDER BY total_spent DESC
     `, params);
 
-    // Get spending by month - only actual receipts
+    // Get spending by month in the user's timezone.
+    const timezoneParam = params.length + 1;
+    const monthParams = [...params, timezone];
     const monthsResult = await this.postgres.query(`
       SELECT 
-        TO_CHAR(order_date, 'YYYY-MM') as month,
+        TO_CHAR(order_date AT TIME ZONE $${timezoneParam}, 'YYYY-MM') as month,
         SUM(amount_spent) as total_spent,
         COUNT(*) as order_count
       FROM receipts 
-      WHERE user_id = $1 AND order_date IS NOT NULL AND amount_spent > 0 ${dateFilter}
-      GROUP BY TO_CHAR(order_date, 'YYYY-MM')
+      WHERE user_id = $1 AND order_date IS NOT NULL ${dateFilter}
+      GROUP BY TO_CHAR(order_date AT TIME ZONE $${timezoneParam}, 'YYYY-MM')
       ORDER BY month DESC
       LIMIT 12
-    `, params);
+    `, monthParams);
 
     return {
-      totalSpent: parseFloat(stats.total_spent),
+      totalSpent: Number(parseFloat(stats.total_spent).toFixed(2)),
       totalOrders: parseInt(stats.total_orders),
-      averageOrderValue: parseFloat(stats.average_order_value),
+      averageOrderValue: Number(parseFloat(stats.average_order_value).toFixed(2)),
       topRestaurants: restaurantsResult.rows
         .map((row: any) => ({
           name: String(row.restaurant_name).trim(),
           count: parseInt(row.count),
-          totalSpent: parseFloat(row.total_spent)
+          totalSpent: Number(parseFloat(row.total_spent).toFixed(2))
         }))
         .filter((restaurant: { name: string }) => /[\p{L}\p{N}]/u.test(restaurant.name)),
       spendingByType: typesResult.rows.map((row: any) => ({
         type: row.receipt_type,
         count: parseInt(row.count),
-        totalSpent: parseFloat(row.total_spent)
+        totalSpent: Number(parseFloat(row.total_spent).toFixed(2))
       })),
       spendingByMonth: monthsResult.rows.map((row: any) => ({
         month: row.month,
-        totalSpent: parseFloat(row.total_spent),
+        totalSpent: Number(parseFloat(row.total_spent).toFixed(2)),
         orderCount: parseInt(row.order_count)
       }))
     };

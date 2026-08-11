@@ -121,9 +121,12 @@ export class PostgresService {
           receipt_type VARCHAR(50) NOT NULL DEFAULT 'unknown',
           data_source VARCHAR(20) NOT NULL DEFAULT 'csv',
           restaurant_name VARCHAR(255),
-          order_date TIMESTAMP,
+          order_date TIMESTAMPTZ,
           amount_spent DECIMAL(10,2) NOT NULL DEFAULT 0,
           items JSONB,
+          source_identity TEXT,
+          first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -225,6 +228,197 @@ export class PostgresService {
       } catch (error) {
         console.log('Gmail OAuth columns already exist or migration failed');
       }
+
+      // Product-level permission and export lifecycle are deliberately stored
+      // separately from Google OAuth tokens. Possessing a durable token does
+      // not itself authorize background monitoring.
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS user_import_preferences (
+          user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          monitoring_consent_state VARCHAR(24) NOT NULL DEFAULT 'not_offered'
+            CHECK (monitoring_consent_state IN ('not_offered', 'declined', 'granted', 'revoked')),
+          monitoring_consent_version VARCHAR(50),
+          monitoring_consented_at TIMESTAMP,
+          monitoring_revoked_at TIMESTAMP,
+          export_status VARCHAR(40) NOT NULL DEFAULT 'not_started'
+            CHECK (export_status IN (
+              'not_started',
+              'requested_monitoring_enabled',
+              'requested_monitoring_disabled',
+              'file_ready',
+              'import_processing',
+              'completed',
+              'failed'
+            )),
+          export_requested_at TIMESTAMP,
+          export_updated_at TIMESTAMP,
+          gmail_import_status VARCHAR(24) NOT NULL DEFAULT 'never_started'
+            CHECK (gmail_import_status IN ('never_started', 'importing', 'completed', 'failed')),
+          gmail_import_updated_at TIMESTAMPTZ,
+          gmail_imported_count INTEGER NOT NULL DEFAULT 0,
+          gmail_import_error_code VARCHAR(80),
+          ongoing_tracking_consent_state VARCHAR(24) NOT NULL DEFAULT 'not_offered'
+            CHECK (ongoing_tracking_consent_state IN ('not_offered', 'declined', 'granted', 'revoked')),
+          ongoing_tracking_consent_version VARCHAR(50),
+          ongoing_tracking_consented_at TIMESTAMPTZ,
+          ongoing_tracking_revoked_at TIMESTAMPTZ,
+          tracking_status VARCHAR(24) NOT NULL DEFAULT 'inactive'
+            CHECK (tracking_status IN ('inactive', 'active', 'paused', 'reconnect_required', 'error')),
+          last_check_attempt_at TIMESTAMPTZ,
+          last_successful_check_at TIMESTAMPTZ,
+          last_stats_updated_at TIMESTAMPTZ,
+          last_new_order_at TIMESTAMPTZ,
+          last_tracking_error_at TIMESTAMPTZ,
+          last_tracking_error_code VARCHAR(80),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_import_preferences_export_status
+        ON user_import_preferences(export_status)
+      `);
+
+      // Add tracking/import lifecycle columns for databases created before the
+      // dashboard state model existed.
+      await this.query(`
+        ALTER TABLE user_import_preferences
+          ADD COLUMN IF NOT EXISTS gmail_import_status VARCHAR(24) NOT NULL DEFAULT 'never_started'
+            CHECK (gmail_import_status IN ('never_started', 'importing', 'completed', 'failed')),
+          ADD COLUMN IF NOT EXISTS gmail_import_updated_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS gmail_imported_count INTEGER NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS gmail_import_error_code VARCHAR(80),
+          ADD COLUMN IF NOT EXISTS ongoing_tracking_consent_state VARCHAR(24) NOT NULL DEFAULT 'not_offered'
+            CHECK (ongoing_tracking_consent_state IN ('not_offered', 'declined', 'granted', 'revoked')),
+          ADD COLUMN IF NOT EXISTS ongoing_tracking_consent_version VARCHAR(50),
+          ADD COLUMN IF NOT EXISTS ongoing_tracking_consented_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS ongoing_tracking_revoked_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS tracking_status VARCHAR(24) NOT NULL DEFAULT 'inactive'
+            CHECK (tracking_status IN ('inactive', 'active', 'paused', 'reconnect_required', 'error')),
+          ADD COLUMN IF NOT EXISTS last_check_attempt_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS last_successful_check_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS last_stats_updated_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS last_new_order_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS last_tracking_error_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS last_tracking_error_code VARCHAR(80)
+      `);
+
+      await this.query(`
+        ALTER TABLE receipts
+          ADD COLUMN IF NOT EXISTS external_id TEXT,
+          ADD COLUMN IF NOT EXISTS source_identity TEXT,
+          ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      `);
+      await this.query(`
+        UPDATE receipts
+        SET first_seen_at = created_at AT TIME ZONE 'UTC'
+        WHERE created_at IS NOT NULL
+          AND first_seen_at > (created_at AT TIME ZONE 'UTC') + INTERVAL '1 minute'
+      `);
+
+      // Give existing Gmail receipts a stable identity, collapse any legacy
+      // duplicates, then enforce one row per discovered Gmail order.
+      await this.query(`
+        UPDATE receipts
+        SET source_identity = CASE
+          WHEN external_id IS NOT NULL THEN 'external:' || external_id
+          WHEN order_date IS NOT NULL THEN
+            'fallback:' || LOWER(BTRIM(COALESCE(restaurant_name, 'unknown'))) || '|' ||
+            TO_CHAR(order_date AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI')
+          ELSE NULL
+        END
+        WHERE data_source = 'email' AND source_identity IS NULL
+      `);
+      await this.query(`
+        DELETE FROM receipts duplicate
+        USING receipts keeper
+        WHERE duplicate.user_id = keeper.user_id
+          AND duplicate.data_source = 'email'
+          AND keeper.data_source = 'email'
+          AND duplicate.source_identity = keeper.source_identity
+          AND duplicate.source_identity IS NOT NULL
+          AND (
+            duplicate.amount_spent < keeper.amount_spent
+            OR (duplicate.amount_spent = keeper.amount_spent AND duplicate.id::TEXT > keeper.id::TEXT)
+          )
+      `);
+      await this.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_user_source_identity_unique
+        ON receipts(user_id, data_source, source_identity)
+        WHERE source_identity IS NOT NULL
+      `);
+
+      // Privacy-safe lifecycle audit used for funnel measurement and consent
+      // history. It stores state transitions only—never email or receipt data.
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS user_import_preference_events (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          event_name VARCHAR(60) NOT NULL
+            CHECK (event_name IN (
+              'monitoring_consent_granted',
+              'monitoring_consent_declined',
+              'monitoring_consent_revoked',
+              'ongoing_tracking_consent_granted',
+              'ongoing_tracking_consent_declined',
+              'ongoing_tracking_consent_revoked',
+              'export_requested',
+              'export_file_ready',
+              'export_import_processing',
+              'export_completed',
+              'export_failed'
+            )),
+          metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await this.query(`
+        ALTER TABLE user_import_preference_events
+          DROP CONSTRAINT IF EXISTS user_import_preference_events_event_name_check;
+        ALTER TABLE user_import_preference_events
+          ADD CONSTRAINT user_import_preference_events_event_name_check
+          CHECK (event_name IN (
+            'monitoring_consent_granted', 'monitoring_consent_declined', 'monitoring_consent_revoked',
+            'ongoing_tracking_consent_granted', 'ongoing_tracking_consent_declined', 'ongoing_tracking_consent_revoked',
+            'export_requested', 'export_file_ready', 'export_import_processing', 'export_completed', 'export_failed'
+          ))
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_import_preference_events_user_created
+        ON user_import_preference_events(user_id, created_at DESC)
+      `);
+
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_import_preference_events_name_created
+        ON user_import_preference_events(event_name, created_at DESC)
+      `);
+
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS gmail_sync_runs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          trigger_type VARCHAR(20) NOT NULL
+            CHECK (trigger_type IN ('manual', 'background')),
+          outcome VARCHAR(20) NOT NULL DEFAULT 'running'
+            CHECK (outcome IN ('running', 'success', 'partial', 'failed')),
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          emails_scanned INTEGER NOT NULL DEFAULT 0,
+          receipts_processed INTEGER NOT NULL DEFAULT 0,
+          new_orders INTEGER NOT NULL DEFAULT 0,
+          updated_orders INTEGER NOT NULL DEFAULT 0,
+          unchanged_orders INTEGER NOT NULL DEFAULT 0,
+          error_code VARCHAR(80)
+        )
+      `);
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_gmail_sync_runs_user_started
+        ON gmail_sync_runs(user_id, started_at DESC)
+      `);
 
       // Create verification_codes table
       await this.query(`
@@ -357,7 +551,7 @@ export class PostgresService {
     try {
       await this.query(`
         ALTER TABLE receipts 
-        ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMP
+        ADD COLUMN IF NOT EXISTS delivery_time TIMESTAMPTZ
       `);
       console.log('✅ Delivery time column added (or already exists)');
     } catch (error: any) {
@@ -365,6 +559,70 @@ export class PostgresService {
         console.error('❌ Delivery time column migration failed:', error.message);
         throw error; // Re-throw critical errors
       }
+    }
+
+    // 3.1 Receipt dates represent instants. Older databases used a timezone-
+    // naive column even though the application consistently treated values as
+    // UTC; convert those values explicitly so reads are host independent.
+    try {
+      await this.query(`
+        DO $$
+        DECLARE
+          order_date_needs_conversion BOOLEAN;
+          year_trigger_existed BOOLEAN;
+        BEGIN
+          SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'receipts'
+              AND column_name = 'order_date'
+              AND data_type = 'timestamp without time zone'
+          ) INTO order_date_needs_conversion;
+
+          IF order_date_needs_conversion THEN
+            -- PostgreSQL will not alter a column referenced by a trigger
+            -- definition. Preserve whether the trigger existed, remove it for
+            -- the conversion, and restore it in this same atomic DO block.
+            SELECT EXISTS (
+              SELECT 1 FROM pg_trigger
+              WHERE tgrelid = 'receipts'::regclass
+                AND tgname = 'trigger_update_receipt_year'
+                AND NOT tgisinternal
+            ) INTO year_trigger_existed;
+
+            IF year_trigger_existed THEN
+              DROP TRIGGER trigger_update_receipt_year ON receipts;
+            END IF;
+
+            ALTER TABLE receipts
+              ALTER COLUMN order_date TYPE TIMESTAMPTZ
+              USING order_date AT TIME ZONE 'UTC';
+
+            IF year_trigger_existed THEN
+              CREATE TRIGGER trigger_update_receipt_year
+              BEFORE INSERT OR UPDATE OF order_date ON receipts
+              FOR EACH ROW
+              EXECUTE FUNCTION update_receipt_year();
+            END IF;
+          END IF;
+
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'receipts'
+              AND column_name = 'delivery_time'
+              AND data_type = 'timestamp without time zone'
+          ) THEN
+            ALTER TABLE receipts
+              ALTER COLUMN delivery_time TYPE TIMESTAMPTZ
+              USING delivery_time AT TIME ZONE 'UTC';
+          END IF;
+        END $$;
+      `);
+      console.log('✅ Receipt timestamps use timezone-aware columns');
+    } catch (error: any) {
+      console.error('❌ Receipt timezone migration failed:', error.message);
+      throw error;
     }
 
     // 3.5 Add external_id column for receipt deduplication (Uber UUIDs)

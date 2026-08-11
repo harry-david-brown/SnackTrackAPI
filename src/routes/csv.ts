@@ -145,6 +145,9 @@ router.post('/import',
     }
 
     const filePath = req.file.path;
+    let exportLifecycleStarted = false;
+    let exportCompleted = false;
+    let lifecycleUserId: string | null = null;
 
     try {
       const userId = req.body.userId;
@@ -152,6 +155,9 @@ router.post('/import',
         // Should be caught by validateOwnership if it wasn't empty, but good to double check
         return res.status(400).json({ error: 'userId is required' });
       }
+      lifecycleUserId = userId;
+      exportLifecycleStarted = await container.importPreferencesRepository
+        .setExportStatus(userId, 'import_processing');
 
       let csvBuffer: Buffer;
       let fileName = req.file.originalname;
@@ -219,6 +225,8 @@ router.post('/import',
 
       if (importResult.success && importResult.receipts.length > 0) {
         await csvImportService.importReceipts(importResult.receipts, userId);
+        await container.importPreferencesRepository.setExportStatus(userId, 'completed');
+        exportCompleted = true;
 
         // Invalidate cached analytics since user data changed
         await cacheService.invalidateAllUserCaches(userId);
@@ -249,6 +257,14 @@ router.post('/import',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     } finally {
+      if (exportLifecycleStarted && !exportCompleted && lifecycleUserId) {
+        await container.importPreferencesRepository
+          .setExportStatus(lifecycleUserId, 'failed')
+          .catch((statusError) => {
+            console.error('Failed to update export lifecycle after import failure:', statusError);
+          });
+      }
+
       // Critical: Clean up temp file
       if (req.file && req.file.path) {
         fs.unlink(req.file.path, (err) => {

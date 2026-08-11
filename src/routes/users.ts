@@ -5,7 +5,12 @@ import { validateUUIDParam, validateUserCreation } from '../middleware/validatio
 import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
 import { cacheService } from '../services/core/CacheService';
-import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
+import {
+  detectTimezoneFromRequest,
+  getDefaultTimezone,
+  getLocalDateKey,
+  isValidTimezone,
+} from '../utils/timezone';
 
 const router = Router();
 const databaseService = container.databaseService;
@@ -209,28 +214,38 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
   try {
     const userId = req.params.id;
     const includeWrapped = req.query.includeWrapped === 'true';
+
+    // Keep the analytics timezone aligned with the signed-in device. This also
+    // repairs older Google/Apple accounts that were created with the fallback.
+    let user = await container.userRepository.findById(userId);
+    if (!user) {
+      throw new NotFoundError('User', userId);
+    }
+    const requestTimezone = detectTimezoneFromRequest(req);
+    if (requestTimezone && requestTimezone !== user.timezone) {
+      await container.userRepository.updateTimezone(userId, requestTimezone);
+      await cacheService.invalidateAllUserCaches(userId);
+      user = { ...user, timezone: requestTimezone };
+    }
+    const analyticsTimezone = user.timezone || getDefaultTimezone();
     
-    // Check cache first (different cache key if wrapped analytics requested).
-    // v3: wrapped payload gained explicit coverage metadata and a stricter
-    // percentile cohort gate — use a fresh key to skip stale cached payloads.
-    const cacheKey = includeWrapped ? `${userId}-wrapped-v3` : userId;
+    // Timezone and metric-versioned keys prevent a device timezone correction
+    // or formula fix from returning an older cached payload.
+    const cacheKey = includeWrapped
+      ? `${userId}-wrapped-v4-${analyticsTimezone}`
+      : `${userId}-v4-${analyticsTimezone}`;
     const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
       return res.json(cachedSummary);
     }
     
-    // Get user details
-    const user = await container.userRepository.findById(userId);
-    if (!user) {
-      throw new NotFoundError('User', userId);
-    }
-
     // Get user's receipts
     const receipts = await container.receiptRepository.findByUserId(userId);
     
     // Calculate statistics
-    const totalSpent = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
-    const averageSpent = receipts.length > 0 ? totalSpent / receipts.length : 0;
+    const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
+    const totalSpent = roundMoney(receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0));
+    const averageSpent = receipts.length > 0 ? roundMoney(totalSpent / receipts.length) : 0;
     const totalReceipts = receipts.length;
     
     // Data source breakdown
@@ -242,12 +257,14 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     // Monthly breakdown
     const monthlyBreakdown = receipts.reduce((acc, receipt) => {
       if (!receipt.orderDate) return acc;
-      const month = receipt.orderDate.toISOString().substring(0, 7); // YYYY-MM
+      const localDate = getLocalDateKey(receipt.orderDate, analyticsTimezone);
+      if (!localDate) return acc;
+      const month = localDate.substring(0, 7); // YYYY-MM in the user's timezone
       if (!acc[month]) {
         acc[month] = { count: 0, total: 0 };
       }
       acc[month].count++;
-      acc[month].total += receipt.amountSpent;
+      acc[month].total = roundMoney(acc[month].total + receipt.amountSpent);
       return acc;
     }, {} as Record<string, { count: number; total: number }>);
 
@@ -261,13 +278,13 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
         acc[restaurant] = { count: 0, total: 0 };
       }
       acc[restaurant].count++;
-      acc[restaurant].total += receipt.amountSpent;
+      acc[restaurant].total = roundMoney(acc[restaurant].total + receipt.amountSpent);
       return acc;
     }, {} as Record<string, { count: number; total: number }>);
 
     const topRestaurants = Object.entries(restaurantStats)
       .map(([name, stats]) => ({ name, ...stats }))
-      .sort((a, b) => b.total - a.total)
+      .sort((a, b) => b.count - a.count || b.total - a.total || a.name.localeCompare(b.name))
       .slice(0, 10);
 
     // Validation insights
@@ -439,9 +456,7 @@ router.put('/:id/timezone', authenticateToken, validateOwnership, validateUUIDPa
       });
     }
 
-    // Validate timezone format (basic validation)
-    // IANA timezones are typically in format: Continent/City
-    if (!/^[A-Za-z_]+\/[A-Za-z_]+/.test(timezone)) {
+    if (!isValidTimezone(timezone)) {
       return res.status(400).json({ 
         error: 'Invalid timezone format',
         message: 'Timezone must be a valid IANA timezone identifier (e.g., "America/New_York", "Europe/London")'
@@ -455,6 +470,7 @@ router.put('/:id/timezone', authenticateToken, validateOwnership, validateUUIDPa
     }
 
     await databaseService.updateUserTimezone(req.params.id, timezone);
+    await cacheService.invalidateAllUserCaches(req.params.id);
     
     res.json({ 
       message: 'Timezone updated successfully',

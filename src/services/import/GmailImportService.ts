@@ -8,6 +8,8 @@ import { ReceiptExtractor, RawEmail, ExtractionResult, ServiceType } from '../ex
 import * as fs from 'fs';
 import * as path from 'path';
 import pLimit from 'p-limit';
+import { getDefaultTimezone, parseReceiptLocalDateTime } from '../../utils/timezone';
+import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
 
 export interface GmailImportResult {
   success: boolean;
@@ -17,10 +19,13 @@ export interface GmailImportResult {
   totalAmount: number;
   errors: string[];
   receipts: Receipt[];
+  newOrders: number;
+  updatedOrders: number;
+  unchangedOrders: number;
 }
 
 /**
- * Service to orchestrate importing Uber Eats receipts from Gmail
+ * Service to orchestrate incremental Uber Eats receipt synchronization from Gmail
  * Uses existing email infrastructure to fetch, filter, and parse emails
  * 
  * Performance optimizations:
@@ -32,25 +37,31 @@ export class GmailImportService {
   private gmailClient: GmailClient;
   private extractor: ReceiptExtractor;
   private receiptService: ReceiptService;
+  private importPreferences: ImportPreferencesRepository;
 
   constructor(postgres: PostgresService) {
     this.gmailClient = new GmailClient();
     this.extractor = new ReceiptExtractor();
     this.receiptService = new ReceiptService(postgres);
+    this.importPreferences = new ImportPreferencesRepository(postgres);
   }
 
   /**
    * Import Uber Eats receipts from Gmail for a user
-   * Always replaces existing email-based receipts before importing new ones
+   * Upserts existing email receipts and preserves their original discovery time.
    * @param user User object with Gmail OAuth tokens
    * 
    * Performance optimizations:
    * - Parallel extraction with concurrency limiting (10 concurrent)
    * - Combined classification + extraction (single pass, no redundant work)
    */
-  async importFromGmail(user: User): Promise<GmailImportResult> {
+  async importFromGmail(
+    user: User,
+    triggerType: 'manual' | 'background' = 'manual'
+  ): Promise<GmailImportResult> {
     const errors: string[] = [];
     const criticalErrors: string[] = []; // Errors that should mark import as failed
+    const syncRunId = await this.importPreferences.startSyncRun(user.id, triggerType);
 
     try {
       const hasRefreshToken = !!user.gmailRefreshToken;
@@ -104,7 +115,11 @@ export class GmailImportService {
       for (const { email, result } of extractionResults) {
         if (result.classification.isReceipt && result.data) {
           // Convert extraction result to Receipt
-          const receipt = this.convertExtractionToReceipt(email.userId, result);
+          const receipt = this.convertExtractionToReceipt(
+            email.userId,
+            result,
+            user.timezone || getDefaultTimezone()
+          );
           if (receipt) {
             receipts.push(receipt);
             emailReceiptPairs.push({ email, receipt });
@@ -173,31 +188,28 @@ export class GmailImportService {
         }
       }
 
-      const validReceipts = foodReceipts;
-      console.log(`📧 ${validReceipts.length} food delivery receipts ready for import`);
-
-      // Always delete existing email-based receipts BEFORE processing new ones
-      // This ensures we replace all email-based receipts with fresh imports
-      try {
-        const deletedCount = await this.deleteEmailReceipts(user.id);
-        console.log(`🗑️  Deleted ${deletedCount} existing email-based receipts for user ${user.id}`);
-        } catch (error) {
-          const errorMsg = `Failed to delete existing email receipts: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          console.error(`❌ ${errorMsg}`);
-          errors.push(errorMsg);
-          criticalErrors.push(errorMsg); // Deletion failure is critical
-          // Continue with import even if deletion fails - user should be notified
-        }
-
-      // Calculate total amount (from valid food receipts)
-      const totalAmount = validReceipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
+      // Once a full export exists, it is authoritative through its latest
+      // order. Import only newer Gmail receipts so historical orders are not
+      // counted twice across CSV and email sources.
+      const csvCutoff = await this.getLatestCsvReceiptDate(user.id);
+      const validReceipts = csvCutoff
+        ? foodReceipts.filter(receipt => receipt.orderDate && receipt.orderDate > csvCutoff)
+        : foodReceipts;
+      if (csvCutoff) {
+        console.log(`📧 Skipped ${foodReceipts.length - validReceipts.length} Gmail receipts already covered by the uploaded export`);
+      }
+      console.log(`📧 ${validReceipts.length} delivery receipts ready for import`);
 
       // Import receipts to database (only valid receipts with restaurant names)
       let importedCount = 0;
+      let newOrders = 0;
+      let updatedOrders = 0;
+      let unchangedOrders = 0;
       if (validReceipts.length > 0) {
 
         // Deduplicate receipts before saving
-        // Strategy: Group by externalId (Uber UUID), keep the one with highest total (Tip Update)
+        // Strategy: Group by externalId when available, otherwise by normalized
+        // merchant + order minute. Keep the highest total (tip-update receipt).
         // Calculate Naive Total (Pre-dedupe)
         const naiveTotal = validReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
         console.log(`💰 DEBUG: Naive Total (All Receipts): $${naiveTotal.toFixed(2)}`);
@@ -226,19 +238,23 @@ export class GmailImportService {
         let higherAmountReplacements = 0;
 
         for (const receipt of validReceipts) {
-          if (receipt.externalId) {
-            const existing = uniqueReceipts.get(receipt.externalId);
+          const fallbackKey = receipt.orderDate
+            ? `${receipt.restaurantName?.trim().toLowerCase() || 'unknown'}|${receipt.orderDate.toISOString().slice(0, 16)}`
+            : null;
+          const dedupeKey = receipt.externalId
+            ? `external:${receipt.externalId}`
+            : fallbackKey ? `fallback:${fallbackKey}` : null;
+
+          if (dedupeKey) {
+            const existing = uniqueReceipts.get(dedupeKey);
             if (!existing) {
-              uniqueReceipts.set(receipt.externalId, receipt);
+              uniqueReceipts.set(dedupeKey, receipt);
             } else {
               duplicatesFound++;
               // Conflict: Same Order UUID. Keep the one with higher total (Tip Update)
               if (receipt.amountSpent > existing.amountSpent) {
                 higherAmountReplacements++;
-                uniqueReceipts.set(receipt.externalId, receipt);
-                console.log(`♻️  Replacing receipt for order ${receipt.externalId} with higher amount ($${receipt.amountSpent} vs $${existing.amountSpent})`);
-              } else {
-                console.log(`Start skipping duplicate for order ${receipt.externalId} ($${receipt.amountSpent} vs $${existing.amountSpent})`);
+                uniqueReceipts.set(dedupeKey, receipt);
               }
             }
           } else {
@@ -266,11 +282,14 @@ export class GmailImportService {
 
         console.log(`Analyzed ${validReceipts.length} receipts. Found ${validReceiptsList.length} unique orders.`);
 
-        // OPTIMIZATION: Use batch insert for 10-20x faster database writes
-        // Receipts are already deduplicated above, so we can insert directly
+        // Incrementally merge receipts. Existing rows keep first_seen_at, while
+        // tip adjustments update the order without pretending it is new.
         try {
-          const insertedIds = await this.receiptService.createReceiptsBatch(validReceiptsList);
-          importedCount = insertedIds.length;
+          const upsertResult = await this.receiptService.upsertEmailReceipts(validReceiptsList);
+          newOrders = upsertResult.newOrders;
+          updatedOrders = upsertResult.updatedOrders;
+          unchangedOrders = upsertResult.unchangedOrders;
+          importedCount = newOrders + updatedOrders + unchangedOrders;
           
           // Log summary instead of individual receipts for cleaner output
           if (importedCount > 0) {
@@ -294,6 +313,23 @@ export class GmailImportService {
         await cacheService.invalidateAllUserCaches(user.id);
         console.log(`✅ Imported ${importedCount} receipts for user ${user.id}`);
 
+        if (criticalErrors.length > 0) {
+          await this.importPreferences.failSyncRun(syncRunId, user.id, 'GMAIL_IMPORT_WRITE_FAILED');
+        } else {
+          await this.importPreferences.completeSyncRun(
+          syncRunId,
+          user.id,
+          errors.length > 0 ? 'partial' : 'success',
+          {
+            emailsScanned: emails.length,
+            receiptsProcessed: receipts.length,
+            newOrders,
+            updatedOrders,
+            unchangedOrders,
+          }
+          );
+        }
+
         // Return the correct final total
         // Only mark as failed if there are critical errors (not conversion errors for non-receipt emails)
         return {
@@ -303,11 +339,22 @@ export class GmailImportService {
           totalReceiptsImported: importedCount,
           totalAmount: finalTotal, // Use deduped total
           errors,
-          receipts: validReceiptsList // return deduped list
+          receipts: validReceiptsList, // return deduped list
+          newOrders,
+          updatedOrders,
+          unchangedOrders,
         };
       }
 
-      // Fallback if loop was skipped (should satisfy TS)
+      await this.importPreferences.completeSyncRun(syncRunId, user.id, 'success', {
+        emailsScanned: emails.length,
+        receiptsProcessed: receipts.length,
+        newOrders: 0,
+        updatedOrders: 0,
+        unchangedOrders: 0,
+      });
+
+      // A successful scan can legitimately find no matching receipts.
       return {
         success: criticalErrors.length === 0,
         totalEmailsFound: emails.length,
@@ -315,12 +362,16 @@ export class GmailImportService {
         totalReceiptsImported: importedCount,
         totalAmount: 0,
         errors,
-        receipts: []
+        receipts: [],
+        newOrders: 0,
+        updatedOrders: 0,
+        unchangedOrders: 0,
       };
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Gmail import error:', errorMsg);
+      await this.importPreferences.failSyncRun(syncRunId, user.id, this.getErrorCode(error));
 
       return {
         success: false,
@@ -329,23 +380,32 @@ export class GmailImportService {
         totalReceiptsImported: 0,
         totalAmount: 0,
         errors: [errorMsg],
-        receipts: []
+        receipts: [],
+        newOrders: 0,
+        updatedOrders: 0,
+        unchangedOrders: 0,
       };
     }
   }
 
-  /**
-   * Delete all email-based receipts for a user
-   * @returns Number of receipts deleted
-   */
-  private async deleteEmailReceipts(userId: string): Promise<number> {
-    // This would be better as a method in ReceiptService, but for now we'll use direct query
+  private getErrorCode(error: unknown): string {
+    const status = (error as any)?.response?.status;
+    const code = (error as any)?.code;
+    if (code) return String(code).substring(0, 80);
+    if (status) return `HTTP_${status}`;
+    return 'GMAIL_SYNC_FAILED';
+  }
+
+  private async getLatestCsvReceiptDate(userId: string): Promise<Date | null> {
     const postgres = (this.receiptService as any).postgres as PostgresService;
     const result = await postgres.query(
-      "DELETE FROM receipts WHERE user_id = $1 AND data_source = 'email'",
+      "SELECT MAX(order_date) AS latest FROM receipts WHERE user_id = $1 AND data_source = 'csv'",
       [userId]
     );
-    return result.rowCount || 0;
+    const value = result.rows[0]?.latest;
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   /**
@@ -376,7 +436,11 @@ export class GmailImportService {
    * Convert extraction result to Receipt object
    * Maps the extraction data format to the Receipt model
    */
-  private convertExtractionToReceipt(userId: string, result: ExtractionResult): Receipt | null {
+  private convertExtractionToReceipt(
+    userId: string,
+    result: ExtractionResult,
+    timezone: string
+  ): Receipt | null {
     const data = result.data;
     if (!data) return null;
 
@@ -413,13 +477,14 @@ export class GmailImportService {
     }
 
     // Create receipt with extracted data
+    const localOrderDate = parseReceiptLocalDateTime(data.orderDate, data.orderTime, timezone);
     const receipt = new Receipt(
       userId,
       [], // Items not extracted from email HTML currently
       data.total,
       receiptType,
       data.merchant || 'Unknown Restaurant',
-      data.parsedDate || undefined,
+      localOrderDate || data.parsedDate || undefined,
       DataSource.EMAIL,
       undefined, // deliveryTime not extracted
       data.orderId || undefined // externalId for deduplication

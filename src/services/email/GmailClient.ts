@@ -59,35 +59,119 @@ export class GmailClient implements EmailClient {
     return expiry > Date.now();
   }
 
+  private async createAuthenticatedGmailClient(user: User) {
+    const { clientId, clientSecret, redirectUri } = this.getRequiredOAuthConfig();
+    const hasRefreshToken = !!user.gmailRefreshToken;
+    const hasAccessToken = this.hasUsableAccessToken(user);
+
+    if (!hasRefreshToken && !hasAccessToken) {
+      throw new Error('No usable Gmail credentials available for user');
+    }
+
+    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    if (hasRefreshToken) {
+      oAuth2Client.setCredentials({ refresh_token: user.gmailRefreshToken! });
+      await oAuth2Client.getAccessToken();
+    } else {
+      oAuth2Client.setCredentials({ access_token: user.gmailAccessToken! });
+    }
+
+    return google.gmail({ version: 'v1', auth: oAuth2Client });
+  }
+
+  /**
+   * Looks only for Uber's export-ready notification after the user requested it.
+   * This deliberately does not open links or download the export archive.
+   */
+  async hasUberExportReadyEmail(user: User, requestedAt: string): Promise<boolean> {
+    const requestedTimestamp = new Date(requestedAt).getTime();
+    if (Number.isNaN(requestedTimestamp)) {
+      return false;
+    }
+
+    if (config.shouldUseMockData() && !config.isProduction()) {
+      const emails = this.loadEmailsFromDebugFolder(user);
+      return emails.some((email) => this.isUberExportReadyMessage(
+        email.from,
+        email.subject ?? '',
+        email.body
+      ));
+    }
+
+    const gmail = await this.createAuthenticatedGmailClient(user);
+    const afterSeconds = Math.floor(requestedTimestamp / 1000);
+    const query = [
+      '(from:noreply@uber.com OR from:uber.com OR from:ubereats.com)',
+      `after:${afterSeconds}`,
+      '(subject:"Your Uber data is ready for download" OR "Your Uber data is now ready" OR "GO TO DOWNLOAD PAGE")',
+    ].join(' ');
+
+    try {
+      const listResponse = await gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+        maxResults: 10,
+      });
+
+      const candidates = listResponse.data.messages ?? [];
+      for (const candidate of candidates) {
+        if (!candidate.id) continue;
+
+        const messageResponse = await gmail.users.messages.get({
+          userId: 'me',
+          id: candidate.id,
+        });
+        const payload = messageResponse.data.payload;
+        let from = '';
+        let subject = '';
+        for (const header of payload?.headers ?? []) {
+          if (header.name?.toLowerCase() === 'from') from = header.value ?? '';
+          if (header.name?.toLowerCase() === 'subject') subject = header.value ?? '';
+        }
+
+        const body = `${messageResponse.data.snippet ?? ''}\n${this.extractBody(payload)}`;
+        if (this.isUberExportReadyMessage(from, subject, body)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown Gmail API error';
+      throw new Error(`Failed to check for an Uber export-ready email: ${errorMessage}`);
+    }
+  }
+
+  private isUberExportReadyMessage(from: string, subject: string, body: string): boolean {
+    const normalizedFrom = from.toLowerCase();
+    const isFromUber = /@(?:[a-z0-9-]+\.)?(?:uber|ubereats)\.com\b/i.test(normalizedFrom);
+    if (!isFromUber) {
+      return false;
+    }
+
+    const normalizedSubject = subject.toLowerCase();
+    const normalizedBody = body.toLowerCase();
+    const matchesConfirmedEmail = normalizedFrom.includes('noreply@uber.com')
+      && normalizedSubject.includes('your uber data is ready for download');
+    const hasReadyLanguage = normalizedBody.includes('your uber data is now ready')
+      || normalizedBody.includes('ready for you to download');
+    const hasDownloadAction = normalizedBody.includes('go to download page');
+    const matchesKnownTemplate = normalizedSubject.includes('download your data')
+      && normalizedBody.includes('available for 7 days')
+      && normalizedBody.includes('sign in at the link below');
+
+    return matchesConfirmedEmail
+      || (hasReadyLanguage && hasDownloadAction)
+      || matchesKnownTemplate;
+  }
+
   async getEmails(user: User): Promise<Email[]> {
     if (config.shouldUseMockData() && !config.isProduction()) {
       console.log('🧪 USE_MOCK_DATA enabled, loading emails from debug-emails folder.');
       return this.loadEmailsFromDebugFolder(user);
     }
 
-    const { clientId, clientSecret, redirectUri } = this.getRequiredOAuthConfig();
-
-    const hasRefreshToken = !!user.gmailRefreshToken;
-    const hasAccessToken = this.hasUsableAccessToken(user);
-
-    if (!hasRefreshToken && !hasAccessToken) {
-      const errorMsg = 'No usable Gmail credentials available for user';
-      console.error(`❌ ${errorMsg}`);
-      throw new Error(errorMsg);
-    }
-
-    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-
-    if (hasRefreshToken) {
-      console.log('🔐 Using refresh token for Gmail API access');
-      oAuth2Client.setCredentials({ refresh_token: user.gmailRefreshToken! });
-      await oAuth2Client.getAccessToken();
-    } else {
-      console.log('🔐 Using stored access token for Gmail API access');
-      oAuth2Client.setCredentials({ access_token: user.gmailAccessToken! });
-    }
-
-    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+    const gmail = await this.createAuthenticatedGmailClient(user);
     const emailList: Email[] = [];
 
     try {

@@ -94,9 +94,17 @@ export class ReceiptDataExtractor {
     const savings = this.extractSavings(plainText);
 
     // Determine currency from extracted values
-    const currency = this.determineCurrency(
+    let currency = this.determineCurrency(
       total, subtotal, tax, tip, deliveryFee, serviceFee
     );
+    // Uber commonly renders Canadian receipts with a bare "$". Infer CAD only
+    // when the template itself contains a strong Canadian entity/address cue.
+    if (
+      currency === Currency.USD
+      && /Uber Portier Canada|\bCanada\b|,\s*(?:ON|QC|BC|AB|MB|SK|NS|NB|NL|PE|NT|NU|YT)\b/i.test(plainText)
+    ) {
+      currency = Currency.CAD;
+    }
 
     // Extract additional metadata
     const deliveryAddress = this.extractDeliveryAddress(plainText, htmlBody);
@@ -229,25 +237,33 @@ export class ReceiptDataExtractor {
     let orderTime: string | null = null;
     let parsedDate: Date | null = null;
 
+    // Prefer the last timestamp in the receipt header. Saved Gmail pages add
+    // their own sent time before the actual Uber body; tip-update emails also
+    // repeat the later payment time below the receipt total.
+    const bodyMarker = text.search(/Thanks for|Here's your receipt|Your order from|\bTotal\b/i);
+    const headerText = bodyMarker > 0 ? text.slice(0, bodyMarker) : text;
+
     // Try word-based dates first (more reliable parsing)
-    const wordDateMatch = text.match(PATTERNS.dateWords);
-    if (wordDateMatch) {
-      orderDate = wordDateMatch[0];
-      parsedDate = new Date(orderDate);
-      if (isNaN(parsedDate.getTime())) {
-        parsedDate = null;
+    const wordDateMatches = headerText.match(PATTERNS.dateWords) || text.match(PATTERNS.dateWords);
+    if (wordDateMatches?.length) {
+      orderDate = wordDateMatches[wordDateMatches.length - 1];
+      const match = orderDate.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+      if (match) {
+        const month = new Date(`${match[1]} 1, 2000`).getUTCMonth();
+        parsedDate = new Date(Date.UTC(Number(match[3]), month, Number(match[2])));
       }
     }
 
     // Try numeric dates if no word date found
     if (!orderDate) {
-      const numericMatch = PATTERNS.dateNumeric.exec(text);
+      PATTERNS.dateNumeric.lastIndex = 0;
+      const numericMatch = PATTERNS.dateNumeric.exec(headerText) || PATTERNS.dateNumeric.exec(text);
       if (numericMatch) {
         orderDate = numericMatch[0];
         // Parse MM/DD/YY format
         const [, month, day, year] = numericMatch;
         const fullYear = year.length === 2 ? `20${year}` : year;
-        parsedDate = new Date(parseInt(fullYear), parseInt(month) - 1, parseInt(day));
+        parsedDate = new Date(Date.UTC(parseInt(fullYear), parseInt(month) - 1, parseInt(day)));
         if (isNaN(parsedDate.getTime())) {
           parsedDate = null;
         }
@@ -255,9 +271,9 @@ export class ReceiptDataExtractor {
     }
 
     // Extract time
-    const timeMatch = text.match(PATTERNS.time);
-    if (timeMatch) {
-      orderTime = timeMatch[0];
+    const timeMatches = headerText.match(PATTERNS.time) || text.match(PATTERNS.time);
+    if (timeMatches?.length) {
+      orderTime = timeMatches[timeMatches.length - 1];
 
       // If we have both date and time, combine them
       if (parsedDate && orderTime) {
@@ -270,7 +286,7 @@ export class ReceiptDataExtractor {
           if (isPM && hours !== 12) hours += 12;
           if (!isPM && hours === 12) hours = 0;
 
-          parsedDate.setHours(hours, minutes, 0, 0);
+          parsedDate.setUTCHours(hours, minutes, 0, 0);
         }
       }
     }
@@ -476,4 +492,3 @@ export class ReceiptDataExtractor {
     return null;
   }
 }
-

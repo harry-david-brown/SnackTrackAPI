@@ -20,6 +20,7 @@ import { sentryConfig } from './config/sentry';
 import { redisConfig } from './config/redis';
 import { logger, logRequest } from './config/logger';
 import * as Sentry from '@sentry/node';
+import { container } from './services/core/ServiceContainer';
 
 // Helper to get log level (for conditional logging)
 const getLogLevel = (): string => {
@@ -206,9 +207,26 @@ async function startServer() {
       }
     });
 
+    // In production, ongoing tracking runs hourly by default. Set
+    // TRACKING_SYNC_INTERVAL_MINUTES=0 when an external scheduler calls the
+    // protected batch endpoint instead.
+    const configuredTrackingInterval = Number(process.env.TRACKING_SYNC_INTERVAL_MINUTES);
+    const trackingIntervalMinutes = Number.isFinite(configuredTrackingInterval)
+      ? Math.max(0, configuredTrackingInterval)
+      : config.isProduction() ? 60 : 0;
+    const trackingTimer = trackingIntervalMinutes > 0
+      ? setInterval(() => {
+          void container.ongoingTrackingService.runEligibleBatch(100)
+            .then(result => logger.info('Ongoing Gmail tracking batch completed', result))
+            .catch(error => logger.error('Ongoing Gmail tracking batch failed', { error: error instanceof Error ? error.message : String(error) }));
+        }, trackingIntervalMinutes * 60 * 1000)
+      : null;
+    trackingTimer?.unref();
+
     // Graceful shutdown handling
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received, starting graceful shutdown...`);
+      if (trackingTimer) clearInterval(trackingTimer);
 
       server.close(async () => {
         logger.info('HTTP server closed');

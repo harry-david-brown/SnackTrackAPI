@@ -13,6 +13,8 @@ import { EmailSenderService } from '../email/EmailSender';
 import { AlertingService } from '../monitoring/AlertingService';
 import { OAuthRepository } from '../data/OAuthRepository';
 import { CacheService } from './CacheService';
+import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import { OngoingTrackingService } from '../import/OngoingTrackingService';
 
 /**
  * Simple service container for dependency injection
@@ -44,6 +46,7 @@ export class ServiceContainer {
     this.services.set('userRepository', new UserRepository(this.get('postgres')));
     this.services.set('oauthRepository', new OAuthRepository(this.get('postgres')));
     this.services.set('receiptRepository', new ReceiptRepository(this.get('postgres')));
+    this.services.set('importPreferencesRepository', new ImportPreferencesRepository(this.get('postgres')));
 
     // Cache service
     this.services.set('cacheService', new CacheService());
@@ -68,6 +71,7 @@ export class ServiceContainer {
     this.services.set('csvImportService', new CsvImportService(this.get('postgres')));
     this.services.set('receiptParserService', new ReceiptParserService());
     this.services.set('emailFilterService', new EmailFilterService());
+    this.services.set('ongoingTrackingService', new OngoingTrackingService(this.get('postgres')));
 
     // Analytics services
     this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
@@ -99,6 +103,10 @@ export class ServiceContainer {
 
   get receiptRepository(): ReceiptRepository {
     return this.get<ReceiptRepository>('receiptRepository');
+  }
+
+  get importPreferencesRepository(): ImportPreferencesRepository {
+    return this.get<ImportPreferencesRepository>('importPreferencesRepository');
   }
 
   get receiptLookupService(): ReceiptLookupService {
@@ -139,6 +147,10 @@ export class ServiceContainer {
 
   get alertingService(): AlertingService {
     return this.get<AlertingService>('alertingService');
+  }
+
+  get ongoingTrackingService(): OngoingTrackingService {
+    return this.get<OngoingTrackingService>('ongoingTrackingService');
   }
 }
 

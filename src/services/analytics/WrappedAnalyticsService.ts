@@ -20,7 +20,14 @@ import {
   WeekendWarrior,
   DeliveryWaits
 } from './WrappedAnalyticsTypes';
-import { getLocalDate, getLocalHour, getLocalDay } from '../../utils/timezone';
+import {
+  formatTimeInTimezone,
+  getLocalDateKey,
+  getLocalDay,
+  getLocalHour,
+  getLocalMinuteOfDay,
+  getLocalYear,
+} from '../../utils/timezone';
 
 /**
  * Wrapped Analytics Service
@@ -75,14 +82,14 @@ export class WrappedAnalyticsService {
       this.calculateChainDependency(receipts),
       
       // Flex analytics
-      this.calculateMostExpensiveOrder(receipts),
+      this.calculateMostExpensiveOrder(receipts, userTimezone),
       this.calculateCoffeeAddiction(receipts),
       this.calculateNightOwl(receipts, userTimezone),
       
       // Comparative analytics
       this.calculateSpentThisYear(receipts, userTimezone),
       this.calculateCouldHaveBought(receipts),
-      this.calculateMissedInvestment(receipts),
+      this.calculateMissedInvestment(receipts, userTimezone),
       this.calculateCostPerMeal(receipts),
       
       // Pattern analytics
@@ -193,7 +200,7 @@ export class WrappedAnalyticsService {
    *
    * One aggregate query: per-user totals + PERCENT_RANK window functions.
    * night_owl_pct mirrors calculateNightOwl (share of orders at/after 10pm,
-   * in each user's own timezone; order_date is a naive UTC timestamp).
+   * in each user's own timezone; order_date is stored as a UTC instant).
    * Returns undefined when the user isn't in the pool (too few receipts) or
    * the pool itself is too small for percentiles to mean anything.
    */
@@ -206,9 +213,9 @@ export class WrappedAnalyticsService {
           COUNT(*)::int AS order_count,
           AVG(
             CASE
-              WHEN r.order_date IS NOT NULL
-               AND EXTRACT(
-                     HOUR FROM (r.order_date AT TIME ZONE 'UTC')
+              WHEN r.order_date IS NULL THEN NULL
+              WHEN EXTRACT(
+                     HOUR FROM r.order_date
                        AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
                    ) >= 22
               THEN 1.0 ELSE 0.0
@@ -283,9 +290,9 @@ export class WrappedAnalyticsService {
     const latest = lateNightReceipts.reduce((latest, r) => {
       if (!r.orderDate) return latest;
       if (!latest.orderDate) return r;
-      const rHour = getLocalHour(r.orderDate, timezone) || 0;
-      const latestHour = getLocalHour(latest.orderDate, timezone) || 0;
-      return rHour > latestHour ? r : latest;
+      const rMinute = getLocalMinuteOfDay(r.orderDate, timezone) ?? -1;
+      const latestMinute = getLocalMinuteOfDay(latest.orderDate, timezone) ?? -1;
+      return rMinute > latestMinute ? r : latest;
     }, lateNightReceipts[0]);
 
     // Find worst offender (most expensive late night order)
@@ -294,10 +301,7 @@ export class WrappedAnalyticsService {
     , lateNightReceipts[0]);
 
     // Format times in user's local timezone
-    const formatLocalTime = (date: Date) => {
-      const localDate = getLocalDate(date, timezone);
-      return localDate ? this.formatTime(localDate) : 'Unknown';
-    };
+    const formatLocalTime = (date: Date) => formatTimeInTimezone(date, timezone) || 'Unknown';
 
     return {
       count: lateNightReceipts.length,
@@ -325,9 +329,8 @@ export class WrappedAnalyticsService {
     validReceipts.forEach(r => {
       if (!r.orderDate) return;
       // Get the date string in user's timezone (YYYY-MM-DD)
-      const localDate = getLocalDate(r.orderDate, timezone);
-      if (!localDate) return;
-      const dateKey = localDate.toISOString().split('T')[0];
+      const dateKey = getLocalDateKey(r.orderDate, timezone);
+      if (!dateKey) return;
       if (!dayGroups.has(dateKey)) {
         dayGroups.set(dateKey, []);
       }
@@ -350,7 +353,7 @@ export class WrappedAnalyticsService {
     if (maxOrders < 3) return undefined; // Only show if 3+ orders
 
     const totalSpent = laziestReceipts.reduce((sum: number, r: ReceiptForAnalytics) => sum + r.amountSpent, 0);
-    const dayOfWeek = this.getDayOfWeek(new Date(laziestDate));
+    const dayOfWeek = this.getDayOfWeek(laziestDate);
 
     return {
       date: laziestDate,
@@ -373,8 +376,7 @@ export class WrappedAnalyticsService {
     // Get unique dates in user's local timezone (sorted)
     const uniqueDates = Array.from(new Set(
       validReceipts.map(r => {
-        const localDate = getLocalDate(r.orderDate!, timezone);
-        return localDate ? localDate.toISOString().split('T')[0] : null;
+        return getLocalDateKey(r.orderDate!, timezone);
       }).filter((d): d is string => d !== null)
     )).sort();
 
@@ -410,9 +412,8 @@ export class WrappedAnalyticsService {
 
     // Calculate total spent during streak
     const streakReceipts = validReceipts.filter(r => {
-      const localDate = getLocalDate(r.orderDate!, timezone);
-      if (!localDate) return false;
-      const date = localDate.toISOString().split('T')[0];
+      const date = getLocalDateKey(r.orderDate!, timezone);
+      if (!date) return false;
       return date >= startDate && date <= endDate;
     });
     const totalSpent = streakReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
@@ -439,7 +440,7 @@ export class WrappedAnalyticsService {
         item.name.trim() === '' || 
         !item.name
       );
-      return itemCount <= 2 && r.amountSpent < 20 && !hasUnknownItems;
+      return r.items.length > 0 && itemCount === 1 && r.amountSpent < 20 && !hasUnknownItems;
     });
 
     if (singleOrders.length === 0) return undefined;
@@ -455,7 +456,7 @@ export class WrappedAnalyticsService {
         const itemName = item.name?.trim();
         if (itemName && itemName.toLowerCase() !== 'unknown') {
           const count = itemCounts.get(itemName) || 0;
-          itemCounts.set(itemName, count + 1);
+          itemCounts.set(itemName, count + item.quantity);
         }
       });
     });
@@ -489,7 +490,9 @@ export class WrappedAnalyticsService {
     const majorChains = [
       "McDonald's", "Starbucks", "Chipotle", "Taco Bell", "Subway",
       "Dunkin'", "Wendy's", "Burger King", "KFC", "Chick-fil-A",
-      "Popeyes", "Panera", "Jimmy John's", "Five Guys", "Shake Shack"
+      "Popeyes", "Panera", "Jimmy John's", "Five Guys", "Shake Shack",
+      "Tim Hortons", "Pizza Pizza", "Harvey's", "Swiss Chalet",
+      "Mary Brown's", "A&W", "Booster Juice"
     ];
 
     const chainCounts = new Map<string, { count: number; spent: number }>();
@@ -514,7 +517,7 @@ export class WrappedAnalyticsService {
     // Sort by count
     const sortedChains = Array.from(chainCounts.entries())
       .map(([name, data]) => ({ name, count: data.count, spent: parseFloat(data.spent.toFixed(2)) }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.count - a.count || b.spent - a.spent || a.name.localeCompare(b.name));
 
     const worstOffender = sortedChains[0];
     const percentage = Math.round((worstOffender.count / receipts.length) * 100);
@@ -532,7 +535,7 @@ export class WrappedAnalyticsService {
   /**
    * Calculate Most Expensive Order
    */
-  private async calculateMostExpensiveOrder(receipts: ReceiptForAnalytics[]): Promise<MostExpensiveOrder | undefined> {
+  private async calculateMostExpensiveOrder(receipts: ReceiptForAnalytics[], timezone: string): Promise<MostExpensiveOrder | undefined> {
     if (receipts.length === 0) return undefined;
 
     const mostExpensive = receipts.reduce((max, r) => 
@@ -542,7 +545,7 @@ export class WrappedAnalyticsService {
     return {
       amount: mostExpensive.amountSpent,
       restaurant: mostExpensive.restaurantName || 'Unknown',
-      date: mostExpensive.orderDate ? mostExpensive.orderDate.toISOString().split('T')[0] : 'Unknown',
+      date: mostExpensive.orderDate ? getLocalDateKey(mostExpensive.orderDate, timezone) || 'Unknown' : 'Unknown',
       items: mostExpensive.items.map(i => ({ name: i.name, price: i.price })),
       message: `You once spent $${mostExpensive.amountSpent.toFixed(2)} on a single order`
     };
@@ -552,7 +555,7 @@ export class WrappedAnalyticsService {
    * Calculate Coffee Addiction
    */
   private async calculateCoffeeAddiction(receipts: ReceiptForAnalytics[]): Promise<CoffeeAddiction | undefined> {
-    const coffeeTerms = ['coffee', 'latte', 'espresso', 'cappuccino', 'americano', 'mocha', 'frappe', 'cold brew', 'macchiato'];
+    const coffeeTerms = ['coffee', 'latte', 'espresso', 'cappuccino', 'americano', 'mocha', 'frappe', 'cold brew', 'macchiato', 'iced capp'];
     
     const coffeeOrders = receipts.filter(r => 
       r.items.some(item => 
@@ -562,8 +565,8 @@ export class WrappedAnalyticsService {
 
     if (coffeeOrders.length === 0) return undefined;
 
-    const totalSpent = coffeeOrders.reduce((sum, r) => sum + r.amountSpent, 0);
-    const averagePrice = totalSpent / coffeeOrders.length;
+    let totalSpent = 0;
+    let totalCoffeeItems = 0;
 
     // Find most ordered coffee drink
     const coffeeCounts = new Map<string, number>();
@@ -571,7 +574,9 @@ export class WrappedAnalyticsService {
       r.items.forEach(item => {
         if (coffeeTerms.some(term => item.name.toLowerCase().includes(term))) {
           const count = coffeeCounts.get(item.name) || 0;
-          coffeeCounts.set(item.name, count + 1);
+          coffeeCounts.set(item.name, count + item.quantity);
+          totalCoffeeItems += item.quantity;
+          totalSpent += item.price * item.quantity;
         }
       });
     });
@@ -588,10 +593,9 @@ export class WrappedAnalyticsService {
     return {
       orderCount: coffeeOrders.length,
       totalSpent: parseFloat(totalSpent.toFixed(2)),
-      averagePrice: parseFloat(averagePrice.toFixed(2)),
+      averagePrice: parseFloat((totalSpent / Math.max(1, totalCoffeeItems)).toFixed(2)),
       mostOrdered,
-      message: `You spent $${totalSpent.toFixed(2)} on coffee`,
-      disclaimer: "This doesn't even count the Starbucks® ones"
+      message: `You spent $${totalSpent.toFixed(2)} on coffee items`
     };
   }
 
@@ -613,15 +617,12 @@ export class WrappedAnalyticsService {
 
     // Find latest order (by hour in user's timezone)
     const latest = nightOrders.reduce((latest, r) => {
-      const rHour = getLocalHour(r.orderDate!, timezone) || 0;
-      const latestHour = getLocalHour(latest.orderDate!, timezone) || 0;
-      return rHour > latestHour ? r : latest;
+      const rMinute = getLocalMinuteOfDay(r.orderDate!, timezone) ?? -1;
+      const latestMinute = getLocalMinuteOfDay(latest.orderDate!, timezone) ?? -1;
+      return rMinute > latestMinute ? r : latest;
     }, nightOrders[0]);
 
-    const formatLocalTime = (date: Date) => {
-      const localDate = getLocalDate(date, timezone);
-      return localDate ? this.formatTime(localDate) : 'Unknown';
-    };
+    const formatLocalTime = (date: Date) => formatTimeInTimezone(date, timezone) || 'Unknown';
 
     return {
       percentage,
@@ -639,20 +640,12 @@ export class WrappedAnalyticsService {
   private async calculateSpentThisYear(receipts: ReceiptForAnalytics[], timezone: string): Promise<SpentThisYear | undefined> {
     // Get current year in user's timezone
     const now = new Date();
-    const localNow = getLocalDate(now, timezone) || now;
-    const currentYear = localNow.getFullYear();
-    
-    // Create year boundaries in user's timezone
-    // We need to convert local year boundaries back to UTC for comparison
-    const yearStartLocal = new Date(currentYear, 0, 1); // Jan 1 in server timezone
-    const yearEndLocal = new Date(currentYear, 11, 31, 23, 59, 59); // Dec 31 in server timezone
+    const currentYear = getLocalYear(now, timezone) ?? now.getUTCFullYear();
     
     // Filter receipts from current year (comparing UTC dates, but year is determined by local timezone)
     const thisYearReceipts = receipts.filter(r => {
       if (!r.orderDate) return false;
-      const localDate = getLocalDate(r.orderDate, timezone);
-      if (!localDate) return false;
-      const receiptYear = localDate.getFullYear();
+      const receiptYear = getLocalYear(r.orderDate, timezone);
       return receiptYear === currentYear;
     });
 
@@ -674,59 +667,32 @@ export class WrappedAnalyticsService {
   /**
    * Calculate Could Have Bought
    */
-  private async calculateCouldHaveBought(receipts: ReceiptForAnalytics[]): Promise<CouldHaveBought | undefined> {
-    const totalSpent = receipts.reduce((sum, r) => sum + r.amountSpent, 0);
-    if (totalSpent === 0) return undefined;
-
-    const comparisons = [
-      { item: "Used Honda Civic", price: 5000, unit: "car" },
-      { item: "Round-trip flights to Europe", price: 1200, unit: "trip" },
-      { item: "Months of groceries", price: 300, unit: "month" },
-      { item: "iPhone 15 Pro Max", price: 1199, unit: "phone" },
-      { item: "Gym memberships", price: 50, unit: "month" },
-      { item: "Netflix subscriptions", price: 15.49, unit: "month" }
-    ];
-
-    return {
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
-      comparisons: comparisons
-        .map(c => {
-          const quantity = parseFloat((totalSpent / c.price).toFixed(1));
-          if (quantity >= 0.5) {
-            return {
-              item: c.item,
-              quantity,
-              message: quantity >= 1 
-                ? `${Math.floor(quantity)} ${c.item.toLowerCase()}`
-                : `${(quantity * 100).toFixed(0)}% of a ${c.unit}`
-            };
-          }
-          return null;
-        })
-        .filter(c => c !== null) as Array<{ item: string; quantity: number; message: string }>
-    };
+  private async calculateCouldHaveBought(_receipts: ReceiptForAnalytics[]): Promise<CouldHaveBought | undefined> {
+    // Accurate comparisons require a receipt currency plus current, localized
+    // comparison prices. Neither is represented in the current analytics
+    // schema, so omit this metric instead of presenting false equivalences.
+    return undefined;
   }
 
   /**
    * Calculate Missed Investment
    * 
-   * Calculates what each receipt would be worth if invested in S&P 500
-   * from the date it was spent, then sums all values.
+   * Calculates a hypothetical value using a fixed 10% annual return from each
+   * receipt date. This is illustrative, not historical market performance.
    */
-  private async calculateMissedInvestment(receipts: ReceiptForAnalytics[]): Promise<MissedInvestment | undefined> {
+  private async calculateMissedInvestment(receipts: ReceiptForAnalytics[], timezone: string): Promise<MissedInvestment | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate).sort((a, b) => 
       a.orderDate!.getTime() - b.orderDate!.getTime()
     );
     
     if (validReceipts.length === 0) return undefined;
 
-    const totalSpent = receipts.reduce((sum, r) => sum + r.amountSpent, 0);
+    const totalSpent = validReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
     const firstOrder = validReceipts[0];
     const now = new Date();
     const daysElapsed = Math.floor((now.getTime() - firstOrder.orderDate!.getTime()) / (1000 * 60 * 60 * 24));
 
-    // Average S&P 500 annual return ~10%
-    const sp500Return = 10; // Simplified 10% annual
+    const sp500Return = 10;
     const annualReturnRate = sp500Return / 100;
     
     // Calculate compound interest for each receipt based on when it was spent
@@ -747,95 +713,24 @@ export class WrappedAnalyticsService {
 
     return {
       amountSpent: parseFloat(totalSpent.toFixed(2)),
-      firstOrderDate: firstOrder.orderDate!.toISOString().split('T')[0],
+      firstOrderDate: getLocalDateKey(firstOrder.orderDate!, timezone) || firstOrder.orderDate!.toISOString().split('T')[0],
       daysElapsed,
       sp500Return,
       wouldBeWorth: parseFloat(wouldBeWorth.toFixed(2)),
       missedGains: parseFloat(missedGains.toFixed(2)),
-      message: `If you'd invested this in the S&P 500, you'd have $${wouldBeWorth.toFixed(2)}`
+      message: `At a hypothetical 10% annual return, it could have grown to $${wouldBeWorth.toFixed(2)}`
     };
   }
 
   /**
-   * Calculate Cost Per Meal (Delivery Tax)
-   * Calculates all extra costs beyond base food prices:
-   * extraCosts = totalOrderAmount - sum(itemPrices)
-   * 
-   * Where totalOrderAmount (amountSpent) includes:
-   * - Base food item prices
-   * - Delivery fee
-   * - Service fee
-   * - Tax
-   * - Tip
-   * 
-   * This gives us the true "delivery tax" - all costs beyond getting the food yourself.
-   * 
-   * Note: DoorDash CSV exports don't include the total order amount with fees,
-   * so we skip DoorDash receipts for this calculation.
+   * Cost-per-meal requires explicit fee, tax, tip, promotion, and item subtotal
+   * fields. It remains omitted until the receipt model can represent them.
    */
-  private async calculateCostPerMeal(receipts: ReceiptForAnalytics[]): Promise<CostPerMeal | undefined> {
-    if (receipts.length === 0) return undefined;
-
-    // Filter out DoorDash receipts - their CSV doesn't include total order amount with fees
-    // DoorDash CSV only has item subtotals, not the final total including delivery fees, tax, etc.
-    const receiptsWithTotalAmount = receipts.filter(r => r.receiptType !== 'doordash');
-    
-    if (receiptsWithTotalAmount.length === 0) {
-      return undefined;
-    }
-
-    // Calculate extra costs for each receipt
-    // extraCosts = amountSpent - sum(item.price * item.quantity)
-    // amountSpent is the final total including delivery fee, service fee, tax, and tip
-    const receiptsWithExtraCosts: Array<{ receipt: ReceiptForAnalytics; extraCosts: number; itemCount: number }> = [];
-    
-    receiptsWithTotalAmount.forEach(receipt => {
-      // Calculate sum of item prices (base food cost)
-      const itemSubtotal = receipt.items.reduce((sum, item) => {
-        // Only count items with valid prices (> 0)
-        if (item.price > 0) {
-          return sum + (item.price * item.quantity);
-        }
-        return sum;
-      }, 0);
-
-      const itemCount = receipt.items.reduce((sum, item) => sum + item.quantity, 0);
-
-      // Validate we can calculate extra costs
-      if (itemCount === 0 || itemSubtotal <= 0 || itemSubtotal >= receipt.amountSpent) {
-        return;
-      }
-
-      // Calculate extra costs (delivery fee + service fee + tax + tip)
-      // This is the difference between what was paid and the base food cost
-      const extraCosts = receipt.amountSpent - itemSubtotal;
-      
-      // Only include if extra costs are positive (should always be, but safety check)
-      if (extraCosts > 0) {
-        receiptsWithExtraCosts.push({ receipt, extraCosts, itemCount });
-      }
-    });
-
-    // Need at least some receipts with valid data
-    if (receiptsWithExtraCosts.length === 0) {
-      return undefined;
-    }
-
-    // Aggregate extra costs
-    const totalDeliveryFees = receiptsWithExtraCosts.reduce((sum, r) => sum + r.extraCosts, 0);
-    const averageDeliveryFee = totalDeliveryFees / receiptsWithExtraCosts.length;
-    
-    // Each order is a meal, so averageDeliveryFeePerMeal = averageDeliveryFee
-    // (We don't divide by item count - each order represents one meal/delivery)
-    const averageDeliveryFeePerMeal = averageDeliveryFee;
-
-    return {
-      totalDeliveryFees: parseFloat(totalDeliveryFees.toFixed(2)),
-      averageDeliveryFee: parseFloat(averageDeliveryFee.toFixed(2)),
-      averageDeliveryFeePerMeal: parseFloat(averageDeliveryFeePerMeal.toFixed(2)),
-      totalOrders: receiptsWithExtraCosts.length,
-      message: `You paid $${averageDeliveryFeePerMeal.toFixed(2)} extra per meal in delivery fees`
-    };
+  private async calculateCostPerMeal(_receipts: ReceiptForAnalytics[]): Promise<CostPerMeal | undefined> {
+    // Order total minus item subtotal is not a delivery fee: it also mixes tax,
+    // tips, service fees, promotions, and substitutions. The current receipt
+    // model does not store those components, so do not publish a false metric.
+    return undefined;
   }
 
   /**
@@ -902,8 +797,9 @@ export class WrappedAnalyticsService {
         const waitMs = receipt.deliveryTime.getTime() - receipt.orderDate.getTime();
         const waitMinutes = Math.round(waitMs / (1000 * 60));
         
-        // Only include valid wait times (positive)
-        if (waitMinutes > 0) {
+        // Ignore corrupt/cross-day timestamps. Even scheduled grocery orders
+        // should not be presented as a continuous food-delivery wait over 12h.
+        if (waitMinutes > 0 && waitMinutes <= 12 * 60) {
           waitTimes.push({ receipt, minutes: waitMinutes });
         }
       }
@@ -970,10 +866,16 @@ export class WrappedAnalyticsService {
       }
     });
 
-    const ratio = weekdaySpending > 0 ? weekendSpending / weekdaySpending : 0;
-    const message = weekdaySpending > weekendSpending 
-      ? "You spend more on weekdays (cooking challenged all week)"
-      : "Weekend delivery champion";
+    // Two weekend days should not be compared directly with five weekdays.
+    // Normalize both totals to an average weekday-category day.
+    const weekendDailySpending = weekendSpending / 2;
+    const weekdayDailySpending = weekdaySpending / 5;
+    const ratio = weekdayDailySpending > 0
+      ? weekendDailySpending / weekdayDailySpending
+      : weekendDailySpending > 0 ? 5 : 0;
+    const message = ratio > 1
+      ? "Weekend delivery champion"
+      : "You spend more per day on weekdays";
 
     return {
       weekendOrders,
@@ -987,23 +889,16 @@ export class WrappedAnalyticsService {
 
   // Helper methods
 
-  private formatTime(date: Date): string {
-    let hours = date.getHours();
-    const minutes = date.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${hours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-  }
-
   private formatHour(hour: number): string {
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const displayHour = hour % 12 || 12;
     return `${displayHour}:00 ${ampm}`;
   }
 
-  private getDayOfWeek(date: Date): string {
+  private getDayOfWeek(dateKey: string): string {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return days[date.getDay()];
+    const [year, month, day] = dateKey.split('-').map(Number);
+    return days[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
   }
 
   private getEmptyAnalytics(): WrappedAnalytics {

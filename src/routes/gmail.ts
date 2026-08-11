@@ -12,8 +12,11 @@ import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { GmailImportService } from '../services/import/GmailImportService';
 import { ImportLockService } from '../services/import/ImportLockService';
+import { GmailClient } from '../services/email/GmailClient';
 import { User } from '../models/User';
 import { authConfig } from '../config/auth';
+import { validateApiKey } from '../middleware/security';
+import { detectTimezoneFromRequest } from '../utils/timezone';
 
 const router = Router();
 const REQUIRED_GMAIL_SCOPES = new Set([
@@ -125,7 +128,7 @@ const buildGmailStatus = (user: User) => {
 
   let statusMessage = 'Connect your Gmail account to import receipts.';
   if (connected && connectionMode === 'offline') {
-    statusMessage = 'Gmail is connected with durable access. Imports can refresh automatically.';
+    statusMessage = 'Gmail is connected with durable access for imports you explicitly allow.';
   } else if (connected && connectionMode === 'temporary' && canImport && expiryDate) {
     statusMessage = `Gmail is connected with temporary access until ${expiryDate.toISOString()}.`;
   } else if (connected && connectionMode === 'temporary') {
@@ -144,6 +147,120 @@ const buildGmailStatus = (user: User) => {
     hasRequiredScope,
     expiresAt: expiryDate?.toISOString() || null,
     statusMessage,
+  };
+};
+
+const buildImportPreferencesResponse = async (userId: string) => {
+  const userRepository = container.userRepository;
+  const user = await userRepository.findByIdWithGmailTokens(userId);
+  if (!user) {
+    throw new ValidationError('User not found');
+  }
+
+  const preferences = await container.importPreferencesRepository.get(userId);
+  const gmailStatus = buildGmailStatus(user);
+  const sourceResult = await container.postgres.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE data_source = 'email')::int AS email_count,
+       COUNT(*) FILTER (WHERE data_source = 'csv')::int AS export_count
+     FROM receipts WHERE user_id = $1`,
+    [userId]
+  );
+  const emailReceiptCount = Number(sourceResult.rows[0]?.email_count || 0);
+  const exportReceiptCount = Number(sourceResult.rows[0]?.export_count || 0);
+  const ordersAddedThisWeek = await container.importPreferencesRepository.getOrdersAddedThisWeek(
+    userId,
+    user.timezone || 'America/New_York'
+  );
+
+  let effectiveState: 'not_offered' | 'declined' | 'enabled' | 'disabled' | 'reconnect_required';
+  if (preferences.monitoringConsentState === 'granted') {
+    effectiveState = gmailStatus.connected
+      && gmailStatus.canImport
+      && gmailStatus.connectionMode === 'offline'
+      ? 'enabled'
+      : 'reconnect_required';
+  } else if (preferences.monitoringConsentState === 'declined') {
+    effectiveState = 'declined';
+  } else if (preferences.monitoringConsentState === 'revoked') {
+    effectiveState = 'disabled';
+  } else {
+    effectiveState = 'not_offered';
+  }
+
+  let ongoingTrackingEffectiveState: 'not_offered' | 'declined' | 'active' | 'paused' | 'reconnect_required' | 'error';
+  if (preferences.ongoingTrackingConsentState === 'granted') {
+    if (!gmailStatus.connected || !gmailStatus.canImport || gmailStatus.connectionMode !== 'offline') {
+      ongoingTrackingEffectiveState = 'reconnect_required';
+    } else if (preferences.trackingStatus === 'error') {
+      ongoingTrackingEffectiveState = 'error';
+    } else {
+      ongoingTrackingEffectiveState = 'active';
+    }
+  } else if (preferences.ongoingTrackingConsentState === 'declined') {
+    ongoingTrackingEffectiveState = 'declined';
+  } else if (preferences.ongoingTrackingConsentState === 'revoked') {
+    ongoingTrackingEffectiveState = 'paused';
+  } else {
+    ongoingTrackingEffectiveState = 'not_offered';
+  }
+
+  return {
+    monitoring: {
+      consentState: preferences.monitoringConsentState,
+      consentVersion: preferences.monitoringConsentVersion,
+      consentedAt: preferences.monitoringConsentedAt,
+      revokedAt: preferences.monitoringRevokedAt,
+      effectiveState,
+      capability: {
+        gmailConnected: gmailStatus.connected,
+        durableAccess: gmailStatus.connectionMode === 'offline',
+        canMonitor: gmailStatus.connected
+          && gmailStatus.canImport
+          && gmailStatus.connectionMode === 'offline',
+      },
+    },
+    export: {
+      status: preferences.exportStatus,
+      requestedAt: preferences.exportRequestedAt,
+      updatedAt: preferences.exportUpdatedAt,
+    },
+    gmailImport: {
+      status: preferences.gmailImportStatus,
+      updatedAt: preferences.gmailImportUpdatedAt,
+      importedCount: preferences.gmailImportedCount,
+      errorCode: preferences.gmailImportErrorCode,
+      receiptCount: emailReceiptCount,
+      hasImported: preferences.gmailImportStatus === 'completed' || emailReceiptCount > 0,
+    },
+    ongoingTracking: {
+      consentState: preferences.ongoingTrackingConsentState,
+      consentVersion: preferences.ongoingTrackingConsentVersion,
+      consentedAt: preferences.ongoingTrackingConsentedAt,
+      revokedAt: preferences.ongoingTrackingRevokedAt,
+      status: preferences.trackingStatus,
+      effectiveState: ongoingTrackingEffectiveState,
+      capability: {
+        gmailConnected: gmailStatus.connected,
+        durableAccess: gmailStatus.connectionMode === 'offline',
+        canTrack: gmailStatus.connected && gmailStatus.canImport && gmailStatus.connectionMode === 'offline',
+      },
+      activity: {
+        lastCheckAttemptAt: preferences.lastCheckAttemptAt,
+        lastSuccessfulCheckAt: preferences.lastSuccessfulCheckAt,
+        lastStatsUpdatedAt: preferences.lastStatsUpdatedAt,
+        lastNewOrderAt: preferences.lastNewOrderAt,
+        ordersAddedThisWeek,
+        lastErrorAt: preferences.lastTrackingErrorAt,
+        lastErrorCode: preferences.lastTrackingErrorCode,
+      },
+    },
+    coverage: {
+      emailReceiptCount,
+      exportReceiptCount,
+      hasEmailData: emailReceiptCount > 0,
+      hasExportData: exportReceiptCount > 0,
+    },
   };
 };
 
@@ -305,13 +422,170 @@ router.post('/disconnect', authenticateToken, asyncHandler(async (req: Request, 
   }
 
   const userRepository = container.userRepository;
+  const preferences = await container.importPreferencesRepository.get(userId);
   await userRepository.disconnectGmail(userId);
+  if (preferences.monitoringConsentState === 'granted') {
+    await container.importPreferencesRepository.setMonitoringConsent(userId, 'revoked');
+  }
+  if (preferences.ongoingTrackingConsentState === 'granted') {
+    await container.importPreferencesRepository.setOngoingTrackingConsent(userId, 'revoked');
+  }
 
   console.log(`✅ Disconnected Gmail for user: ${userId}`);
 
   res.json({
     success: true,
     message: 'Gmail account disconnected successfully'
+  });
+}));
+
+router.get('/preferences', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  const requestTimezone = detectTimezoneFromRequest(req);
+  if (requestTimezone) {
+    await container.userRepository.updateTimezone(userId, requestTimezone);
+  }
+  res.json(await buildImportPreferencesResponse(userId));
+}));
+
+router.put('/preferences/monitoring-consent', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  const decision = req.body?.decision;
+  if (typeof decision !== 'string' || !['granted', 'declined', 'revoked'].includes(decision)) {
+    throw new ValidationError('decision must be granted, declined, or revoked');
+  }
+  const validatedDecision = decision as 'granted' | 'declined' | 'revoked';
+
+  const consentVersion = req.body?.consentVersion;
+  if (validatedDecision === 'granted') {
+    if (
+      typeof consentVersion !== 'string'
+      || consentVersion.trim().length === 0
+      || consentVersion.length > 50
+    ) {
+      throw new ValidationError('consentVersion is required when granting monitoring consent');
+    }
+  }
+
+  await container.importPreferencesRepository.setMonitoringConsent(
+    userId,
+    validatedDecision,
+    typeof consentVersion === 'string' ? consentVersion.trim() : undefined
+  );
+
+  res.json(await buildImportPreferencesResponse(userId));
+}));
+
+router.put('/preferences/ongoing-tracking-consent', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) throw new ValidationError('User ID not found in token');
+  const decision = req.body?.decision;
+  if (typeof decision !== 'string' || !['granted', 'declined', 'revoked'].includes(decision)) {
+    throw new ValidationError('decision must be granted, declined, or revoked');
+  }
+  const consentVersion = req.body?.consentVersion;
+  if (decision === 'granted' && (typeof consentVersion !== 'string' || !consentVersion.trim() || consentVersion.length > 50)) {
+    throw new ValidationError('consentVersion is required when granting ongoing tracking consent');
+  }
+  const user = await container.userRepository.findByIdWithGmailTokens(userId);
+  if (!user) throw new ValidationError('User not found');
+  const gmailStatus = buildGmailStatus(user);
+  if (decision === 'granted' && (!gmailStatus.connected || gmailStatus.connectionMode !== 'offline')) {
+    throw new ValidationError('Reconnect Gmail with durable access before enabling ongoing tracking.');
+  }
+  await container.importPreferencesRepository.setOngoingTrackingConsent(
+    userId,
+    decision as 'granted' | 'declined' | 'revoked',
+    typeof consentVersion === 'string' ? consentVersion.trim() : undefined
+  );
+  res.json(await buildImportPreferencesResponse(userId));
+}));
+
+router.post('/tracking/check', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) throw new ValidationError('User ID not found in token');
+  const result = await container.ongoingTrackingService.checkUser(userId);
+  if (!result) {
+    res.status(409).json({
+      success: false,
+      code: 'TRACKING_NOT_AVAILABLE',
+      message: 'Ongoing tracking is not enabled, Gmail needs reconnection, or a check is already running.',
+      preferences: await buildImportPreferencesResponse(userId),
+    });
+    return;
+  }
+  res.json({ ...result, preferences: await buildImportPreferencesResponse(userId) });
+}));
+
+// Scheduler-ready entry point. Production can call this with X-API-Key at the
+// desired cadence without granting the scheduler access to user credentials.
+router.post('/tracking/run-batch', validateApiKey, asyncHandler(async (req: Request, res: Response) => {
+  const limit = typeof req.body?.limit === 'number' ? req.body.limit : 100;
+  res.json(await container.ongoingTrackingService.runEligibleBatch(limit));
+}));
+
+router.post('/preferences/export-requested', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  await container.importPreferencesRepository.markExportRequested(userId);
+  res.json(await buildImportPreferencesResponse(userId));
+}));
+
+router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  const preferences = await container.importPreferencesRepository.get(userId);
+  if (
+    preferences.monitoringConsentState !== 'granted'
+    || preferences.exportStatus !== 'requested_monitoring_enabled'
+    || !preferences.exportRequestedAt
+  ) {
+    res.json({
+      detected: false,
+      preferences: await buildImportPreferencesResponse(userId),
+    });
+    return;
+  }
+
+  const user = await container.userRepository.findByIdWithGmailTokens(userId);
+  if (!user) {
+    throw new ValidationError('User not found');
+  }
+
+  const gmailStatus = buildGmailStatus(user);
+  if (!gmailStatus.connected || !gmailStatus.canImport || gmailStatus.connectionMode !== 'offline') {
+    res.json({
+      detected: false,
+      preferences: await buildImportPreferencesResponse(userId),
+    });
+    return;
+  }
+
+  const detected = await new GmailClient().hasUberExportReadyEmail(
+    user,
+    preferences.exportRequestedAt
+  );
+  if (detected) {
+    await container.importPreferencesRepository.setExportStatus(userId, 'file_ready');
+  }
+
+  res.json({
+    detected,
+    preferences: await buildImportPreferencesResponse(userId),
   });
 }));
 
@@ -493,7 +767,7 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       );
     }
 
-    console.log(`📧 Starting Gmail import for user: ${user.email} (will replace existing email receipts)`);
+    console.log(`📧 Starting incremental Gmail receipt sync for user: ${user.email}`);
 
     const gmailImportService = new GmailImportService(container.postgres);
     const result = await gmailImportService.importFromGmail(user);
@@ -502,6 +776,7 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
     console.log(`   - Emails found: ${result.totalEmailsFound}`);
     console.log(`   - Receipts processed: ${result.totalReceiptsProcessed}`);
     console.log(`   - Receipts imported: ${result.totalReceiptsImported}`);
+    console.log(`   - New: ${result.newOrders}, updated: ${result.updatedOrders}, unchanged: ${result.unchangedOrders}`);
     console.log(`   - Total amount: $${result.totalAmount.toFixed(2)}`);
 
     res.json({
@@ -509,6 +784,9 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       totalEmailsFound: result.totalEmailsFound,
       totalReceiptsProcessed: result.totalReceiptsProcessed,
       totalReceiptsImported: result.totalReceiptsImported,
+      newOrders: result.newOrders,
+      updatedOrders: result.updatedOrders,
+      unchangedOrders: result.unchangedOrders,
       totalAmount: result.totalAmount,
       errors: result.errors
     });

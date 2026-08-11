@@ -3,6 +3,7 @@ import { PostgresService } from '../data/PostgresService';
 import { v4 as uuidv4 } from 'uuid';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
+import { getDefaultTimezone, zonedDateTimeToUtc } from '../../utils/timezone';
 
 export interface UberCsvRow {
   City_Name: string;
@@ -84,13 +85,14 @@ export class CsvImportService {
    * Parse CSV file and convert to Receipt objects
    * Auto-detects format and routes to appropriate parser
    */
-  async parseCsvFile(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
+  async parseCsvFile(csvBuffer: Buffer, userId: string, timezone?: string): Promise<ImportResult> {
     const format = this.detectCsvFormat(csvBuffer);
 
     if (format === 'doordash') {
       return this.parseDoorDashCsv(csvBuffer, userId);
     } else if (format === 'uber') {
-      return this.parseUberEatsCsv(csvBuffer, userId);
+      const userTimezone = timezone || await this.getUserTimezone(userId);
+      return this.parseUberEatsCsv(csvBuffer, userId, userTimezone);
     } else {
       throw new Error('Unknown CSV format. Expected Uber Eats or DoorDash format.');
     }
@@ -99,7 +101,11 @@ export class CsvImportService {
   /**
    * Parse Uber Eats CSV file and convert to Receipt objects
    */
-  async parseUberEatsCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
+  async parseUberEatsCsv(
+    csvBuffer: Buffer,
+    userId: string,
+    timezone: string = getDefaultTimezone()
+  ): Promise<ImportResult> {
     const results: UberCsvRow[] = [];
     const errors: string[] = [];
     let rowCount = 0;
@@ -163,7 +169,7 @@ export class CsvImportService {
               return;
             }
 
-            const receipts = this.convertUberEatsRowsToReceipts(results, userId);
+            const receipts = this.convertUberEatsRowsToReceipts(results, userId, timezone);
             const totalAmount = receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
             
             resolve({
@@ -399,7 +405,11 @@ export class CsvImportService {
    * Note: All items in the same order should have the same Order_Price, but we group by restaurant + time
    * to handle any data inconsistencies where Order_Price might vary
    */
-  private convertUberEatsRowsToReceipts(rows: UberCsvRow[], userId: string): Receipt[] {
+  private convertUberEatsRowsToReceipts(
+    rows: UberCsvRow[],
+    userId: string,
+    timezone: string
+  ): Receipt[] {
     // Group rows by order (restaurant + time only)
     // All items in the same order should be grouped together regardless of Order_Price value
     const orderGroups = new Map<string, UberCsvRow[]>();
@@ -420,20 +430,22 @@ export class CsvImportService {
       
       // Parse order date
       let orderDate: Date | undefined;
-      try {
-        orderDate = new Date(firstRow.Request_Time_Local);
-      } catch (error) {
+      const parsedOrderDate = this.parseUberLocalTimestamp(firstRow.Request_Time_Local, timezone);
+      if (parsedOrderDate) {
+        orderDate = parsedOrderDate;
+      } else {
         console.warn(`Invalid date format: ${firstRow.Request_Time_Local}`);
       }
 
       // Parse delivery time (Final_Delivery_Time_Local is when order was delivered)
       let deliveryTime: Date | undefined;
-      try {
-        if (firstRow.Final_Delivery_Time_Local) {
-          deliveryTime = new Date(firstRow.Final_Delivery_Time_Local);
+      if (firstRow.Final_Delivery_Time_Local) {
+        const parsedDeliveryTime = this.parseUberLocalTimestamp(firstRow.Final_Delivery_Time_Local, timezone);
+        if (parsedDeliveryTime) {
+          deliveryTime = parsedDeliveryTime;
+        } else {
+          console.warn(`Invalid delivery time format: ${firstRow.Final_Delivery_Time_Local}`);
         }
-      } catch (error) {
-        console.warn(`Invalid delivery time format: ${firstRow.Final_Delivery_Time_Local}`);
       }
 
       // Parse order price - use the maximum Order_Price from all rows in case of inconsistencies
@@ -446,11 +458,17 @@ export class CsvImportService {
       const orderPrice = Math.max(...orderPrices); // Use max price as order total
 
       // Convert items
-      const items: ReceiptItem[] = orderRows.map(row => ({
-        name: row.Item_Name,
-        quantity: parseInt(row.Item_quantity) || 1,
-        price: parseFloat(row.Item_Price) || 0
-      }));
+      const items: ReceiptItem[] = orderRows.map(row => {
+        const quantity = Math.max(1, parseInt(row.Item_quantity, 10) || 1);
+        const linePrice = parseFloat(row.Item_Price) || 0;
+        return {
+          name: row.Item_Name,
+          quantity,
+          // Uber's Item_Price is the full line price (for example quantity 2
+          // at $16.99 is exported as $33.98). ReceiptItem.price is per unit.
+          price: linePrice / quantity,
+        };
+      });
 
       // Create receipt
       const receipt = new Receipt(
@@ -468,6 +486,33 @@ export class CsvImportService {
     }
 
     return receipts;
+  }
+
+  private async getUserTimezone(userId: string): Promise<string> {
+    const result = await this.postgres.query(
+      "SELECT COALESCE(timezone, 'America/New_York') AS timezone FROM users WHERE id = $1",
+      [userId]
+    );
+    return result.rows[0]?.timezone || getDefaultTimezone();
+  }
+
+  /**
+   * Uber labels these fields *_Local. Some exports append "Z" even though the
+   * values are local wall time, so parsing with new Date() shifts every order.
+   */
+  private parseUberLocalTimestamp(value: string, timezone: string): Date | null {
+    const match = value?.trim().match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z?$/
+    );
+    if (!match) return null;
+    return zonedDateTimeToUtc({
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4]),
+      minute: Number(match[5]),
+      second: Number(match[6]),
+    }, timezone);
   }
 
   /**

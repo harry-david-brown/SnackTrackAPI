@@ -29,7 +29,7 @@ A comprehensive API for tracking food delivery spending and receipts with viral-
 Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
 - **Shame**: 3am orders, lazy days, ordering streaks, chain dependency
 - **Flex**: Most expensive order, coffee addiction, night owl badge
-- **Comparative**: S&P 500 investment comparison, cost per meal analysis
+- **Comparative**: Hypothetical fixed-return opportunity-cost comparison
 - **Patterns**: Peak hunger hours, weekend vs weekday patterns
 
       `,
