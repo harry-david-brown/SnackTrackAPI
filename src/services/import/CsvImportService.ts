@@ -536,53 +536,73 @@ export class CsvImportService {
    * Uses batch insert for performance (much faster than individual inserts)
    */
   async importReceipts(receipts: Receipt[], userId: string): Promise<void> {
-    // Clear existing receipts for this user to avoid duplicates
-    await this.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
-    
     if (receipts.length === 0) return;
 
-    // Batch insert for performance (much faster than individual inserts)
-    // Process in chunks of 50 to avoid query size limits and ensure reliability
-    const batchSize = 50;
-    for (let i = 0; i < receipts.length; i += batchSize) {
-      const batch = receipts.slice(i, i + batchSize);
+    const datedReceipts = receipts
+      .map(receipt => receipt.orderDate)
+      .filter((date): date is Date => Boolean(date));
+    if (datedReceipts.length === 0) {
+      throw new Error('Export contains no valid order dates');
+    }
+    const latestExportDate = new Date(Math.max(...datedReceipts.map(date => date.getTime())));
+    const client = await this.postgres.getClient();
 
-      // Build values array and placeholders for batch insert
-      const values: any[] = [];
-      const placeholders: string[] = [];
+    try {
+      await client.query('BEGIN');
 
-      batch.forEach((receipt, index) => {
+      // Replace only the previous export. Preserve Gmail orders newer than the
+      // export's latest order, while removing historical overlap so analytics
+      // never count the same order from both sources.
+      await client.query(
+        `DELETE FROM receipts
+         WHERE user_id = $1
+           AND (data_source = 'csv' OR (data_source = 'email' AND order_date <= $2))`,
+        [userId, latestExportDate]
+      );
+
+      // Batch insert for performance (much faster than individual inserts)
+      // Process in chunks of 50 to avoid query size limits.
+      const batchSize = 50;
+      for (let i = 0; i < receipts.length; i += batchSize) {
+        const batch = receipts.slice(i, i + batchSize);
+
+        const values: any[] = [];
+        const placeholders: string[] = [];
+
+        batch.forEach((receipt, index) => {
           // Truncate restaurant name to fit VARCHAR(255) constraint
-      const truncatedRestaurantName = receipt.restaurantName
-          ? receipt.restaurantName.substring(0, 255)
-          : receipt.restaurantName;
-        const paramIndex = index * 8 + 1; // PostgreSQL uses $1, $2, $3, etc.
-        placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7})`);
-        values.push(
-          userId, // Use the userId parameter, not receipt.userId, to ensure consistency
-          receipt.receiptType,
-          receipt.dataSource,
-          truncatedRestaurantName,
-          receipt.orderDate,
-          receipt.amountSpent,
-          receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
-          receipt.deliveryTime || null
-        );
-      });
+          const truncatedRestaurantName = receipt.restaurantName
+            ? receipt.restaurantName.substring(0, 255)
+            : receipt.restaurantName;
+          const paramIndex = index * 8 + 1;
+          placeholders.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6}, $${paramIndex + 7})`);
+          values.push(
+            userId,
+            receipt.receiptType,
+            receipt.dataSource,
+            truncatedRestaurantName,
+            receipt.orderDate,
+            receipt.amountSpent,
+            receipt.items.length > 0 ? JSON.stringify(receipt.items) : '[]',
+            receipt.deliveryTime || null
+          );
+        });
 
-      // Execute batch insert with error handling
-      try {
-        await this.postgres.query(`
+        await client.query(`
           INSERT INTO receipts (
             user_id, receipt_type, data_source, restaurant_name, order_date, 
             amount_spent, items, delivery_time
           ) VALUES ${placeholders.join(', ')}
         `, values);
-      } catch (error: any) {
-        console.error(`Batch insert failed for batch starting at index ${i}:`, error.message);
-        console.error(`Batch size: ${batch.length}, Placeholders: ${placeholders.length}, Values: ${values.length}`);
-        throw error; // Re-throw to let the caller handle it
       }
+
+      await client.query('COMMIT');
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      console.error('Transactional export import failed:', error.message);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

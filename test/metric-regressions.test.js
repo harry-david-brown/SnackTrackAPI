@@ -7,6 +7,8 @@ const { WrappedAnalyticsService } = require('../dist/services/analytics/WrappedA
 const { ReceiptService } = require('../dist/services/receipt/ReceiptService');
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const { ImportPreferencesRepository } = require('../dist/services/data/ImportPreferencesRepository');
+const { isGmailReconnectError } = require('../dist/services/import/GmailImportService');
+const { GmailConnectionHealthService } = require('../dist/services/email/GmailConnectionHealthService');
 const {
   getLocalDateKey,
   parseReceiptLocalDateTime,
@@ -143,4 +145,71 @@ test('orders-added-this-week uses a user-local PostgreSQL week boundary', async 
   assert.equal(count, 2);
   assert.match(captured.sql, /DATE_TRUNC\('week', NOW\(\) AT TIME ZONE \$2\)/);
   assert.deepEqual(captured.params, ['user-id', 'America/Toronto']);
+});
+
+test('export replacement preserves Gmail orders newer than the export cutoff', async () => {
+  const queries = [];
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 1 };
+    },
+    release: () => {},
+  };
+  const postgres = { getClient: async () => client };
+  const receipt = new Receipt(
+    'user-id', [], 20, ReceiptType.UBER_EATS, 'Export Place',
+    new Date('2026-08-01T22:00:00.000Z'), DataSource.CSV
+  );
+
+  await new CsvImportService(postgres).importReceipts([receipt], 'user-id');
+
+  const replacement = queries.find(query => query.sql.includes('DELETE FROM receipts'));
+  assert.match(replacement.sql, /data_source = 'csv'/);
+  assert.match(replacement.sql, /data_source = 'email' AND order_date <= \$2/);
+  assert.equal(replacement.params[1].toISOString(), '2026-08-01T22:00:00.000Z');
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.equal(queries.at(-1).sql, 'COMMIT');
+});
+
+test('Google invalid_grant errors require Gmail reconnection', () => {
+  assert.equal(isGmailReconnectError(new Error('invalid_grant')), true);
+  assert.equal(isGmailReconnectError({ response: { data: { error: 'invalid_grant' } } }), true);
+  assert.equal(isGmailReconnectError(new Error('socket timeout')), false);
+});
+
+test('Gmail health validation is cached but import preflight can force a fresh check', async () => {
+  const postgres = { query: async () => ({ rows: [], rowCount: 1 }) };
+  const health = new GmailConnectionHealthService(postgres);
+  let validations = 0;
+  health.gmail.validateConnection = async () => { validations += 1; };
+  const user = {
+    id: 'user-id', email: 'user@example.com', gmailConnected: true,
+    gmailRefreshToken: 'refresh-token', gmailConnectionMode: 'offline',
+  };
+
+  assert.equal((await health.validate(user)).status, 'valid');
+  assert.equal((await health.validate(user)).status, 'valid');
+  assert.equal(validations, 1);
+  assert.equal((await health.validate(user, true)).status, 'valid');
+  assert.equal(validations, 2);
+});
+
+test('proactive Gmail validation marks rejected grants for reconnection', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  const health = new GmailConnectionHealthService(postgres);
+  health.gmail.validateConnection = async () => { throw new Error('invalid_grant'); };
+  const result = await health.validate({
+    id: 'user-id', email: 'user@example.com', gmailConnected: true,
+    gmailRefreshToken: 'rejected-token', gmailConnectionMode: 'offline',
+  });
+
+  assert.equal(result.status, 'reconnect_required');
+  assert.ok(queries.some(query => query.sql.includes('gmail_refresh_token = NULL')));
 });

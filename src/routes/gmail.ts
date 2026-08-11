@@ -17,6 +17,7 @@ import { User } from '../models/User';
 import { authConfig } from '../config/auth';
 import { validateApiKey } from '../middleware/security';
 import { detectTimezoneFromRequest } from '../utils/timezone';
+import { GmailConnectionHealthResult } from '../services/email/GmailConnectionHealthService';
 
 const router = Router();
 const REQUIRED_GMAIL_SCOPES = new Set([
@@ -114,7 +115,7 @@ const getExpiryDate = (user: User): Date | null => {
   return Number.isNaN(expiry.getTime()) ? null : expiry;
 };
 
-const buildGmailStatus = (user: User) => {
+const buildGmailStatus = (user: User, health?: GmailConnectionHealthResult) => {
   const scopes = user.gmailScopes || [];
   const connectionMode = getConnectionMode(user);
   const expiryDate = getExpiryDate(user);
@@ -122,19 +123,20 @@ const buildGmailStatus = (user: User) => {
   const hasRefreshToken = !!user.gmailRefreshToken;
   const hasAccessToken = !!user.gmailAccessToken;
   const accessTokenUsable = hasAccessToken && (!expiryDate || expiryDate.getTime() > Date.now());
-  const canImport = hasRequiredScope && (hasRefreshToken || accessTokenUsable);
+  const credentialRejected = health?.status === 'reconnect_required';
+  const canImport = hasRequiredScope && (hasRefreshToken || accessTokenUsable) && !credentialRejected;
   const connected = !!user.gmailConnected && connectionMode !== 'none';
-  const needsReconnect = connected && !canImport;
+  const needsReconnect = credentialRejected || (connected && !canImport);
 
   let statusMessage = 'Connect your Gmail account to import receipts.';
-  if (connected && connectionMode === 'offline') {
+  if (needsReconnect) {
+    statusMessage = 'Gmail needs to be reconnected before imports can run.';
+  } else if (connected && connectionMode === 'offline') {
     statusMessage = 'Gmail is connected with durable access for imports you explicitly allow.';
   } else if (connected && connectionMode === 'temporary' && canImport && expiryDate) {
     statusMessage = `Gmail is connected with temporary access until ${expiryDate.toISOString()}.`;
   } else if (connected && connectionMode === 'temporary') {
     statusMessage = 'Gmail is connected with temporary access. Reconnect when the token expires.';
-  } else if (needsReconnect) {
-    statusMessage = 'Gmail needs to be reconnected before imports can run.';
   }
 
   return {
@@ -146,19 +148,27 @@ const buildGmailStatus = (user: User) => {
     scopes,
     hasRequiredScope,
     expiresAt: expiryDate?.toISOString() || null,
+    connectionHealth: health?.status ?? (connected ? 'valid' : 'disconnected'),
+    lastValidatedAt: health?.validatedAt ?? null,
     statusMessage,
   };
 };
 
-const buildImportPreferencesResponse = async (userId: string) => {
-  const userRepository = container.userRepository;
-  const user = await userRepository.findByIdWithGmailTokens(userId);
-  if (!user) {
-    throw new ValidationError('User not found');
+const getValidatedGmailStatus = async (userId: string, force = false) => {
+  let user = await container.userRepository.findByIdWithGmailTokens(userId);
+  if (!user) throw new ValidationError('User not found');
+  const health = await container.gmailConnectionHealthService.validate(user, force);
+  if (health.status === 'reconnect_required') {
+    user = await container.userRepository.findByIdWithGmailTokens(userId);
+    if (!user) throw new ValidationError('User not found');
   }
+  return { user, health, status: buildGmailStatus(user, health) };
+};
+
+const buildImportPreferencesResponse = async (userId: string) => {
+  const { user, status: gmailStatus } = await getValidatedGmailStatus(userId);
 
   const preferences = await container.importPreferencesRepository.get(userId);
-  const gmailStatus = buildGmailStatus(user);
   const sourceResult = await container.postgres.query(
     `SELECT
        COUNT(*) FILTER (WHERE data_source = 'email')::int AS email_count,
@@ -215,7 +225,11 @@ const buildImportPreferencesResponse = async (userId: string) => {
       capability: {
         gmailConnected: gmailStatus.connected,
         durableAccess: gmailStatus.connectionMode === 'offline',
-        canMonitor: gmailStatus.connected
+        needsReconnect: gmailStatus.needsReconnect,
+        connectionHealth: gmailStatus.connectionHealth,
+        lastValidatedAt: gmailStatus.lastValidatedAt,
+        canMonitor: gmailStatus.connectionHealth === 'valid'
+          && gmailStatus.connected
           && gmailStatus.canImport
           && gmailStatus.connectionMode === 'offline',
       },
@@ -243,7 +257,11 @@ const buildImportPreferencesResponse = async (userId: string) => {
       capability: {
         gmailConnected: gmailStatus.connected,
         durableAccess: gmailStatus.connectionMode === 'offline',
-        canTrack: gmailStatus.connected && gmailStatus.canImport && gmailStatus.connectionMode === 'offline',
+        needsReconnect: gmailStatus.needsReconnect,
+        connectionHealth: gmailStatus.connectionHealth,
+        lastValidatedAt: gmailStatus.lastValidatedAt,
+        canTrack: gmailStatus.connectionHealth === 'valid'
+          && gmailStatus.connected && gmailStatus.canImport && gmailStatus.connectionMode === 'offline',
       },
       activity: {
         lastCheckAttemptAt: preferences.lastCheckAttemptAt,
@@ -371,6 +389,7 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
       scopes,
       connectionMode,
     });
+    container.gmailConnectionHealthService.invalidate(decodedState.userId);
 
     const successRedirect = new URL(appRedirectUri);
     successRedirect.searchParams.set('gmail', 'success');
@@ -424,6 +443,7 @@ router.post('/disconnect', authenticateToken, asyncHandler(async (req: Request, 
   const userRepository = container.userRepository;
   const preferences = await container.importPreferencesRepository.get(userId);
   await userRepository.disconnectGmail(userId);
+  container.gmailConnectionHealthService.invalidate(userId);
   if (preferences.monitoringConsentState === 'granted') {
     await container.importPreferencesRepository.setMonitoringConsent(userId, 'revoked');
   }
@@ -495,11 +515,15 @@ router.put('/preferences/ongoing-tracking-consent', authenticateToken, asyncHand
   if (decision === 'granted' && (typeof consentVersion !== 'string' || !consentVersion.trim() || consentVersion.length > 50)) {
     throw new ValidationError('consentVersion is required when granting ongoing tracking consent');
   }
-  const user = await container.userRepository.findByIdWithGmailTokens(userId);
-  if (!user) throw new ValidationError('User not found');
-  const gmailStatus = buildGmailStatus(user);
-  if (decision === 'granted' && (!gmailStatus.connected || gmailStatus.connectionMode !== 'offline')) {
-    throw new ValidationError('Reconnect Gmail with durable access before enabling ongoing tracking.');
+  if (decision === 'granted') {
+    const { health, status: gmailStatus } = await getValidatedGmailStatus(userId, true);
+    if (
+      health.status !== 'valid'
+      || !gmailStatus.connected
+      || gmailStatus.connectionMode !== 'offline'
+    ) {
+      throw new ValidationError('Reconnect Gmail with durable access before enabling ongoing tracking.');
+    }
   }
   await container.importPreferencesRepository.setOngoingTrackingConsent(
     userId,
@@ -561,13 +585,8 @@ router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(a
     return;
   }
 
-  const user = await container.userRepository.findByIdWithGmailTokens(userId);
-  if (!user) {
-    throw new ValidationError('User not found');
-  }
-
-  const gmailStatus = buildGmailStatus(user);
-  if (!gmailStatus.connected || !gmailStatus.canImport || gmailStatus.connectionMode !== 'offline') {
+  const { user, health, status: gmailStatus } = await getValidatedGmailStatus(userId);
+  if (health.status !== 'valid' || !gmailStatus.connected || !gmailStatus.canImport || gmailStatus.connectionMode !== 'offline') {
     res.json({
       detected: false,
       preferences: await buildImportPreferencesResponse(userId),
@@ -624,16 +643,8 @@ router.get('/status', authenticateToken, asyncHandler(async (req: Request, res: 
     throw new ValidationError('User ID not found in token');
   }
 
-  const userRepository = container.userRepository;
-  const user = await userRepository.findByIdWithGmailTokens(userId);
-
-  if (!user) {
-    throw new ValidationError('User not found');
-  }
-
-  res.json({
-    ...buildGmailStatus(user)
-  });
+  const { status } = await getValidatedGmailStatus(userId);
+  res.json(status);
 }));
 
 /**
@@ -737,6 +748,33 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
     throw new ValidationError('User ID not found in token');
   }
 
+  // Force a fresh lightweight Google validation before starting a sync run or
+  // acquiring the longer-lived import lock.
+  const { user, health, status: gmailStatus } = await getValidatedGmailStatus(userId, true);
+  if (health.status === 'reconnect_required' || gmailStatus.needsReconnect) {
+    res.status(409).json({
+      success: false,
+      code: 'GMAIL_RECONNECT_REQUIRED',
+      message: 'Your Gmail authorization is no longer valid. Reconnect Gmail to continue.',
+    });
+    return;
+  }
+  if (health.status === 'unavailable') {
+    res.status(503).json({
+      success: false,
+      code: 'GMAIL_VALIDATION_UNAVAILABLE',
+      message: 'Gmail could not be reached to verify the connection. Please try again shortly.',
+    });
+    return;
+  }
+  if (!gmailStatus.canImport) {
+    throw new ValidationError(
+      gmailStatus.needsReconnect
+        ? 'Gmail needs to be reconnected before imports can run.'
+        : 'Gmail account not connected. Please connect your Gmail account first.'
+    );
+  }
+
   // Try to acquire import lock - prevents duplicate imports for same user
   const lockAcquired = await ImportLockService.acquireLock(userId);
   if (!lockAcquired) {
@@ -751,35 +789,19 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
   }
 
   try {
-    const userRepository = container.userRepository;
-    const user = await userRepository.findByIdWithGmailTokens(userId);
-
-    if (!user) {
-      throw new ValidationError('User not found');
-    }
-
-    const gmailStatus = buildGmailStatus(user);
-    if (!gmailStatus.canImport) {
-      throw new ValidationError(
-        gmailStatus.needsReconnect
-          ? 'Gmail needs to be reconnected before imports can run.'
-          : 'Gmail account not connected. Please connect your Gmail account first.'
-      );
-    }
-
     console.log(`📧 Starting incremental Gmail receipt sync for user: ${user.email}`);
 
     const gmailImportService = new GmailImportService(container.postgres);
     const result = await gmailImportService.importFromGmail(user);
 
-    console.log(`✅ Gmail import completed for user: ${user.email}`);
+    console.log(`${result.success ? '✅ Gmail import completed' : '❌ Gmail import failed'} for user: ${user.email}`);
     console.log(`   - Emails found: ${result.totalEmailsFound}`);
     console.log(`   - Receipts processed: ${result.totalReceiptsProcessed}`);
     console.log(`   - Receipts imported: ${result.totalReceiptsImported}`);
     console.log(`   - New: ${result.newOrders}, updated: ${result.updatedOrders}, unchanged: ${result.unchangedOrders}`);
     console.log(`   - Total amount: $${result.totalAmount.toFixed(2)}`);
 
-    res.json({
+    const responseBody = {
       success: result.success,
       totalEmailsFound: result.totalEmailsFound,
       totalReceiptsProcessed: result.totalReceiptsProcessed,
@@ -788,8 +810,18 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       updatedOrders: result.updatedOrders,
       unchangedOrders: result.unchangedOrders,
       totalAmount: result.totalAmount,
-      errors: result.errors
-    });
+      errors: result.errors,
+      code: result.errorCode,
+      message: result.errorCode === 'GMAIL_RECONNECT_REQUIRED'
+        ? 'Your Gmail authorization is no longer valid. Reconnect Gmail to continue.'
+        : result.success ? undefined : 'Gmail import failed. Please try again.'
+    };
+
+    if (!result.success) {
+      res.status(result.errorCode === 'GMAIL_RECONNECT_REQUIRED' ? 409 : 502).json(responseBody);
+      return;
+    }
+    res.json(responseBody);
   } finally {
     // Always release the lock when done (success or failure)
     await ImportLockService.releaseLock(userId);

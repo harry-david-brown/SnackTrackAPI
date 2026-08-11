@@ -79,6 +79,13 @@ export class GmailClient implements EmailClient {
     return google.gmail({ version: 'v1', auth: oAuth2Client });
   }
 
+  /** Refreshes the credential and performs a minimal Gmail API request. */
+  async validateConnection(user: User): Promise<void> {
+    if (config.shouldUseMockData() && !config.isProduction()) return;
+    const gmail = await this.createAuthenticatedGmailClient(user);
+    await gmail.users.getProfile({ userId: 'me', fields: 'emailAddress' });
+  }
+
   /**
    * Looks only for Uber's export-ready notification after the user requested it.
    * This deliberately does not open links or download the export archive.

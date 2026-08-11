@@ -256,6 +256,21 @@ export class UserRepository {
     );
   }
 
+  /** Preserve the connected account identity while invalidating rejected OAuth credentials. */
+  async markGmailReconnectRequired(userId: string): Promise<void> {
+    await this.postgres.query(
+      `UPDATE users SET
+        gmail_refresh_token = NULL,
+        gmail_access_token = NULL,
+        gmail_token_expiry = NULL,
+        gmail_connected = TRUE,
+        gmail_connection_mode = 'temporary',
+        updated_at = NOW()
+       WHERE id = $1`,
+      [userId]
+    );
+  }
+
   /**
    * Check if user has Gmail connected
    */

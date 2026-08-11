@@ -10,6 +10,18 @@ import * as path from 'path';
 import pLimit from 'p-limit';
 import { getDefaultTimezone, parseReceiptLocalDateTime } from '../../utils/timezone';
 import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import { UserRepository } from '../data/UserRepository';
+
+export const isGmailReconnectError = (error: unknown): boolean => {
+  const candidate = error as any;
+  const values = [
+    candidate?.message,
+    candidate?.code,
+    candidate?.response?.data?.error,
+    candidate?.response?.data?.error_description,
+  ];
+  return values.some(value => String(value || '').toLowerCase().includes('invalid_grant'));
+};
 
 export interface GmailImportResult {
   success: boolean;
@@ -22,6 +34,7 @@ export interface GmailImportResult {
   newOrders: number;
   updatedOrders: number;
   unchangedOrders: number;
+  errorCode: string | null;
 }
 
 /**
@@ -38,12 +51,14 @@ export class GmailImportService {
   private extractor: ReceiptExtractor;
   private receiptService: ReceiptService;
   private importPreferences: ImportPreferencesRepository;
+  private users: UserRepository;
 
   constructor(postgres: PostgresService) {
     this.gmailClient = new GmailClient();
     this.extractor = new ReceiptExtractor();
     this.receiptService = new ReceiptService(postgres);
     this.importPreferences = new ImportPreferencesRepository(postgres);
+    this.users = new UserRepository(postgres);
   }
 
   /**
@@ -333,7 +348,9 @@ export class GmailImportService {
         // Return the correct final total
         // Only mark as failed if there are critical errors (not conversion errors for non-receipt emails)
         return {
-          success: criticalErrors.length === 0 && importedCount > 0,
+          // A completed scan is successful even when the uploaded export
+          // already covers every matching Gmail receipt.
+          success: criticalErrors.length === 0,
           totalEmailsFound: emails.length,
           totalReceiptsProcessed: receipts.length, // Count of emails that were receipts
           totalReceiptsImported: importedCount,
@@ -343,6 +360,7 @@ export class GmailImportService {
           newOrders,
           updatedOrders,
           unchangedOrders,
+          errorCode: null,
         };
       }
 
@@ -366,12 +384,18 @@ export class GmailImportService {
         newOrders: 0,
         updatedOrders: 0,
         unchangedOrders: 0,
+        errorCode: null,
       };
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorCode = this.getErrorCode(error);
       console.error('Gmail import error:', errorMsg);
-      await this.importPreferences.failSyncRun(syncRunId, user.id, this.getErrorCode(error));
+      await this.importPreferences.failSyncRun(syncRunId, user.id, errorCode);
+      if (errorCode === 'GMAIL_RECONNECT_REQUIRED') {
+        await this.users.markGmailReconnectRequired(user.id);
+        await this.importPreferences.markTrackingReconnectRequired(user.id);
+      }
 
       return {
         success: false,
@@ -384,11 +408,13 @@ export class GmailImportService {
         newOrders: 0,
         updatedOrders: 0,
         unchangedOrders: 0,
+        errorCode,
       };
     }
   }
 
   private getErrorCode(error: unknown): string {
+    if (isGmailReconnectError(error)) return 'GMAIL_RECONNECT_REQUIRED';
     const status = (error as any)?.response?.status;
     const code = (error as any)?.code;
     if (code) return String(code).substring(0, 80);
