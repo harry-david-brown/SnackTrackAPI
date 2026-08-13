@@ -1,0 +1,4 @@
+interface:
+  display_name: "SnackTrack Account Data Lifecycle"
+  short_description: "Reset and retain SnackTrack account data safely"
+  default_prompt: "Use $snacktrack-account-data-lifecycle to implement or verify a safe SnackTrack account-data reset."

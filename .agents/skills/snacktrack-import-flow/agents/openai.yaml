@@ -1,0 +1,4 @@
+interface:
+  display_name: "SnackTrack Import Flow"
+  short_description: "Understand Gmail, export, consent, and tracking states"
+  default_prompt: "Use $snacktrack-import-flow to trace this import behavior across persisted state, API health, app resolvers, and user recovery paths."

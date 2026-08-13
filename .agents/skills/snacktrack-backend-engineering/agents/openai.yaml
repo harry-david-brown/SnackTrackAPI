@@ -1,0 +1,4 @@
+interface:
+  display_name: "SnackTrack Backend Engineering"
+  short_description: "Build safe SnackTrack API and database changes"
+  default_prompt: "Use $snacktrack-backend-engineering to implement a safe SnackTrack API and database change."
