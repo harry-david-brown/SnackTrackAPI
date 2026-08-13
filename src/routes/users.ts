@@ -16,6 +16,21 @@ import { buildDashboardInsights } from '../services/analytics/DashboardInsightSe
 const router = Router();
 const databaseService = container.databaseService;
 
+// POST /users/:id/reset-onboarding - preserve login identity while clearing all imported data.
+router.post('/:id/reset-onboarding', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.params.id;
+  const result = await container.accountResetService.resetForOnboarding(userId);
+
+  container.gmailConnectionHealthService.invalidate(userId);
+  await cacheService.invalidateAllUserCaches(userId);
+
+  res.json({
+    success: true,
+    deletedReceipts: result.deletedReceipts,
+    message: 'Account import data reset successfully',
+  });
+}));
+
 /**
  * @swagger
  * /users/create:

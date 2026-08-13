@@ -16,6 +16,7 @@ import { CacheService } from './CacheService';
 import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
 import { OngoingTrackingService } from '../import/OngoingTrackingService';
 import { GmailConnectionHealthService } from '../email/GmailConnectionHealthService';
+import { AccountResetService } from '../data/AccountResetService';
 
 /**
  * Simple service container for dependency injection
@@ -74,6 +75,7 @@ export class ServiceContainer {
     this.services.set('emailFilterService', new EmailFilterService());
     this.services.set('ongoingTrackingService', new OngoingTrackingService(this.get('postgres')));
     this.services.set('gmailConnectionHealthService', new GmailConnectionHealthService(this.get('postgres')));
+    this.services.set('accountResetService', new AccountResetService(this.get('postgres')));
 
     // Analytics services
     this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
@@ -157,6 +159,10 @@ export class ServiceContainer {
 
   get gmailConnectionHealthService(): GmailConnectionHealthService {
     return this.get<GmailConnectionHealthService>('gmailConnectionHealthService');
+  }
+
+  get accountResetService(): AccountResetService {
+    return this.get<AccountResetService>('accountResetService');
   }
 }
 

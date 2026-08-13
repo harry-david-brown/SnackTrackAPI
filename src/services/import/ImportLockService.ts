@@ -43,6 +43,23 @@ export class ImportLockService {
     return this.acquireInMemoryLock(userId);
   }
 
+  /** Wait for the user's current import to finish, then acquire its lock. */
+  static async acquireLockWithWait(
+    userId: string,
+    timeoutMs = 300000,
+    pollIntervalMs = 250
+  ): Promise<boolean> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+
+    do {
+      if (!await this.isLocked(userId) && await this.acquireLock(userId)) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    } while (Date.now() < deadline);
+
+    return false;
+  }
+
   /**
    * Release an import lock for a user
    */
@@ -141,4 +158,3 @@ export class ImportLockService {
     return this.inMemoryLocks.size;
   }
 }
-

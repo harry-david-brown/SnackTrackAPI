@@ -8,6 +8,7 @@ const { ReceiptService } = require('../dist/services/receipt/ReceiptService');
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const { ImportPreferencesRepository } = require('../dist/services/data/ImportPreferencesRepository');
 const { PostgresService } = require('../dist/services/data/PostgresService');
+const { AccountResetService } = require('../dist/services/data/AccountResetService');
 const { isGmailReconnectError } = require('../dist/services/import/GmailImportService');
 const { GmailConnectionHealthService } = require('../dist/services/email/GmailConnectionHealthService');
 const { buildDashboardInsights } = require('../dist/services/analytics/DashboardInsightService');
@@ -60,6 +61,43 @@ test('database event constraint permits the Gmail import reset audit event', asy
   const replaceEventConstraint = queries.find(sql => sql.includes('DROP CONSTRAINT IF EXISTS user_import_preference_events_event_name_check'));
   assert.match(createEventsTable, /'gmail_import_reset'/);
   assert.match(replaceEventConstraint, /'gmail_import_reset'/);
+});
+
+test('onboarding account reset waits for imports and restores fresh import state atomically', async () => {
+  const queries = [];
+  let released = false;
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      if (sql.includes('UPDATE users SET')) return { rowCount: 1, rows: [] };
+      if (sql.includes('DELETE FROM receipts')) return { rowCount: 257, rows: [] };
+      return { rowCount: 1, rows: [] };
+    },
+    release: () => {},
+  };
+  const postgres = { getClient: async () => client };
+  const lock = {
+    acquireLockWithWait: async (userId, timeoutMs) => {
+      assert.equal(userId, 'user-id');
+      assert.equal(timeoutMs, 300000);
+      return true;
+    },
+    releaseLock: async () => { released = true; },
+  };
+
+  const result = await new AccountResetService(postgres, lock).resetForOnboarding('user-id');
+
+  assert.deepEqual(result, { deletedReceipts: 257 });
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.match(queries[1].sql, /gmail_refresh_token = NULL/);
+  assert.match(queries[1].sql, /gmail_connected = FALSE/);
+  assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM receipts')));
+  assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM gmail_sync_runs')));
+  assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM user_import_preference_events')));
+  assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM user_import_preferences')));
+  assert.ok(queries.some(({ sql }) => sql.includes('INSERT INTO user_import_preferences')));
+  assert.equal(queries.at(-1).sql, 'COMMIT');
+  assert.equal(released, true);
 });
 
 test('dashboard insights use local time and keep email-only cards free of export details', () => {

@@ -10,6 +10,7 @@ import { ZipExtractor } from '../services/import/ZipExtractor';
 import { ValidationError } from '../middleware/errorHandler';
 import { cacheService } from '../services/core/CacheService';
 import { concurrencyLimiter } from '../middleware/concurrencyLimiter';
+import { ImportLockService } from '../services/import/ImportLockService';
 
 const router = Router();
 const csvImportService = container.csvImportService;
@@ -148,6 +149,7 @@ router.post('/import',
     let exportLifecycleStarted = false;
     let exportCompleted = false;
     let lifecycleUserId: string | null = null;
+    let importLockAcquired = false;
 
     try {
       const userId = req.body.userId;
@@ -156,6 +158,13 @@ router.post('/import',
         return res.status(400).json({ error: 'userId is required' });
       }
       lifecycleUserId = userId;
+      importLockAcquired = await ImportLockService.acquireLock(userId);
+      if (!importLockAcquired) {
+        return res.status(409).json({
+          error: 'Another import or account reset is already in progress',
+          code: 'IMPORT_IN_PROGRESS',
+        });
+      }
       exportLifecycleStarted = await container.importPreferencesRepository
         .setExportStatus(userId, 'import_processing');
 
@@ -270,6 +279,9 @@ router.post('/import',
         fs.unlink(req.file.path, (err) => {
           if (err) console.error('Failed to delete temp file:', err);
         });
+      }
+      if (importLockAcquired && lifecycleUserId) {
+        await ImportLockService.releaseLock(lifecycleUserId);
       }
     }
   });
