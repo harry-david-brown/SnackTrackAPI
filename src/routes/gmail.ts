@@ -245,7 +245,7 @@ const buildImportPreferencesResponse = async (userId: string) => {
       importedCount: preferences.gmailImportedCount,
       errorCode: preferences.gmailImportErrorCode,
       receiptCount: emailReceiptCount,
-      hasImported: preferences.gmailImportStatus === 'completed' || emailReceiptCount > 0,
+      hasImported: preferences.gmailImportStatus === 'completed',
     },
     ongoingTracking: {
       consentState: preferences.ongoingTrackingConsentState,
@@ -441,6 +441,7 @@ router.post('/disconnect', authenticateToken, asyncHandler(async (req: Request, 
   }
 
   const userRepository = container.userRepository;
+  const resetImportStatus = req.body?.resetImportStatus === true;
   const preferences = await container.importPreferencesRepository.get(userId);
   await userRepository.disconnectGmail(userId);
   container.gmailConnectionHealthService.invalidate(userId);
@@ -449,6 +450,9 @@ router.post('/disconnect', authenticateToken, asyncHandler(async (req: Request, 
   }
   if (preferences.ongoingTrackingConsentState === 'granted') {
     await container.importPreferencesRepository.setOngoingTrackingConsent(userId, 'revoked');
+  }
+  if (resetImportStatus) {
+    await container.importPreferencesRepository.resetGmailImportStatus(userId);
   }
 
   console.log(`✅ Disconnected Gmail for user: ${userId}`);

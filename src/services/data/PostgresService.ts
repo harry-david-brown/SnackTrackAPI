@@ -368,7 +368,8 @@ export class PostgresService {
               'export_file_ready',
               'export_import_processing',
               'export_completed',
-              'export_failed'
+              'export_failed',
+              'gmail_import_reset'
             )),
           metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -376,6 +377,7 @@ export class PostgresService {
       `);
 
       await this.query(`
+        BEGIN;
         ALTER TABLE user_import_preference_events
           DROP CONSTRAINT IF EXISTS user_import_preference_events_event_name_check;
         ALTER TABLE user_import_preference_events
@@ -383,8 +385,10 @@ export class PostgresService {
           CHECK (event_name IN (
             'monitoring_consent_granted', 'monitoring_consent_declined', 'monitoring_consent_revoked',
             'ongoing_tracking_consent_granted', 'ongoing_tracking_consent_declined', 'ongoing_tracking_consent_revoked',
-            'export_requested', 'export_file_ready', 'export_import_processing', 'export_completed', 'export_failed'
-          ))
+            'export_requested', 'export_file_ready', 'export_import_processing', 'export_completed', 'export_failed',
+            'gmail_import_reset'
+          ));
+        COMMIT;
       `);
 
       await this.query(`

@@ -129,6 +129,7 @@ export class ImportPreferencesRepository {
        ) source
        WHERE preferences.user_id = $1
          AND preferences.gmail_import_status = 'never_started'
+         AND preferences.gmail_import_updated_at IS NULL
          AND source.count > 0`,
       [userId]
     );
@@ -273,6 +274,29 @@ export class ImportPreferencesRepository {
       consentVersion: consentVersion || null,
     });
     return this.get(userId);
+  }
+
+  async resetGmailImportStatus(userId: string): Promise<void> {
+    await this.ensureRow(userId);
+    const result = await this.postgres.query(
+      `UPDATE user_import_preferences
+       SET gmail_import_status = 'never_started',
+           gmail_import_updated_at = NOW(),
+           gmail_imported_count = 0,
+           gmail_import_error_code = NULL,
+           last_check_attempt_at = NULL,
+           last_successful_check_at = NULL,
+           last_stats_updated_at = NULL,
+           last_new_order_at = NULL,
+           last_tracking_error_at = NULL,
+           last_tracking_error_code = NULL,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId]
+    );
+    if (result.rowCount > 0) {
+      await this.recordEvent(userId, 'gmail_import_reset');
+    }
   }
 
   async startSyncRun(userId: string, triggerType: 'manual' | 'background'): Promise<string> {

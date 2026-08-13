@@ -11,6 +11,7 @@ import {
   getLocalDateKey,
   isValidTimezone,
 } from '../utils/timezone';
+import { buildDashboardInsights } from '../services/analytics/DashboardInsightService';
 
 const router = Router();
 const databaseService = container.databaseService;
@@ -232,8 +233,8 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     // Timezone and metric-versioned keys prevent a device timezone correction
     // or formula fix from returning an older cached payload.
     const cacheKey = includeWrapped
-      ? `${userId}-wrapped-v4-${analyticsTimezone}`
-      : `${userId}-v4-${analyticsTimezone}`;
+      ? `${userId}-wrapped-v5-${analyticsTimezone}`
+      : `${userId}-v5-${analyticsTimezone}`;
     const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
       return res.json(cachedSummary);
@@ -323,7 +324,8 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
         amountSpent: receipt.amountSpent,
         orderDate: receipt.orderDate,
         dataSource: receipt.dataSource
-      }))
+      })),
+      dashboardInsights: buildDashboardInsights(receipts, analyticsTimezone, userId)
     };
 
     // Optionally include Spotify Wrapped-style analytics

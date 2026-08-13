@@ -7,8 +7,10 @@ const { WrappedAnalyticsService } = require('../dist/services/analytics/WrappedA
 const { ReceiptService } = require('../dist/services/receipt/ReceiptService');
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const { ImportPreferencesRepository } = require('../dist/services/data/ImportPreferencesRepository');
+const { PostgresService } = require('../dist/services/data/PostgresService');
 const { isGmailReconnectError } = require('../dist/services/import/GmailImportService');
 const { GmailConnectionHealthService } = require('../dist/services/email/GmailConnectionHealthService');
+const { buildDashboardInsights } = require('../dist/services/analytics/DashboardInsightService');
 const {
   getLocalDateKey,
   parseReceiptLocalDateTime,
@@ -23,6 +25,95 @@ test('timezone helpers preserve local calendar dates and receipt wall time', () 
     parseReceiptLocalDateTime('Jul 23, 2026', '6:50 p.m.', 'America/Toronto').toISOString(),
     '2026-07-23T22:50:00.000Z'
   );
+});
+
+test('onboarding reset clears the Gmail import lifecycle explicitly', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  await new ImportPreferencesRepository(postgres).resetGmailImportStatus('user-id');
+
+  const resetQuery = queries.find(({ sql }) => sql.includes("gmail_import_status = 'never_started'"));
+  assert.ok(resetQuery);
+  assert.match(resetQuery.sql, /gmail_import_updated_at = NOW\(\)/);
+  assert.match(resetQuery.sql, /gmail_imported_count = 0/);
+  assert.match(resetQuery.sql, /gmail_import_error_code = NULL/);
+  assert.deepEqual(resetQuery.params, ['user-id']);
+});
+
+test('database event constraint permits the Gmail import reset audit event', async () => {
+  const queries = [];
+  const postgres = Object.create(PostgresService.prototype);
+  postgres.query = async (sql) => {
+    queries.push(sql);
+    return { rows: [], rowCount: 0 };
+  };
+
+  await postgres.initializeTables();
+
+  const createEventsTable = queries.find(sql => sql.includes('CREATE TABLE IF NOT EXISTS user_import_preference_events'));
+  const replaceEventConstraint = queries.find(sql => sql.includes('DROP CONSTRAINT IF EXISTS user_import_preference_events_event_name_check'));
+  assert.match(createEventsTable, /'gmail_import_reset'/);
+  assert.match(replaceEventConstraint, /'gmail_import_reset'/);
+});
+
+test('dashboard insights use local time and keep email-only cards free of export details', () => {
+  const receipts = [
+    new Receipt('user-id', [], 12, ReceiptType.UBER_EATS, 'Night Kitchen', new Date('2026-08-08T03:30:00.000Z'), DataSource.EMAIL),
+    new Receipt('user-id', [], 18, ReceiptType.UBER_EATS, 'Night Kitchen', new Date('2026-08-15T03:45:00.000Z'), DataSource.EMAIL),
+    new Receipt('user-id', [], 24, ReceiptType.UBER_EATS, 'Other Place', new Date('2026-08-22T03:15:00.000Z'), DataSource.EMAIL),
+  ];
+
+  const insights = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T12:00:00.000Z'));
+  assert.equal(insights[0].id, 'top-restaurants');
+  assert.ok(insights.some(insight => insight.id === 'favorite-day' && insight.headline === 'Friday'));
+  assert.ok(insights.some(insight => insight.id === 'peak-hunger-hour' && insight.headline === '11 PM'));
+  assert.equal(insights.filter(insight => insight.locked).length <= 1, true);
+  assert.equal(insights.some(insight => insight.id === 'most-ordered-meal' || insight.id === 'worst-order'), false);
+  if (insights.some(insight => insight.locked)) assert.equal(insights.at(-1).locked, true);
+
+  const lockedCounts = [];
+  for (let week = 0; week < 12; week++) {
+    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + (week * 7))));
+    lockedCounts.push(cards.filter(card => card.locked).length);
+    assert.equal(cards[0].locked === true, false);
+  }
+  assert.ok(lockedCounts.some(count => count === 0), 'locked previews should not appear every week');
+  assert.ok(lockedCounts.some(count => count === 1), 'locked previews should appear occasionally');
+});
+
+test('dashboard insights unlock item and delivery cards only when export receipts support them', () => {
+  const receipts = [
+    new Receipt('user-id', [{ name: 'Spicy Bowl', quantity: 1, price: 14 }], 22, ReceiptType.UBER_EATS, 'Test Kitchen', new Date('2026-08-01T22:00:00.000Z'), DataSource.CSV, new Date('2026-08-01T22:35:00.000Z')),
+    new Receipt('user-id', [{ name: 'Spicy Bowl', quantity: 2, price: 14 }], 42, ReceiptType.UBER_EATS, 'Test Kitchen', new Date('2026-08-02T22:00:00.000Z'), DataSource.CSV, new Date('2026-08-02T23:05:00.000Z')),
+    new Receipt('user-id', [{ name: 'Fries', quantity: 1, price: 6 }], 16, ReceiptType.UBER_EATS, 'Other Place', new Date('2026-08-03T22:00:00.000Z'), DataSource.CSV, new Date('2026-08-03T22:25:00.000Z')),
+  ];
+
+  const first = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T12:00:00.000Z'));
+  const second = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-12T12:00:00.000Z'));
+  assert.deepEqual(second, first, 'the carousel should remain stable during the same weekly rotation');
+  assert.equal(first.some(insight => insight.locked), false);
+  assert.equal(first.length <= 6, true);
+
+  const rotatingIds = new Set();
+  for (let week = 0; week < 12; week++) {
+    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + (week * 7))));
+    cards.forEach(card => rotatingIds.add(card.id));
+    const worstOrder = cards.find(card => card.id === 'worst-order');
+    if (worstOrder) assert.ok(worstOrder.items.length > 0);
+    const favoriteMeal = cards.find(card => card.id === 'most-ordered-meal');
+    if (favoriteMeal) assert.equal(favoriteMeal.headline, 'Spicy Bowl');
+    const longestWait = cards.find(card => card.id === 'longest-wait');
+    if (longestWait) assert.equal(longestWait.value, 65);
+  }
+  assert.equal(rotatingIds.has('most-ordered-meal'), true);
+  assert.equal(rotatingIds.has('worst-order'), true);
+  assert.equal(rotatingIds.has('longest-wait'), true);
 });
 
 test('email extraction prefers the Uber order header and infers Canadian dollars', () => {
