@@ -19,7 +19,7 @@ Use this skill to preserve the distinctions between connection, import, export, 
    - app response normalization and hooks;
    - dashboard/upload/post-summary resolver precedence;
    - user-visible action and recovery path.
-6. Add a regression test at the canonical transition or resolver, then run focused app and API checks.
+6. Add regression coverage at the canonical transition or resolver. Run only the relevant TypeScript check unless the user explicitly requests tests or other verification.
 
 ## Canonical files
 

@@ -29,7 +29,11 @@ export class OngoingTrackingService {
       this.users.findByIdWithGmailTokens(userId),
       this.preferences.get(userId),
     ]);
-    if (!user || preferences.ongoingTrackingConsentState !== 'granted') return null;
+    if (
+      !user
+      || preferences.gmailImportStatus !== 'completed'
+      || preferences.ongoingTrackingConsentState !== 'granted'
+    ) return null;
 
     const durableConnection = Boolean(
       user.gmailConnected
@@ -55,33 +59,33 @@ export class OngoingTrackingService {
     }
     this.batchRunning = true;
     try {
-    const userIds = await this.preferences.getEligibleTrackingUserIds(Math.max(1, Math.min(limit, 500)));
-    const summary: TrackingBatchResult = {
-      eligible: userIds.length,
-      checked: 0,
-      skipped: 0,
-      failed: 0,
-      newOrders: 0,
-      updatedOrders: 0,
-    };
+      const userIds = await this.preferences.getEligibleTrackingUserIds(Math.max(1, Math.min(limit, 500)));
+      const summary: TrackingBatchResult = {
+        eligible: userIds.length,
+        checked: 0,
+        skipped: 0,
+        failed: 0,
+        newOrders: 0,
+        updatedOrders: 0,
+      };
 
-    // Deliberately sequential to stay within Gmail and database rate limits.
-    for (const userId of userIds) {
-      try {
-        const result = await this.checkUser(userId);
-        if (!result) {
-          summary.skipped++;
-          continue;
+      // Deliberately sequential to stay within Gmail and database rate limits.
+      for (const userId of userIds) {
+        try {
+          const result = await this.checkUser(userId);
+          if (!result) {
+            summary.skipped++;
+            continue;
+          }
+          summary.checked++;
+          summary.newOrders += result.newOrders;
+          summary.updatedOrders += result.updatedOrders;
+          if (!result.success) summary.failed++;
+        } catch {
+          summary.failed++;
         }
-        summary.checked++;
-        summary.newOrders += result.newOrders;
-        summary.updatedOrders += result.updatedOrders;
-        if (!result.success) summary.failed++;
-      } catch {
-        summary.failed++;
       }
-    }
-    return summary;
+      return summary;
     } finally {
       this.batchRunning = false;
     }

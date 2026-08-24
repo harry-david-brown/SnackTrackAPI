@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
-import { asyncHandler, NotFoundError, DatabaseError } from '../middleware/errorHandler';
+import { asyncHandler, NotFoundError, DatabaseError, ValidationError } from '../middleware/errorHandler';
 import { validateUUIDParam, validateUserCreation } from '../middleware/validation';
 import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
@@ -11,7 +11,12 @@ import {
   getLocalDateKey,
   isValidTimezone,
 } from '../utils/timezone';
-import { buildDashboardInsights } from '../services/analytics/DashboardInsightService';
+import {
+  buildDashboardInsightEdition,
+  DASHBOARD_INSIGHT_METRIC_VERSION,
+  getDashboardInsightPreviewNow,
+  MAX_DASHBOARD_INSIGHT_DEV_DAY_OFFSET,
+} from '../services/analytics/dashboard';
 
 const router = Router();
 const databaseService = container.databaseService;
@@ -29,6 +34,96 @@ router.post('/:id/reset-onboarding', authenticateToken, validateOwnership, valid
     deletedReceipts: result.deletedReceipts,
     message: 'Account import data reset successfully',
   });
+}));
+
+/**
+ * @swagger
+ * /users/{id}/dashboard-insights:
+ *   get:
+ *     summary: Get the user's daily dashboard insight edition
+ *     description: Returns up to seven deterministic, user-local daily observations derived from persisted receipts.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: header
+ *         name: X-Timezone
+ *         schema:
+ *           type: string
+ *         description: Current IANA timezone used for local-day analytics.
+ *     responses:
+ *       200:
+ *         description: Daily dashboard insight edition
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DashboardInsightEdition'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
+router.get('/:id/dashboard-insights', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
+  const rawDevDayOffset = req.query.devDayOffset;
+  if (rawDevDayOffset !== undefined && process.env.NODE_ENV === 'production') {
+    throw new ValidationError('devDayOffset is only available outside production', 'devDayOffset');
+  }
+  if (rawDevDayOffset !== undefined && (
+    typeof rawDevDayOffset !== 'string'
+    || !/^\d+$/.test(rawDevDayOffset)
+    || Number(rawDevDayOffset) > MAX_DASHBOARD_INSIGHT_DEV_DAY_OFFSET
+  )) {
+    throw new ValidationError(
+      `devDayOffset must be a whole number from 0 to ${MAX_DASHBOARD_INSIGHT_DEV_DAY_OFFSET}`,
+      'devDayOffset',
+    );
+  }
+  const devDayOffset = rawDevDayOffset === undefined ? 0 : Number(rawDevDayOffset);
+  const isDevPreview = devDayOffset > 0;
+  try {
+    const userId = req.params.id;
+    let user = await container.userRepository.findById(userId);
+    if (!user) throw new NotFoundError('User', userId);
+
+    const requestTimezone = detectTimezoneFromRequest(req);
+    if (requestTimezone && requestTimezone !== user.timezone) {
+      await container.userRepository.updateTimezone(userId, requestTimezone);
+      await cacheService.invalidateAllUserCaches(userId);
+      user = { ...user, timezone: requestTimezone };
+    }
+    const timezone = user.timezone || getDefaultTimezone();
+    const actualNow = new Date();
+    const now = getDashboardInsightPreviewNow(actualNow, timezone, devDayOffset);
+    const localDate = getLocalDateKey(now, timezone) ?? now.toISOString().slice(0, 10);
+    const cacheKey = `${userId}:${DASHBOARD_INSIGHT_METRIC_VERSION}:${timezone}:${localDate}`;
+    // Preview editions intentionally bypass shared caches: otherwise a future
+    // preview could poison the real edition when that calendar date arrives.
+    const cached = isDevPreview ? null : await cacheService.getDashboardInsightEdition(cacheKey);
+    if (cached) {
+      res.set('Cache-Control', 'private, no-cache');
+      return res.json(cached);
+    }
+
+    const receipts = await container.receiptRepository.findByUserId(userId);
+    const edition = buildDashboardInsightEdition(receipts, timezone, userId, now);
+    if (!isDevPreview) {
+      const ttlSeconds = (Date.parse(edition.nextRefreshAt) - actualNow.getTime()) / 1000 + 60;
+      await cacheService.cacheDashboardInsightEdition(cacheKey, edition, ttlSeconds);
+    }
+    res.set('Cache-Control', 'private, no-cache');
+    return res.json(edition);
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error;
+    throw new DatabaseError('Failed to fetch dashboard insights', error as Error);
+  }
 }));
 
 /**
@@ -248,7 +343,7 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
     // Timezone and metric-versioned keys prevent a device timezone correction
     // or formula fix from returning an older cached payload.
     const cacheKey = includeWrapped
-      ? `${userId}-wrapped-v5-${analyticsTimezone}`
+      ? `${userId}-wrapped-v6-${analyticsTimezone}`
       : `${userId}-v5-${analyticsTimezone}`;
     const cachedSummary = await cacheService.getUserSummary(cacheKey);
     if (cachedSummary) {
@@ -340,7 +435,6 @@ router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDPar
         orderDate: receipt.orderDate,
         dataSource: receipt.dataSource
       })),
-      dashboardInsights: buildDashboardInsights(receipts, analyticsTimezone, userId)
     };
 
     // Optionally include Spotify Wrapped-style analytics

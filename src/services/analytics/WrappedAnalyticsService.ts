@@ -28,6 +28,15 @@ import {
   getLocalMinuteOfDay,
   getLocalYear,
 } from '../../utils/timezone';
+import {
+  isLateNightHour,
+  LATE_NIGHT_END_HOUR,
+  LATE_NIGHT_START_HOUR,
+} from './shared/timeWindows';
+import {
+  calculateHypotheticalInvestment,
+  HYPOTHETICAL_ANNUAL_RETURN_PERCENT,
+} from './shared/investment';
 
 /**
  * Wrapped Analytics Service
@@ -199,7 +208,7 @@ export class WrappedAnalyticsService {
    * Rank this user against every other account with enough data.
    *
    * One aggregate query: per-user totals + PERCENT_RANK window functions.
-   * night_owl_pct mirrors calculateNightOwl (share of orders at/after 10pm,
+   * night_owl_pct mirrors calculateNightOwl (share of orders from 10pm–4am,
    * in each user's own timezone; order_date is stored as a UTC instant).
    * Returns undefined when the user isn't in the pool (too few receipts) or
    * the pool itself is too small for percentiles to mean anything.
@@ -217,7 +226,11 @@ export class WrappedAnalyticsService {
               WHEN EXTRACT(
                      HOUR FROM r.order_date
                        AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
-                   ) >= 22
+                   ) >= ${LATE_NIGHT_START_HOUR}
+                OR EXTRACT(
+                     HOUR FROM r.order_date
+                       AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
+                   ) < ${LATE_NIGHT_END_HOUR}
               THEN 1.0 ELSE 0.0
             END
           ) * 100 AS night_owl_pct
@@ -272,14 +285,13 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate 3am Regret Orders
-   * Orders placed between midnight and 6am (in user's local timezone)
+   * Calculate late-night orders using the shared 10pm–4am local window.
    */
   private async calculateLateNightOrders(receipts: ReceiptForAnalytics[], timezone: string): Promise<LateNightOrders | undefined> {
     const lateNightReceipts = receipts.filter(r => {
       if (!r.orderDate) return false;
       const hour = getLocalHour(r.orderDate, timezone);
-      return hour !== null && hour >= 0 && hour < 6;
+      return isLateNightHour(hour);
     });
 
     if (lateNightReceipts.length === 0) return undefined;
@@ -600,7 +612,7 @@ export class WrappedAnalyticsService {
   }
 
   /**
-   * Calculate Night Owl Badge (orders after 10pm in user's local timezone)
+   * Calculate Night Owl Badge using the shared 10pm–4am local window.
    */
   private async calculateNightOwl(receipts: ReceiptForAnalytics[], timezone: string): Promise<NightOwl | undefined> {
     const validReceipts = receipts.filter(r => r.orderDate);
@@ -608,7 +620,7 @@ export class WrappedAnalyticsService {
 
     const nightOrders = validReceipts.filter(r => {
       const hour = getLocalHour(r.orderDate!, timezone);
-      return hour !== null && hour >= 22;
+      return isLateNightHour(hour);
     });
     if (nightOrders.length === 0) return undefined;
 
@@ -677,39 +689,28 @@ export class WrappedAnalyticsService {
   /**
    * Calculate Missed Investment
    * 
-   * Calculates a hypothetical value using a fixed 10% annual return from each
+   * Calculates a hypothetical value using the shared fixed annual return from each
    * receipt date. This is illustrative, not historical market performance.
    */
   private async calculateMissedInvestment(receipts: ReceiptForAnalytics[], timezone: string): Promise<MissedInvestment | undefined> {
-    const validReceipts = receipts.filter(r => r.orderDate).sort((a, b) => 
+    const validReceipts = receipts.filter(r => r.orderDate && Number.isFinite(r.amountSpent) && r.amountSpent > 0).sort((a, b) =>
       a.orderDate!.getTime() - b.orderDate!.getTime()
     );
     
     if (validReceipts.length === 0) return undefined;
 
-    const totalSpent = validReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
     const firstOrder = validReceipts[0];
     const now = new Date();
     const daysElapsed = Math.floor((now.getTime() - firstOrder.orderDate!.getTime()) / (1000 * 60 * 60 * 24));
 
-    const sp500Return = 10;
-    const annualReturnRate = sp500Return / 100;
-    
-    // Calculate compound interest for each receipt based on when it was spent
-    let wouldBeWorth = 0;
-    validReceipts.forEach(receipt => {
-      const daysSinceReceipt = Math.floor((now.getTime() - receipt.orderDate!.getTime()) / (1000 * 60 * 60 * 24));
-      const yearsSinceReceipt = daysSinceReceipt / 365;
-      // Only calculate if the receipt date is in the past
-      if (yearsSinceReceipt > 0) {
-        wouldBeWorth += receipt.amountSpent * Math.pow(1 + annualReturnRate, yearsSinceReceipt);
-      } else {
-        // For future dates (shouldn't happen, but handle gracefully), just add the amount
-        wouldBeWorth += receipt.amountSpent;
-      }
-    });
-    
-    const missedGains = wouldBeWorth - totalSpent;
+    const sp500Return = HYPOTHETICAL_ANNUAL_RETURN_PERCENT;
+    const investment = calculateHypotheticalInvestment(
+      validReceipts.map(receipt => ({ amount: receipt.amountSpent, occurredAt: receipt.orderDate! })),
+      now,
+    );
+    const totalSpent = investment.contributed;
+    const wouldBeWorth = investment.futureValue;
+    const missedGains = investment.gains;
 
     return {
       amountSpent: parseFloat(totalSpent.toFixed(2)),
@@ -718,7 +719,7 @@ export class WrappedAnalyticsService {
       sp500Return,
       wouldBeWorth: parseFloat(wouldBeWorth.toFixed(2)),
       missedGains: parseFloat(missedGains.toFixed(2)),
-      message: `At a hypothetical 10% annual return, it could have grown to $${wouldBeWorth.toFixed(2)}`
+      message: `At a hypothetical ${sp500Return}% annual return, it could have grown to $${wouldBeWorth.toFixed(2)}`
     };
   }
 

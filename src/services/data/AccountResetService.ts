@@ -50,6 +50,7 @@ export class AccountResetService {
         );
         await client.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM user_import_preference_events WHERE user_id = $1', [userId]);
+        await client.query('DELETE FROM user_export_provider_preferences WHERE user_id = $1', [userId]);
         await client.query('DELETE FROM user_import_preferences WHERE user_id = $1', [userId]);
         await client.query('INSERT INTO user_import_preferences (user_id) VALUES ($1)', [userId]);
 

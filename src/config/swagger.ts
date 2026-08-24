@@ -312,6 +312,93 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
             }
           }
         },
+        DashboardInsightBase: {
+          type: 'object',
+          required: ['id', 'presentation', 'category', 'icon', 'eyebrow', 'title'],
+          properties: {
+            id: { type: 'string' },
+            presentation: { type: 'string', enum: ['hero', 'comparison', 'ranking', 'order', 'timeline', 'yearly-champions', 'locked'] },
+            category: { type: 'string', enum: ['favorites', 'habits', 'extremes', 'progress'] },
+            icon: { type: 'string' },
+            eyebrow: { type: 'string' },
+            title: { type: 'string' },
+            detail: { type: 'string' },
+            period: { type: 'object', required: ['startDate'], properties: { startDate: { type: 'string', format: 'date' }, endDate: { type: 'string', format: 'date' } } },
+            methodology: {
+              type: 'object',
+              properties: {
+                estimated: { type: 'boolean' }, sampleSize: { type: 'integer' },
+                assumption: { type: 'string' }, disclaimer: { type: 'string' }
+              }
+            }
+          }
+        },
+        DashboardHeroInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'value', 'valueFormat'], properties: { presentation: { type: 'string', enum: ['hero'] }, value: { type: 'number' }, valueFormat: { type: 'string', enum: ['currency', 'number', 'percent', 'minutes', 'hours', 'days'] }, headline: { type: 'string' } } }
+          ]
+        },
+        DashboardComparisonInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'comparison'], properties: { presentation: { type: 'string', enum: ['comparison'] }, comparison: { type: 'object', required: ['current', 'previous', 'delta', 'percentDelta', 'direction', 'valueFormat', 'currentLabel', 'previousLabel'], properties: { variant: { type: 'string', enum: ['investment'] }, current: { type: 'number' }, previous: { type: 'number' }, delta: { type: 'number' }, percentDelta: { type: 'number', nullable: true }, direction: { type: 'string', enum: ['up', 'down', 'flat'] }, valueFormat: { type: 'string', enum: ['currency', 'number'] }, currentLabel: { type: 'string' }, previousLabel: { type: 'string' }, driver: { type: 'string', enum: ['frequency', 'basket', 'outlier', 'mixed'] }, subject: { type: 'object', required: ['kind', 'name', 'occurrences'], properties: { kind: { type: 'string', enum: ['meal', 'item'] }, name: { type: 'string' }, restaurant: { type: 'string' }, occurrences: { type: 'integer', minimum: 2 } } } } } } }
+          ]
+        },
+        DashboardRankingInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'rows'], properties: { presentation: { type: 'string', enum: ['ranking'] }, rows: { type: 'array', items: { type: 'object', required: ['label', 'count'], properties: { label: { type: 'string' }, count: { type: 'integer' }, amount: { type: 'number' }, context: { type: 'string' } } } } } }
+          ]
+        },
+        DashboardOrderInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'order'], properties: { presentation: { type: 'string', enum: ['order'] }, order: { type: 'object', required: ['restaurant', 'amount', 'items'], properties: { restaurant: { type: 'string' }, restaurants: { type: 'array', items: { type: 'string' } }, amount: { type: 'number' }, orderedAt: { type: 'string', format: 'date-time' }, items: { type: 'array', items: { type: 'string' } } } } } }
+          ]
+        },
+        DashboardTimelineInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'events'], properties: { presentation: { type: 'string', enum: ['timeline'] }, events: { type: 'array', items: { type: 'object', required: ['label', 'value'], properties: { label: { type: 'string' }, value: { oneOf: [{ type: 'string' }, { type: 'number' }] }, valueFormat: { type: 'string' }, detail: { type: 'string' } } } } } }
+          ]
+        },
+        DashboardYearlyChampionsInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'years'], properties: { presentation: { type: 'string', enum: ['yearly-champions'] }, years: { type: 'array', items: { type: 'object', required: ['year', 'winners', 'orderCount', 'currentYear'], properties: { year: { type: 'integer' }, winners: { type: 'array', items: { type: 'string' } }, orderCount: { type: 'integer' }, currentYear: { type: 'boolean' } } } } } }
+          ]
+        },
+        DashboardLockedInsight: {
+          allOf: [
+            { $ref: '#/components/schemas/DashboardInsightBase' },
+            { type: 'object', required: ['presentation', 'action'], properties: { presentation: { type: 'string', enum: ['locked'] }, action: { type: 'string', enum: ['open_export'] } } }
+          ]
+        },
+        DashboardInsightEdition: {
+          type: 'object',
+          required: ['localDate', 'timezone', 'generatedAt', 'nextRefreshAt', 'metricVersion', 'availableCandidateCount', 'insights'],
+          properties: {
+            localDate: { type: 'string', format: 'date' }, timezone: { type: 'string' },
+            generatedAt: { type: 'string', format: 'date-time' }, nextRefreshAt: { type: 'string', format: 'date-time' },
+            metricVersion: { type: 'string' }, availableCandidateCount: { type: 'integer' },
+            insights: {
+              type: 'array', maxItems: 7,
+              items: {
+                discriminator: { propertyName: 'presentation' },
+                oneOf: [
+                  { $ref: '#/components/schemas/DashboardHeroInsight' },
+                  { $ref: '#/components/schemas/DashboardComparisonInsight' },
+                  { $ref: '#/components/schemas/DashboardRankingInsight' },
+                  { $ref: '#/components/schemas/DashboardOrderInsight' },
+                  { $ref: '#/components/schemas/DashboardTimelineInsight' },
+                  { $ref: '#/components/schemas/DashboardYearlyChampionsInsight' },
+                  { $ref: '#/components/schemas/DashboardLockedInsight' }
+                ]
+              }
+            }
+          }
+        },
         CSVPreviewResponse: {
           type: 'object',
           properties: {

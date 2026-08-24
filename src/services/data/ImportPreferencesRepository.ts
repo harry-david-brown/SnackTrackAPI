@@ -11,6 +11,22 @@ export type ExportLifecycleStatus =
   | 'import_processing'
   | 'completed'
   | 'failed';
+export type ExportProvider = 'uber_eats' | 'doordash';
+export type ProviderExportLifecycleStatus =
+  | 'not_started'
+  | 'requested'
+  | 'file_ready'
+  | 'import_processing'
+  | 'completed'
+  | 'failed';
+
+export interface ProviderExportPreference {
+  provider: ExportProvider;
+  status: ProviderExportLifecycleStatus;
+  requestedAt: string | null;
+  updatedAt: string | null;
+  errorCode: string | null;
+}
 
 export interface ImportPreferences {
   userId: string;
@@ -96,6 +112,49 @@ export class ImportPreferencesRepository {
     );
   }
 
+  private async ensureProviderRows(userId: string): Promise<void> {
+    await this.postgres.query(
+      `INSERT INTO user_export_provider_preferences (user_id, provider)
+       VALUES ($1, 'uber_eats'), ($1, 'doordash')
+       ON CONFLICT (user_id, provider) DO NOTHING`,
+      [userId]
+    );
+  }
+
+  async getProviderExports(userId: string): Promise<Record<ExportProvider, ProviderExportPreference>> {
+    await this.ensureProviderRows(userId);
+    await this.postgres.query(
+      `UPDATE user_export_provider_preferences provider_preferences
+       SET status = 'completed', error_code = NULL, updated_at = NOW()
+       WHERE provider_preferences.user_id = $1
+         AND EXISTS (
+           SELECT 1 FROM receipts
+           WHERE receipts.user_id = provider_preferences.user_id
+             AND receipts.data_source = 'csv'
+             AND receipts.receipt_type = provider_preferences.provider
+         )
+         AND provider_preferences.status <> 'completed'`,
+      [userId]
+    );
+    const result = await this.postgres.query(
+      `SELECT provider, status, requested_at, updated_at, error_code
+       FROM user_export_provider_preferences
+       WHERE user_id = $1`,
+      [userId]
+    );
+    const mapped = Object.fromEntries(result.rows.map((row: any) => [row.provider, {
+      provider: row.provider,
+      status: row.status,
+      requestedAt: row.requested_at?.toISOString?.() ?? row.requested_at ?? null,
+      updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at ?? null,
+      errorCode: row.error_code ?? null,
+    }])) as Partial<Record<ExportProvider, ProviderExportPreference>>;
+    return {
+      uber_eats: mapped.uber_eats!,
+      doordash: mapped.doordash!,
+    };
+  }
+
   async get(userId: string): Promise<ImportPreferences> {
     await this.ensureRow(userId);
 
@@ -114,23 +173,6 @@ export class ImportPreferencesRepository {
            WHERE receipts.user_id = preferences.user_id
              AND receipts.data_source = 'csv'
          )`,
-      [userId]
-    );
-
-    await this.postgres.query(
-      `UPDATE user_import_preferences preferences
-       SET gmail_import_status = 'completed',
-           gmail_imported_count = source.count,
-           gmail_import_updated_at = COALESCE(gmail_import_updated_at, NOW()),
-           updated_at = NOW()
-       FROM (
-         SELECT COUNT(*)::int AS count FROM receipts
-         WHERE user_id = $1 AND data_source = 'email'
-       ) source
-       WHERE preferences.user_id = $1
-         AND preferences.gmail_import_status = 'never_started'
-         AND preferences.gmail_import_updated_at IS NULL
-         AND source.count > 0`,
       [userId]
     );
 
@@ -200,43 +242,49 @@ export class ImportPreferencesRepository {
     return this.get(userId);
   }
 
-  async markExportRequested(userId: string): Promise<ImportPreferences> {
-    await this.ensureRow(userId);
-
+  async markExportRequested(userId: string, provider: ExportProvider): Promise<void> {
+    await this.ensureProviderRows(userId);
     const updateResult = await this.postgres.query(
-      `UPDATE user_import_preferences
-       SET export_status = CASE
-             WHEN monitoring_consent_state = 'granted'
-               THEN 'requested_monitoring_enabled'
-             ELSE 'requested_monitoring_disabled'
-           END,
-           export_requested_at = COALESCE(export_requested_at, NOW()),
-           export_updated_at = NOW(),
-           updated_at = NOW()
-       WHERE user_id = $1
-         AND export_status <> 'completed'`,
-      [userId]
+      `UPDATE user_export_provider_preferences provider_preferences
+       SET status = CASE WHEN EXISTS (
+             SELECT 1 FROM receipts
+             WHERE receipts.user_id = $1 AND receipts.data_source = 'csv'
+               AND receipts.receipt_type = $2::VARCHAR(24)
+           ) THEN 'completed' ELSE 'requested' END,
+           requested_at = COALESCE(requested_at, NOW()),
+           updated_at = NOW(), error_code = NULL
+       WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
+      [userId, provider]
     );
     if (updateResult.rowCount > 0) {
-      await this.recordEvent(userId, 'export_requested');
+      await this.recordEvent(userId, 'export_requested', { provider });
     }
-
-    return this.get(userId);
   }
 
-  async setExportStatus(userId: string, status: ExportLifecycleStatus): Promise<boolean> {
-    await this.ensureRow(userId);
+  async setExportStatus(
+    userId: string,
+    provider: ExportProvider,
+    status: ProviderExportLifecycleStatus,
+    errorCode?: string
+  ): Promise<boolean> {
+    await this.ensureProviderRows(userId);
     const result = await this.postgres.query(
-      `UPDATE user_import_preferences
-       SET export_status = $2::VARCHAR(40),
-           export_updated_at = NOW(),
+      `UPDATE user_export_provider_preferences provider_preferences
+       SET status = CASE
+             WHEN $3::VARCHAR(32) = 'failed' AND EXISTS (
+               SELECT 1 FROM receipts
+               WHERE receipts.user_id = $1 AND receipts.data_source = 'csv'
+                 AND receipts.receipt_type = $2::VARCHAR(24)
+             ) THEN 'completed'
+             ELSE $3::VARCHAR(32)
+           END,
+           error_code = CASE WHEN $3::VARCHAR(32) = 'failed' THEN $4::VARCHAR(80) ELSE NULL END,
            updated_at = NOW()
-       WHERE user_id = $1
-         AND (export_status <> 'completed' OR $2::VARCHAR(40) = 'completed')`,
-      [userId, status]
+       WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
+      [userId, provider, status, errorCode?.substring(0, 80) ?? null]
     );
 
-    const eventNameByStatus: Partial<Record<ExportLifecycleStatus, string>> = {
+    const eventNameByStatus: Partial<Record<ProviderExportLifecycleStatus, string>> = {
       file_ready: 'export_file_ready',
       import_processing: 'export_import_processing',
       completed: 'export_completed',
@@ -244,7 +292,7 @@ export class ImportPreferencesRepository {
     };
     const eventName = eventNameByStatus[status];
     if (result.rowCount > 0 && eventName) {
-      await this.recordEvent(userId, eventName);
+      await this.recordEvent(userId, eventName, { provider });
     }
     return result.rowCount > 0;
   }
@@ -306,13 +354,22 @@ export class ImportPreferencesRepository {
        VALUES ($1, $2) RETURNING id`,
       [userId, triggerType]
     );
-    await this.postgres.query(
-      `UPDATE user_import_preferences
-       SET gmail_import_status = 'importing', gmail_import_updated_at = NOW(),
-           gmail_import_error_code = NULL, last_check_attempt_at = NOW(), updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId]
-    );
+    if (triggerType === 'manual') {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET gmail_import_status = 'importing', gmail_import_updated_at = NOW(),
+             gmail_import_error_code = NULL, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+    } else {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET last_check_attempt_at = NOW(), updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+    }
     return result.rows[0].id;
   }
 
@@ -320,7 +377,8 @@ export class ImportPreferencesRepository {
     runId: string,
     userId: string,
     outcome: 'success' | 'partial',
-    counts: SyncRunCounts
+    counts: SyncRunCounts,
+    triggerType: 'manual' | 'background'
   ): Promise<void> {
     await this.postgres.query(
       `UPDATE gmail_sync_runs
@@ -331,37 +389,58 @@ export class ImportPreferencesRepository {
       [runId, outcome, counts.emailsScanned, counts.receiptsProcessed,
         counts.newOrders, counts.updatedOrders, counts.unchangedOrders, userId]
     );
-    await this.postgres.query(
-      `UPDATE user_import_preferences
-       SET gmail_import_status = 'completed', gmail_import_updated_at = NOW(),
-           gmail_imported_count = $2, gmail_import_error_code = NULL,
-           last_successful_check_at = NOW(),
-           last_stats_updated_at = CASE WHEN $3 > 0 OR $4 > 0 THEN NOW() ELSE last_stats_updated_at END,
-           last_new_order_at = CASE WHEN $3 > 0 THEN NOW() ELSE last_new_order_at END,
-           tracking_status = CASE WHEN ongoing_tracking_consent_state = 'granted' THEN 'active' ELSE tracking_status END,
-           last_tracking_error_at = NULL, last_tracking_error_code = NULL, updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId, counts.newOrders + counts.updatedOrders + counts.unchangedOrders,
-        counts.newOrders, counts.updatedOrders]
-    );
+    if (triggerType === 'manual') {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET gmail_import_status = 'completed', gmail_import_updated_at = NOW(),
+             gmail_imported_count = $2, gmail_import_error_code = NULL, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId, counts.newOrders + counts.updatedOrders + counts.unchangedOrders]
+      );
+    } else {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET last_successful_check_at = NOW(),
+             last_stats_updated_at = CASE WHEN $2 > 0 OR $3 > 0 THEN NOW() ELSE last_stats_updated_at END,
+             last_new_order_at = CASE WHEN $2 > 0 THEN NOW() ELSE last_new_order_at END,
+             tracking_status = CASE WHEN ongoing_tracking_consent_state = 'granted' THEN 'active' ELSE tracking_status END,
+             last_tracking_error_at = NULL, last_tracking_error_code = NULL, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId, counts.newOrders, counts.updatedOrders]
+      );
+    }
   }
 
-  async failSyncRun(runId: string, userId: string, errorCode: string): Promise<void> {
+  async failSyncRun(
+    runId: string,
+    userId: string,
+    errorCode: string,
+    triggerType: 'manual' | 'background'
+  ): Promise<void> {
     const safeCode = errorCode.substring(0, 80);
     await this.postgres.query(
       `UPDATE gmail_sync_runs SET outcome = 'failed', completed_at = NOW(), error_code = $2
        WHERE id = $1 AND user_id = $3`,
       [runId, safeCode, userId]
     );
-    await this.postgres.query(
-      `UPDATE user_import_preferences
-       SET gmail_import_status = 'failed', gmail_import_updated_at = NOW(),
-           gmail_import_error_code = $2, tracking_status = CASE
-             WHEN ongoing_tracking_consent_state = 'granted' THEN 'error' ELSE tracking_status END,
-           last_tracking_error_at = NOW(), last_tracking_error_code = $2, updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId, safeCode]
-    );
+    if (triggerType === 'manual') {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET gmail_import_status = 'failed', gmail_import_updated_at = NOW(),
+             gmail_import_error_code = $2, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId, safeCode]
+      );
+    } else {
+      await this.postgres.query(
+        `UPDATE user_import_preferences
+         SET tracking_status = CASE
+               WHEN ongoing_tracking_consent_state = 'granted' THEN 'error' ELSE tracking_status END,
+             last_tracking_error_at = NOW(), last_tracking_error_code = $2, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId, safeCode]
+      );
+    }
   }
 
   async markTrackingReconnectRequired(userId: string): Promise<void> {
@@ -377,7 +456,9 @@ export class ImportPreferencesRepository {
     const result = await this.postgres.query(
       `SELECT COUNT(*)::int AS count FROM receipts
        WHERE user_id = $1 AND data_source = 'email'
-         AND first_seen_at >= (DATE_TRUNC('week', NOW() AT TIME ZONE $2) AT TIME ZONE $2)`,
+         AND order_date IS NOT NULL
+         AND order_date >= (DATE_TRUNC('week', NOW() AT TIME ZONE $2) AT TIME ZONE $2)
+         AND order_date < ((DATE_TRUNC('week', NOW() AT TIME ZONE $2) + INTERVAL '7 days') AT TIME ZONE $2)`,
       [userId, timezone]
     );
     return Number(result.rows[0]?.count || 0);
@@ -389,6 +470,7 @@ export class ImportPreferencesRepository {
        FROM user_import_preferences preferences
        JOIN users ON users.id = preferences.user_id
        WHERE preferences.ongoing_tracking_consent_state = 'granted'
+         AND preferences.gmail_import_status = 'completed'
          AND users.gmail_connected = TRUE
          AND users.gmail_connection_mode = 'offline'
          AND users.gmail_refresh_token IS NOT NULL

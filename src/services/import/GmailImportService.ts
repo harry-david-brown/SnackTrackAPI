@@ -37,6 +37,16 @@ export interface GmailImportResult {
   errorCode: string | null;
 }
 
+type ExportCutoffsByReceiptType = Partial<Record<ReceiptType, Date>>;
+
+export const filterReceiptsAfterExportCutoffs = (
+  receipts: Receipt[],
+  cutoffs: ExportCutoffsByReceiptType
+): Receipt[] => receipts.filter(receipt => {
+  const cutoff = cutoffs[receipt.receiptType];
+  return !cutoff || Boolean(receipt.orderDate && receipt.orderDate > cutoff);
+});
+
 /**
  * Service to orchestrate incremental Uber Eats receipt synchronization from Gmail
  * Uses existing email infrastructure to fetch, filter, and parse emails
@@ -203,14 +213,12 @@ export class GmailImportService {
         }
       }
 
-      // Once a full export exists, it is authoritative through its latest
-      // order. Import only newer Gmail receipts so historical orders are not
-      // counted twice across CSV and email sources.
-      const csvCutoff = await this.getLatestCsvReceiptDate(user.id);
-      const validReceipts = csvCutoff
-        ? foodReceipts.filter(receipt => receipt.orderDate && receipt.orderDate > csvCutoff)
-        : foodReceipts;
-      if (csvCutoff) {
+      // Each provider's export is authoritative only for that provider through
+      // its latest order. Do not let a DoorDash cutoff suppress Uber receipts,
+      // or vice versa.
+      const csvCutoffs = await this.getLatestCsvReceiptDates(user.id);
+      const validReceipts = filterReceiptsAfterExportCutoffs(foodReceipts, csvCutoffs);
+      if (Object.keys(csvCutoffs).length > 0) {
         console.log(`📧 Skipped ${foodReceipts.length - validReceipts.length} Gmail receipts already covered by the uploaded export`);
       }
       console.log(`📧 ${validReceipts.length} delivery receipts ready for import`);
@@ -329,19 +337,20 @@ export class GmailImportService {
         console.log(`✅ Imported ${importedCount} receipts for user ${user.id}`);
 
         if (criticalErrors.length > 0) {
-          await this.importPreferences.failSyncRun(syncRunId, user.id, 'GMAIL_IMPORT_WRITE_FAILED');
+          await this.importPreferences.failSyncRun(syncRunId, user.id, 'GMAIL_IMPORT_WRITE_FAILED', triggerType);
         } else {
           await this.importPreferences.completeSyncRun(
-          syncRunId,
-          user.id,
-          errors.length > 0 ? 'partial' : 'success',
-          {
-            emailsScanned: emails.length,
-            receiptsProcessed: receipts.length,
-            newOrders,
-            updatedOrders,
-            unchangedOrders,
-          }
+            syncRunId,
+            user.id,
+            errors.length > 0 ? 'partial' : 'success',
+            {
+              emailsScanned: emails.length,
+              receiptsProcessed: receipts.length,
+              newOrders,
+              updatedOrders,
+              unchangedOrders,
+            },
+            triggerType
           );
         }
 
@@ -370,7 +379,7 @@ export class GmailImportService {
         newOrders: 0,
         updatedOrders: 0,
         unchangedOrders: 0,
-      });
+      }, triggerType);
 
       // A successful scan can legitimately find no matching receipts.
       return {
@@ -391,7 +400,7 @@ export class GmailImportService {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       const errorCode = this.getErrorCode(error);
       console.error('Gmail import error:', errorMsg);
-      await this.importPreferences.failSyncRun(syncRunId, user.id, errorCode);
+      await this.importPreferences.failSyncRun(syncRunId, user.id, errorCode, triggerType);
       if (errorCode === 'GMAIL_RECONNECT_REQUIRED') {
         await this.users.markGmailReconnectRequired(user.id);
         await this.importPreferences.markTrackingReconnectRequired(user.id);
@@ -422,16 +431,24 @@ export class GmailImportService {
     return 'GMAIL_SYNC_FAILED';
   }
 
-  private async getLatestCsvReceiptDate(userId: string): Promise<Date | null> {
+  private async getLatestCsvReceiptDates(userId: string): Promise<ExportCutoffsByReceiptType> {
     const postgres = (this.receiptService as any).postgres as PostgresService;
     const result = await postgres.query(
-      "SELECT MAX(order_date) AS latest FROM receipts WHERE user_id = $1 AND data_source = 'csv'",
+      `SELECT receipt_type, MAX(order_date) AS latest
+       FROM receipts
+       WHERE user_id = $1 AND data_source = 'csv'
+       GROUP BY receipt_type`,
       [userId]
     );
-    const value = result.rows[0]?.latest;
-    if (!value) return null;
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
+    const cutoffs: ExportCutoffsByReceiptType = {};
+    for (const row of result.rows) {
+      const receiptType = row.receipt_type as ReceiptType;
+      const date = new Date(row.latest);
+      if (Object.values(ReceiptType).includes(receiptType) && !Number.isNaN(date.getTime())) {
+        cutoffs[receiptType] = date;
+      }
+    }
+    return cutoffs;
   }
 
   /**

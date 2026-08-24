@@ -9,7 +9,7 @@ Do not collapse these axes. Similar-looking UI states often have different recov
 | Gmail identity | Which account the user connected | absent, known email |
 | Credential health | Whether current tokens can access Gmail | healthy, unavailable, reconnect required |
 | Historical Gmail import | One-time/backfill import progress | never started, importing, completed, failed |
-| Export lifecycle | Uber/DoorDash request and upload progress | not started, waiting, ready, processing, completed, failed |
+| Provider export lifecycle | Independent Uber Eats/DoorDash request and upload progress | not started, requested, ready, processing, completed, failed |
 | Receipt source coverage | What data actually exists | Gmail-only, export-only, both, neither |
 | Export-alert consent | Permission to inspect mail for Uber’s ready message | not offered, declined, granted, revoked |
 | Ongoing tracking consent | Permission to monitor future receipt emails | not offered, declined, granted, revoked |
@@ -23,7 +23,7 @@ Verify current declarations in `SnackTrackApp/services/gmailApi.ts`. The establi
 
 - monitoring consent: `not_offered`, `declined`, `granted`, `revoked`;
 - effective monitoring: `not_offered`, `declined`, `enabled`, `disabled`, `reconnect_required`;
-- export lifecycle: `not_started`, `requested_monitoring_enabled`, `requested_monitoring_disabled`, `file_ready`, `import_processing`, `completed`, `failed`;
+- provider export lifecycle: `not_started`, `requested`, `file_ready`, `import_processing`, `completed`, `failed`;
 - Gmail import: `never_started`, `importing`, `completed`, `failed`;
 - effective ongoing tracking: `not_offered`, `declined`, `active`, `paused`, `reconnect_required`, `error`.
 
@@ -36,10 +36,18 @@ Use persisted lifecycle fields to retain user progress, but reconcile them with 
 1. Actual receipt sources establish whether Gmail or export data exists.
 2. Credential health establishes whether Gmail actions can run now.
 3. Explicit consent establishes whether background email access is permitted.
-4. Lifecycle status establishes which request/upload step is in progress.
+4. Each provider's lifecycle status establishes which request/upload step is in progress.
 5. Runtime tracking status establishes whether ongoing monitoring is operating.
 
-For example, CSV/export receipts should make the export step complete even if an older preference row still says `not_started`. Conversely, an account email alone must not make Gmail import complete.
+For example, Uber Eats CSV receipts make Uber Eats complete even if its preference row says `not_started`, without completing DoorDash. Conversely, an account email or background tracking receipt must not make the explicit Gmail history import complete.
+
+## Canonical action boundaries
+
+1. Connecting Gmail stores and validates provider access only.
+2. The user explicitly starts the one-time Gmail history import.
+3. Uber Eats and DoorDash exports can be requested or uploaded independently in any order.
+4. Uber export-ready alerts authorize only the Uber data-ready email check while the app is active.
+5. Ongoing tracking requires a completed Gmail history scan, healthy durable Gmail access, and explicit tracking consent.
 
 ## Fresh-account reset state
 

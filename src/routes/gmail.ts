@@ -58,7 +58,6 @@ const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
 interface GmailOAuthStatePayload {
   userId: string;
   redirectUri: string;
-  autoImportGmail?: boolean;
 }
 
 const signOAuthState = (payload: GmailOAuthStatePayload): string => {
@@ -172,12 +171,41 @@ const buildImportPreferencesResponse = async (userId: string) => {
   const sourceResult = await container.postgres.query(
     `SELECT
        COUNT(*) FILTER (WHERE data_source = 'email')::int AS email_count,
-       COUNT(*) FILTER (WHERE data_source = 'csv')::int AS export_count
+       COUNT(*) FILTER (WHERE data_source = 'csv')::int AS export_count,
+       COUNT(*) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+       )::int AS uber_eats_export_count,
+       COUNT(*) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'doordash'
+       )::int AS doordash_export_count
      FROM receipts WHERE user_id = $1`,
     [userId]
   );
   const emailReceiptCount = Number(sourceResult.rows[0]?.email_count || 0);
   const exportReceiptCount = Number(sourceResult.rows[0]?.export_count || 0);
+  const uberEatsExportReceiptCount = Number(sourceResult.rows[0]?.uber_eats_export_count || 0);
+  const doorDashExportReceiptCount = Number(sourceResult.rows[0]?.doordash_export_count || 0);
+  const providerExports = await container.importPreferencesRepository.getProviderExports(userId);
+  const providerStatuses = [providerExports.uber_eats.status, providerExports.doordash.status];
+  const aggregateExportStatus = providerExports.uber_eats.status === 'file_ready'
+    ? 'file_ready'
+    : providerStatuses.includes('import_processing')
+      ? 'import_processing'
+      : providerStatuses.includes('requested')
+        ? preferences.monitoringConsentState === 'granted'
+          ? 'requested_monitoring_enabled'
+          : 'requested_monitoring_disabled'
+        : providerStatuses.includes('failed')
+          ? 'failed'
+          : providerStatuses.includes('completed')
+            ? 'completed'
+            : 'not_started';
+  const providerRequestedDates = [providerExports.uber_eats.requestedAt, providerExports.doordash.requestedAt]
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const providerUpdatedDates = [providerExports.uber_eats.updatedAt, providerExports.doordash.updatedAt]
+    .filter((value): value is string => Boolean(value))
+    .sort();
   const ordersAddedThisWeek = await container.importPreferencesRepository.getOrdersAddedThisWeek(
     userId,
     user.timezone || 'America/New_York'
@@ -235,9 +263,15 @@ const buildImportPreferencesResponse = async (userId: string) => {
       },
     },
     export: {
-      status: preferences.exportStatus,
-      requestedAt: preferences.exportRequestedAt,
-      updatedAt: preferences.exportUpdatedAt,
+      status: aggregateExportStatus,
+      requestedAt: providerRequestedDates.at(-1) ?? null,
+      updatedAt: aggregateExportStatus === 'file_ready'
+        ? providerExports.uber_eats.updatedAt
+        : providerUpdatedDates.at(-1) ?? null,
+      providers: {
+        uberEats: providerExports.uber_eats,
+        doorDash: providerExports.doordash,
+      },
     },
     gmailImport: {
       status: preferences.gmailImportStatus,
@@ -278,13 +312,23 @@ const buildImportPreferencesResponse = async (userId: string) => {
       exportReceiptCount,
       hasEmailData: emailReceiptCount > 0,
       hasExportData: exportReceiptCount > 0,
+      exportProviders: {
+        uberEats: {
+          receiptCount: uberEatsExportReceiptCount,
+          hasData: uberEatsExportReceiptCount > 0,
+        },
+        doorDash: {
+          receiptCount: doorDashExportReceiptCount,
+          hasData: doorDashExportReceiptCount > 0,
+        },
+      },
     },
   };
 };
 
 router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
-  const { redirectUri, autoImportGmail = true } = req.body;
+  const { redirectUri } = req.body;
 
   if (!userId) {
     throw new ValidationError('User ID not found in token');
@@ -311,7 +355,6 @@ router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, re
   const state = signOAuthState({
     userId,
     redirectUri,
-    autoImportGmail: autoImportGmail !== false,
   });
 
   const authUrl = oAuth2Client.generateAuthUrl({
@@ -393,7 +436,6 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
 
     const successRedirect = new URL(appRedirectUri);
     successRedirect.searchParams.set('gmail', 'success');
-    successRedirect.searchParams.set('autoImportGmail', decodedState.autoImportGmail === false ? 'false' : 'true');
     successRedirect.searchParams.set('connectionMode', connectionMode);
     res.redirect(successRedirect.toString());
   } catch (callbackError: any) {
@@ -520,6 +562,15 @@ router.put('/preferences/ongoing-tracking-consent', authenticateToken, asyncHand
     throw new ValidationError('consentVersion is required when granting ongoing tracking consent');
   }
   if (decision === 'granted') {
+    const preferences = await container.importPreferencesRepository.get(userId);
+    if (preferences.gmailImportStatus !== 'completed') {
+      res.status(409).json({
+        success: false,
+        code: 'GMAIL_HISTORY_IMPORT_REQUIRED',
+        message: 'Complete the one-time Gmail history import before enabling ongoing tracking.',
+      });
+      return;
+    }
     const { health, status: gmailStatus } = await getValidatedGmailStatus(userId, true);
     if (
       health.status !== 'valid'
@@ -566,7 +617,11 @@ router.post('/preferences/export-requested', authenticateToken, asyncHandler(asy
     throw new ValidationError('User ID not found in token');
   }
 
-  await container.importPreferencesRepository.markExportRequested(userId);
+  const provider = req.body?.provider;
+  if (provider !== 'uber_eats' && provider !== 'doordash') {
+    throw new ValidationError('provider must be uber_eats or doordash');
+  }
+  await container.importPreferencesRepository.markExportRequested(userId, provider);
   res.json(await buildImportPreferencesResponse(userId));
 }));
 
@@ -577,10 +632,12 @@ router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(a
   }
 
   const preferences = await container.importPreferencesRepository.get(userId);
+  const providerExports = await container.importPreferencesRepository.getProviderExports(userId);
+  const uberExport = providerExports.uber_eats;
   if (
     preferences.monitoringConsentState !== 'granted'
-    || preferences.exportStatus !== 'requested_monitoring_enabled'
-    || !preferences.exportRequestedAt
+    || uberExport.status !== 'requested'
+    || !uberExport.requestedAt
   ) {
     res.json({
       detected: false,
@@ -600,10 +657,10 @@ router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(a
 
   const detected = await new GmailClient().hasUberExportReadyEmail(
     user,
-    preferences.exportRequestedAt
+    uberExport.requestedAt
   );
   if (detected) {
-    await container.importPreferencesRepository.setExportStatus(userId, 'file_ready');
+    await container.importPreferencesRepository.setExportStatus(userId, 'uber_eats', 'file_ready');
   }
 
   res.json({

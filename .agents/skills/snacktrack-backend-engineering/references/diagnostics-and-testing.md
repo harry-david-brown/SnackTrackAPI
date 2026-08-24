@@ -27,11 +27,12 @@ Define:
 - Migration: fresh and existing schema behavior.
 - Integration: recompute summaries from durable rows after mutation.
 
-Run from `SnackTrackAPI/`:
+For ordinary code changes, run only the API TypeScript check:
 
 ```sh
 npm run build
-npm test
 ```
+
+Do not run focused tests, `npm test`, or other test suites unless the user explicitly requests them. Adding regression coverage does not imply running it.
 
 Inspect `git diff --check` and avoid claiming live-state correctness unless the relevant database was safely verified.

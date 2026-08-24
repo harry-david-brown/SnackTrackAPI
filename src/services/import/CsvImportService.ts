@@ -467,6 +467,9 @@ export class CsvImportService {
           // Uber's Item_Price is the full line price (for example quantity 2
           // at $16.99 is exported as $33.98). ReceiptItem.price is per unit.
           price: linePrice / quantity,
+          customizations: row.Customizations
+            ? row.Customizations.split(',').map(value => value.trim()).filter(Boolean)
+            : [],
         };
       });
 
@@ -538,6 +541,12 @@ export class CsvImportService {
   async importReceipts(receipts: Receipt[], userId: string): Promise<void> {
     if (receipts.length === 0) return;
 
+    const receiptTypes = [...new Set(receipts.map(receipt => receipt.receiptType))];
+    if (receiptTypes.length !== 1) {
+      throw new Error('Export must contain receipts from exactly one provider');
+    }
+    const receiptType = receiptTypes[0];
+
     const datedReceipts = receipts
       .map(receipt => receipt.orderDate)
       .filter((date): date is Date => Boolean(date));
@@ -550,14 +559,15 @@ export class CsvImportService {
     try {
       await client.query('BEGIN');
 
-      // Replace only the previous export. Preserve Gmail orders newer than the
-      // export's latest order, while removing historical overlap so analytics
-      // never count the same order from both sources.
+      // Replace only this provider's previous export. Preserve every receipt
+      // from other providers, plus same-provider Gmail orders newer than this
+      // export, so providers coexist without historical duplicates.
       await client.query(
         `DELETE FROM receipts
          WHERE user_id = $1
-           AND (data_source = 'csv' OR (data_source = 'email' AND order_date <= $2))`,
-        [userId, latestExportDate]
+           AND receipt_type = $2
+           AND (data_source = 'csv' OR (data_source = 'email' AND order_date <= $3))`,
+        [userId, receiptType, latestExportDate]
       );
 
       // Batch insert for performance (much faster than individual inserts)

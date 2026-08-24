@@ -30,9 +30,9 @@ The ready email links to Uber’s download page; it does not attach the archive.
 1. Native file picker returns the selected archive/file.
 2. App uploads once; do not insert a redundant second “choose file” screen.
 3. API parses supported Uber/DoorDash export shapes and validates usable records.
-4. Mark lifecycle `import_processing` while work is active.
+4. Mark only the detected provider's lifecycle `import_processing` while work is active.
 5. Replace historical overlapping CSV/email receipts according to cutoff rules while preserving newer Gmail receipts.
-6. Mark completed only after durable receipt writes succeed.
+6. Mark only that provider completed after durable receipt writes succeed.
 7. Invalidate API caches and refetch app state.
 
 ## Ongoing tracking
@@ -43,6 +43,8 @@ The ready email links to Uber’s download page; it does not attach the archive.
 4. Scheduled/import-on-open work processes new receipts incrementally.
 5. Dashboard shows active monitoring without asking the user to manually scan Gmail.
 6. On `invalid_grant`, transition to reconnect required and show a reconnect action.
+
+Background tracking runs update tracking activity and runtime errors only. They must never start, complete, or fail the one-time Gmail history lifecycle.
 
 ## Clearing receipts and onboarding
 

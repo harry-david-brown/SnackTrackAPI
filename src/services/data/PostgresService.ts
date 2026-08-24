@@ -280,6 +280,39 @@ export class PostgresService {
         ON user_import_preferences(export_status)
       `);
 
+      // Export request/upload progress belongs to a provider. The legacy
+      // aggregate columns above remain temporarily for response compatibility,
+      // but new writes use these provider rows as the durable authority.
+      await this.query(`
+        CREATE TABLE IF NOT EXISTS user_export_provider_preferences (
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          provider VARCHAR(24) NOT NULL
+            CHECK (provider IN ('uber_eats', 'doordash')),
+          status VARCHAR(32) NOT NULL DEFAULT 'not_started'
+            CHECK (status IN (
+              'not_started', 'requested', 'file_ready',
+              'import_processing', 'completed', 'failed'
+            )),
+          requested_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          error_code VARCHAR(80),
+          PRIMARY KEY (user_id, provider)
+        )
+      `);
+      await this.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_export_provider_status
+        ON user_export_provider_preferences(provider, status)
+      `);
+      // Only Uber has an automated data-ready email detector. Other legacy
+      // request states are provider-ambiguous and are intentionally not guessed.
+      await this.query(`
+        INSERT INTO user_export_provider_preferences (user_id, provider, status, updated_at)
+        SELECT user_id, 'uber_eats', 'file_ready', COALESCE(export_updated_at, NOW())
+        FROM user_import_preferences
+        WHERE export_status = 'file_ready'
+        ON CONFLICT (user_id, provider) DO NOTHING
+      `);
+
       // Add tracking/import lifecycle columns for databases created before the
       // dashboard state model existed.
       await this.query(`

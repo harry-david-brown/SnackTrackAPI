@@ -18,6 +18,7 @@ export interface ReceiptItem {
   quantity: number;
   price: number;
   category?: string;
+  customizations?: string[];
 }
 
 /**

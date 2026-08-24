@@ -11,6 +11,7 @@ import { ValidationError } from '../middleware/errorHandler';
 import { cacheService } from '../services/core/CacheService';
 import { concurrencyLimiter } from '../middleware/concurrencyLimiter';
 import { ImportLockService } from '../services/import/ImportLockService';
+import type { ExportProvider } from '../services/data/ImportPreferencesRepository';
 
 const router = Router();
 const csvImportService = container.csvImportService;
@@ -149,6 +150,7 @@ router.post('/import',
     let exportLifecycleStarted = false;
     let exportCompleted = false;
     let lifecycleUserId: string | null = null;
+    let lifecycleProvider: ExportProvider | null = null;
     let importLockAcquired = false;
 
     try {
@@ -165,9 +167,6 @@ router.post('/import',
           code: 'IMPORT_IN_PROGRESS',
         });
       }
-      exportLifecycleStarted = await container.importPreferencesRepository
-        .setExportStatus(userId, 'import_processing');
-
       let csvBuffer: Buffer;
       let fileName = req.file.originalname;
 
@@ -219,6 +218,14 @@ router.post('/import',
         });
       }
 
+      const detectedFormat = csvImportService.detectCsvFormat(csvBuffer);
+      if (detectedFormat === 'unknown') {
+        throw new ValidationError('Could not determine whether this export is from Uber Eats or DoorDash.');
+      }
+      lifecycleProvider = detectedFormat === 'uber' ? 'uber_eats' : 'doordash';
+      exportLifecycleStarted = await container.importPreferencesRepository
+        .setExportStatus(userId, lifecycleProvider, 'import_processing');
+
       // Process CSV synchronously (in-memory is fine for the CSV content itself if < 50MB)
       // Future improvement: Stream CSV parsing directly to DB to avoid large buffer in RAM
       const importResult = await csvImportService.parseCsvFile(csvBuffer, userId);
@@ -234,7 +241,7 @@ router.post('/import',
 
       if (importResult.success && importResult.receipts.length > 0) {
         await csvImportService.importReceipts(importResult.receipts, userId);
-        await container.importPreferencesRepository.setExportStatus(userId, 'completed');
+        await container.importPreferencesRepository.setExportStatus(userId, lifecycleProvider, 'completed');
         exportCompleted = true;
 
         // Invalidate cached analytics since user data changed
@@ -249,7 +256,8 @@ router.post('/import',
           : 'CSV imported successfully',
         importedCount: importResult.totalReceipts,
         totalAmount: importResult.totalAmount,
-        fileType: isZip ? 'zip' : 'csv'
+        fileType: isZip ? 'zip' : 'csv',
+        provider: lifecycleProvider,
       });
 
     } catch (error) {
@@ -266,9 +274,9 @@ router.post('/import',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     } finally {
-      if (exportLifecycleStarted && !exportCompleted && lifecycleUserId) {
+      if (exportLifecycleStarted && !exportCompleted && lifecycleUserId && lifecycleProvider) {
         await container.importPreferencesRepository
-          .setExportStatus(lifecycleUserId, 'failed')
+          .setExportStatus(lifecycleUserId, lifecycleProvider, 'failed', 'EXPORT_IMPORT_FAILED')
           .catch((statusError) => {
             console.error('Failed to update export lifecycle after import failure:', statusError);
           });

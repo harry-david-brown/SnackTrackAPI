@@ -18,7 +18,7 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 4. Define the response/error contract and postcondition before implementation.
 5. Implement the narrowest cohesive service operation. Keep routes responsible for authentication, validation, and response construction.
 6. Add regression tests at the durable service/repository boundary and any affected route contract.
-7. Run `npm run build`, focused tests, then `npm test` from `SnackTrackAPI/`.
+7. Run `npm run build` as the API TypeScript check. Do not run focused or full tests unless the user explicitly requests them.
 
 ## Core rules
 
@@ -34,4 +34,4 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 
 ## Expected handoff
 
-Summarize ownership, transaction boundaries, lock participants, cache effects, error behavior, migrations, and checks run.
+Summarize ownership, transaction boundaries, lock participants, cache effects, error behavior, migrations, the TypeScript check result, and any user-requested verification.

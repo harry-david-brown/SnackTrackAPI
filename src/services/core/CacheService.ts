@@ -6,14 +6,39 @@
  */
 
 import { redisConfig } from '../../config/redis';
+import type { DashboardInsightEdition } from '../analytics/dashboard';
 
 export class CacheService {
   private readonly USER_SUMMARY_PREFIX = 'user_summary:';
   private readonly ANALYTICS_PREFIX = 'analytics:';
+  private readonly DASHBOARD_INSIGHTS_PREFIX = 'dashboard_insights:';
   
   // TTL constants (in seconds)
   private readonly USER_SUMMARY_TTL = 300; // 5 minutes
   private readonly ANALYTICS_TTL = 300; // 5 minutes (for Wrapped analytics)
+
+  async cacheDashboardInsightEdition(
+    cacheKey: string,
+    edition: DashboardInsightEdition,
+    ttlSeconds: number,
+  ): Promise<void> {
+    await redisConfig.set(
+      `${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`,
+      JSON.stringify(edition),
+      Math.max(60, Math.ceil(ttlSeconds)),
+    );
+  }
+
+  async getDashboardInsightEdition(cacheKey: string): Promise<DashboardInsightEdition | null> {
+    const cached = await redisConfig.get(`${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`);
+    if (!cached) return null;
+    try {
+      return JSON.parse(cached) as DashboardInsightEdition;
+    } catch {
+      await redisConfig.del(`${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`);
+      return null;
+    }
+  }
 
   /**
    * Cache user summary
@@ -66,7 +91,8 @@ export class CacheService {
     // user_summary:userId* matches: user_summary:userId and user_summary:userId-wrapped
     const patterns = [
       `${this.USER_SUMMARY_PREFIX}${userId}*`, // Pattern to catch both base and -wrapped keys
-      `${this.ANALYTICS_PREFIX}${userId}*`
+      `${this.ANALYTICS_PREFIX}${userId}*`,
+      `${this.DASHBOARD_INSIGHTS_PREFIX}${userId}*`,
     ];
 
     let totalDeleted = 0;
@@ -123,4 +149,3 @@ export class CacheService {
 
 // Export singleton instance
 export const cacheService = new CacheService();
-

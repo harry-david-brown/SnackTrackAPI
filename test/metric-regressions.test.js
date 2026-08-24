@@ -9,9 +9,16 @@ const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const { ImportPreferencesRepository } = require('../dist/services/data/ImportPreferencesRepository');
 const { PostgresService } = require('../dist/services/data/PostgresService');
 const { AccountResetService } = require('../dist/services/data/AccountResetService');
-const { isGmailReconnectError } = require('../dist/services/import/GmailImportService');
+const {
+  filterReceiptsAfterExportCutoffs,
+  isGmailReconnectError,
+} = require('../dist/services/import/GmailImportService');
 const { GmailConnectionHealthService } = require('../dist/services/email/GmailConnectionHealthService');
-const { buildDashboardInsights } = require('../dist/services/analytics/DashboardInsightService');
+const { buildDashboardInsightCatalogue, buildDashboardInsights } = require('../dist/services/analytics/DashboardInsightService');
+const {
+  calculateHypotheticalInvestment,
+  HYPOTHETICAL_ANNUAL_RETURN_PERCENT,
+} = require('../dist/services/analytics/shared/investment');
 const {
   getLocalDateKey,
   parseReceiptLocalDateTime,
@@ -45,6 +52,55 @@ test('onboarding reset clears the Gmail import lifecycle explicitly', async () =
   assert.match(resetQuery.sql, /gmail_imported_count = 0/);
   assert.match(resetQuery.sql, /gmail_import_error_code = NULL/);
   assert.deepEqual(resetQuery.params, ['user-id']);
+});
+
+test('manual and background Gmail runs update separate lifecycle fields', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      if (sql.includes('INSERT INTO gmail_sync_runs')) return { rows: [{ id: 'run-id' }], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  const repository = new ImportPreferencesRepository(postgres);
+
+  await repository.startSyncRun('user-id', 'manual');
+  const manualUpdate = queries.find(({ sql }) => sql.includes("gmail_import_status = 'importing'"));
+  assert.ok(manualUpdate);
+
+  queries.length = 0;
+  await repository.startSyncRun('user-id', 'background');
+  const backgroundUpdate = queries.find(({ sql }) => sql.includes('last_check_attempt_at = NOW()'));
+  assert.ok(backgroundUpdate);
+  assert.doesNotMatch(backgroundUpdate.sql, /gmail_import_status/);
+
+  queries.length = 0;
+  await repository.completeSyncRun('run-id', 'user-id', 'success', {
+    emailsScanned: 0, receiptsProcessed: 0, newOrders: 0, updatedOrders: 0, unchangedOrders: 0,
+  }, 'background');
+  const completionUpdate = queries.find(({ sql }) => sql.includes('last_successful_check_at = NOW()'));
+  assert.ok(completionUpdate);
+  assert.doesNotMatch(completionUpdate.sql, /gmail_import_status/);
+});
+
+test('provider export failures preserve existing imported coverage', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  await new ImportPreferencesRepository(postgres)
+    .setExportStatus('user-id', 'doordash', 'failed', 'EXPORT_IMPORT_FAILED');
+
+  const statusUpdate = queries.find(({ sql }) => sql.includes('user_export_provider_preferences provider_preferences'));
+  assert.ok(statusUpdate);
+  assert.match(statusUpdate.sql, /THEN 'completed'/);
+  assert.match(statusUpdate.sql, /receipts\.receipt_type = \$2/);
+  assert.deepEqual(statusUpdate.params, ['user-id', 'doordash', 'failed', 'EXPORT_IMPORT_FAILED']);
 });
 
 test('database event constraint permits the Gmail import reset audit event', async () => {
@@ -94,6 +150,7 @@ test('onboarding account reset waits for imports and restores fresh import state
   assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM receipts')));
   assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM gmail_sync_runs')));
   assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM user_import_preference_events')));
+  assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM user_export_provider_preferences')));
   assert.ok(queries.some(({ sql }) => sql.includes('DELETE FROM user_import_preferences')));
   assert.ok(queries.some(({ sql }) => sql.includes('INSERT INTO user_import_preferences')));
   assert.equal(queries.at(-1).sql, 'COMMIT');
@@ -108,21 +165,19 @@ test('dashboard insights use local time and keep email-only cards free of export
   ];
 
   const insights = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T12:00:00.000Z'));
-  assert.equal(insights[0].id, 'top-restaurants');
   assert.ok(insights.some(insight => insight.id === 'favorite-day' && insight.headline === 'Friday'));
   assert.ok(insights.some(insight => insight.id === 'peak-hunger-hour' && insight.headline === '11 PM'));
-  assert.equal(insights.filter(insight => insight.locked).length <= 1, true);
-  assert.equal(insights.some(insight => insight.id === 'most-ordered-meal' || insight.id === 'worst-order'), false);
-  if (insights.some(insight => insight.locked)) assert.equal(insights.at(-1).locked, true);
+  assert.equal(insights.filter(insight => insight.presentation === 'locked').length <= 1, true);
+  assert.equal(insights.some(insight => insight.id === 'most-ordered-meal' || insight.id === 'detailed-biggest-order'), false);
+  assert.notEqual(insights[0]?.presentation, 'locked');
 
   const lockedCounts = [];
-  for (let week = 0; week < 12; week++) {
-    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + (week * 7))));
-    lockedCounts.push(cards.filter(card => card.locked).length);
-    assert.equal(cards[0].locked === true, false);
+  for (let day = 0; day < 12; day++) {
+    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + day)));
+    lockedCounts.push(cards.filter(card => card.presentation === 'locked').length);
+    assert.notEqual(cards[0]?.presentation, 'locked');
   }
-  assert.ok(lockedCounts.some(count => count === 0), 'locked previews should not appear every week');
-  assert.ok(lockedCounts.some(count => count === 1), 'locked previews should appear occasionally');
+  assert.ok(lockedCounts.every(count => count <= 1), 'daily editions allow at most one locked preview');
 });
 
 test('dashboard insights unlock item and delivery cards only when export receipts support them', () => {
@@ -133,25 +188,20 @@ test('dashboard insights unlock item and delivery cards only when export receipt
   ];
 
   const first = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T12:00:00.000Z'));
-  const second = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-12T12:00:00.000Z'));
-  assert.deepEqual(second, first, 'the carousel should remain stable during the same weekly rotation');
-  assert.equal(first.some(insight => insight.locked), false);
-  assert.equal(first.length <= 6, true);
+  const second = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T20:00:00.000Z'));
+  assert.deepEqual(second, first, 'the carousel should remain stable during the same local day');
+  assert.equal(first.some(insight => insight.presentation === 'locked'), false);
+  assert.equal(first.length <= 7, true);
 
-  const rotatingIds = new Set();
-  for (let week = 0; week < 12; week++) {
-    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + (week * 7))));
-    cards.forEach(card => rotatingIds.add(card.id));
-    const worstOrder = cards.find(card => card.id === 'worst-order');
-    if (worstOrder) assert.ok(worstOrder.items.length > 0);
-    const favoriteMeal = cards.find(card => card.id === 'most-ordered-meal');
-    if (favoriteMeal) assert.equal(favoriteMeal.headline, 'Spicy Bowl');
-    const longestWait = cards.find(card => card.id === 'longest-wait');
-    if (longestWait) assert.equal(longestWait.value, 65);
+  for (let day = 0; day < 30; day++) {
+    const cards = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date(Date.UTC(2026, 7, 11 + day)));
+    assert.equal(cards.some(card => card.presentation === 'locked'), false);
+    assert.equal(cards.length <= 7, true);
   }
-  assert.equal(rotatingIds.has('most-ordered-meal'), true);
-  assert.equal(rotatingIds.has('worst-order'), true);
-  assert.equal(rotatingIds.has('longest-wait'), true);
+  const catalogue = new Map(buildDashboardInsightCatalogue(receipts, 'America/Toronto', new Date('2026-08-11T12:00:00.000Z')).eligible.map(candidate => [candidate.insight.id, candidate.insight]));
+  assert.equal(catalogue.get('most-ordered-meal').headline, 'Spicy Bowl');
+  assert.ok(catalogue.get('detailed-biggest-order').order.items.length > 0);
+  assert.equal(catalogue.get('longest-delivery').value, 65, 'the record remains eligible even when a related delivery card wins selection');
 });
 
 test('email extraction prefers the Uber order header and infers Canadian dollars', () => {
@@ -177,7 +227,7 @@ test('email extraction prefers the Uber order header and infers Canadian dollars
 test('Uber local timestamps and line-item quantity prices are parsed consistently', async () => {
   const csv = Buffer.from([
     'City_Name,Restaurant_Name,Request_Time_Local,Final_Delivery_Time_Local,Order_Status,Item_Name,Item_quantity,Customizations,Customization_Cost_Local,Special_Instructions,Item_Price,Order_Price,Currency',
-    'Toronto,Test Kitchen,2025-09-16T18:30:13.000Z,2025-09-16T19:08:24.000Z,completed,Burger,2,,,,33.98,31.19,CAD',
+    'Toronto,Test Kitchen,2025-09-16T18:30:13.000Z,2025-09-16T19:08:24.000Z,completed,Burger,2,"Creamy Garlic, Blackened Ranch",,,33.98,31.19,CAD',
     'Toronto,Test Kitchen,2025-09-16T18:30:13.000Z,2025-09-16T19:08:24.000Z,completed,Fries,1,,,,6.99,31.19,CAD',
   ].join('\n'));
   const service = new CsvImportService({});
@@ -187,6 +237,7 @@ test('Uber local timestamps and line-item quantity prices are parsed consistentl
   assert.equal(result.totalAmount, 31.19);
   assert.equal(result.receipts[0].orderDate.toISOString(), '2025-09-16T22:30:13.000Z');
   assert.equal(result.receipts[0].items[0].price, 16.99);
+  assert.deepEqual(result.receipts[0].items[0].customizations, ['Creamy Garlic', 'Blackened Ranch']);
   assert.equal(
     Math.round((result.receipts[0].deliveryTime - result.receipts[0].orderDate) / 60000),
     38
@@ -273,10 +324,27 @@ test('orders-added-this-week uses a user-local PostgreSQL week boundary', async 
     .getOrdersAddedThisWeek('user-id', 'America/Toronto');
   assert.equal(count, 2);
   assert.match(captured.sql, /DATE_TRUNC\('week', NOW\(\) AT TIME ZONE \$2\)/);
+  assert.match(captured.sql, /order_date IS NOT NULL/);
+  assert.match(captured.sql, /order_date >=/);
+  assert.match(captured.sql, /order_date </);
+  assert.doesNotMatch(captured.sql, /first_seen_at/);
   assert.deepEqual(captured.params, ['user-id', 'America/Toronto']);
 });
 
-test('export replacement preserves Gmail orders newer than the export cutoff', async () => {
+test('shared investment math compounds each order from its own timestamp at the disclosed fixed rate', () => {
+  assert.equal(HYPOTHETICAL_ANNUAL_RETURN_PERCENT, 7);
+  const asOf = new Date('2026-01-01T00:00:00.000Z');
+  const result = calculateHypotheticalInvestment([
+    { amount: 100, occurredAt: new Date('2025-01-01T00:00:00.000Z') },
+    { amount: 100, occurredAt: new Date('2025-07-01T00:00:00.000Z') },
+    { amount: 100, occurredAt: new Date('2027-01-01T00:00:00.000Z') },
+  ], asOf);
+  assert.equal(result.contributed, 300);
+  assert.ok(result.futureValue > 310 && result.futureValue < 311, `received ${result.futureValue}`);
+  assert.equal(result.gains, result.futureValue - result.contributed);
+});
+
+test('export replacement is scoped to its provider and preserves newer matching Gmail orders', async () => {
   const queries = [];
   const client = {
     query: async (sql, params) => {
@@ -295,10 +363,34 @@ test('export replacement preserves Gmail orders newer than the export cutoff', a
 
   const replacement = queries.find(query => query.sql.includes('DELETE FROM receipts'));
   assert.match(replacement.sql, /data_source = 'csv'/);
-  assert.match(replacement.sql, /data_source = 'email' AND order_date <= \$2/);
-  assert.equal(replacement.params[1].toISOString(), '2026-08-01T22:00:00.000Z');
+  assert.match(replacement.sql, /receipt_type = \$2/);
+  assert.match(replacement.sql, /data_source = 'email' AND order_date <= \$3/);
+  assert.deepEqual(replacement.params.slice(0, 2), ['user-id', ReceiptType.UBER_EATS]);
+  assert.equal(replacement.params[2].toISOString(), '2026-08-01T22:00:00.000Z');
   assert.equal(queries[0].sql, 'BEGIN');
   assert.equal(queries.at(-1).sql, 'COMMIT');
+});
+
+test('export cutoffs suppress overlap only for the matching provider', () => {
+  const uberBeforeDoorDashCutoff = new Receipt(
+    'user-id', [], 20, ReceiptType.UBER_EATS, 'Uber Place',
+    new Date('2026-06-01T12:00:00.000Z'), DataSource.EMAIL
+  );
+  const doorDashCoveredByExport = new Receipt(
+    'user-id', [], 25, ReceiptType.DOORDASH, 'DoorDash Place',
+    new Date('2026-06-01T12:00:00.000Z'), DataSource.EMAIL
+  );
+  const doorDashNewerThanExport = new Receipt(
+    'user-id', [], 30, ReceiptType.DOORDASH, 'New DoorDash Place',
+    new Date('2026-08-02T12:00:00.000Z'), DataSource.EMAIL
+  );
+
+  const filtered = filterReceiptsAfterExportCutoffs(
+    [uberBeforeDoorDashCutoff, doorDashCoveredByExport, doorDashNewerThanExport],
+    { [ReceiptType.DOORDASH]: new Date('2026-08-01T12:00:00.000Z') }
+  );
+
+  assert.deepEqual(filtered, [uberBeforeDoorDashCutoff, doorDashNewerThanExport]);
 });
 
 test('Google invalid_grant errors require Gmail reconnection', () => {
