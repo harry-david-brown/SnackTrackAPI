@@ -5,7 +5,6 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { AuthService } from '../services/AuthService';
 import { container } from '../services/core/ServiceContainer';
 import { AuthenticationError, AuthorizationError } from './errorHandler';
 import { TokenPayload } from '../models/Token';
@@ -37,7 +36,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
     }
 
     // Get auth service from container
-    const authService = container.get<AuthService>('authService');
+    const authService = container.authService;
 
     // Verify token and extract user data
     const decoded = authService.verifyAccessToken(token);
@@ -112,7 +111,7 @@ export const optionalAuthentication = (req: Request, res: Response, next: NextFu
       return next();
     }
 
-    const authService = container.get<AuthService>('authService');
+    const authService = container.authService;
     const decoded = authService.verifyAccessToken(token);
     req.user = decoded;
 
@@ -122,4 +121,3 @@ export const optionalAuthentication = (req: Request, res: Response, next: NextFu
     next();
   }
 };
-

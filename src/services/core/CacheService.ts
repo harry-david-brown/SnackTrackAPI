@@ -6,7 +6,21 @@
  */
 
 import { redisConfig } from '../../config/redis';
+import logger from '../../config/logger';
 import type { DashboardInsightEdition } from '../analytics/dashboard';
+import {
+  CacheCodec,
+  dashboardInsightEditionCacheCodec,
+  UserSummaryProjection,
+  userSummaryCacheCodec,
+} from './cacheProjections';
+
+export type { UserSummaryProjection } from './cacheProjections';
+
+export interface CacheStats {
+  enabled: boolean;
+  stats: { keys: number; memory: string } | null;
+}
 
 export class CacheService {
   private readonly USER_SUMMARY_PREFIX = 'user_summary:';
@@ -24,50 +38,36 @@ export class CacheService {
   ): Promise<void> {
     await redisConfig.set(
       `${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`,
-      JSON.stringify(edition),
+      dashboardInsightEditionCacheCodec.encode(edition),
       Math.max(60, Math.ceil(ttlSeconds)),
     );
   }
 
   async getDashboardInsightEdition(cacheKey: string): Promise<DashboardInsightEdition | null> {
-    const cached = await redisConfig.get(`${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`);
-    if (!cached) return null;
-    try {
-      return JSON.parse(cached) as DashboardInsightEdition;
-    } catch {
-      await redisConfig.del(`${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`);
-      return null;
-    }
+    return this.readProjection(
+      `${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`,
+      dashboardInsightEditionCacheCodec,
+    );
   }
 
   /**
    * Cache user summary
    */
-  async cacheUserSummary(userId: string, summary: any): Promise<void> {
+  async cacheUserSummary(userId: string, summary: UserSummaryProjection): Promise<void> {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
-    const value = JSON.stringify(summary);
+    const value = userSummaryCacheCodec.encode(summary);
     
     const cached = await redisConfig.set(key, value, this.USER_SUMMARY_TTL);
     
-    if (cached) {
-      console.log(`✅ Cached user summary for ${userId} (TTL: ${this.USER_SUMMARY_TTL}s)`);
-    }
+    if (cached) logger.debug('User summary cached', { ttlSeconds: this.USER_SUMMARY_TTL });
   }
 
   /**
    * Get cached user summary
    */
-  async getUserSummary(userId: string): Promise<any | null> {
+  async getUserSummary(userId: string): Promise<UserSummaryProjection | null> {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
-    const cached = await redisConfig.get(key);
-    
-    if (cached) {
-      console.log(`✅ Cache HIT for user summary: ${userId}`);
-      return JSON.parse(cached);
-    }
-    
-    console.log(`❌ Cache MISS for user summary: ${userId}`);
-    return null;
+    return this.readProjection(key, userSummaryCacheCodec);
   }
 
   /**
@@ -77,9 +77,7 @@ export class CacheService {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
     const deleted = await redisConfig.del(key);
     
-    if (deleted) {
-      console.log(`🗑️  Invalidated cache for user: ${userId}`);
-    }
+    if (deleted) logger.debug('User summary cache invalidated');
   }
 
   /**
@@ -96,41 +94,18 @@ export class CacheService {
     ];
 
     let totalDeleted = 0;
-    const allDeletedKeys: string[] = [];
-    
     for (const pattern of patterns) {
-      // Get keys that match pattern before deletion (for debugging)
-      if (redisConfig.isAvailable()) {
-        try {
-          const client = redisConfig.getClient();
-          if (client) {
-            const matchingKeys = await client.keys(pattern);
-            allDeletedKeys.push(...matchingKeys);
-          }
-        } catch (e) {
-          // Ignore errors in debug lookup
-        }
-      }
-      
       const deleted = await redisConfig.delPattern(pattern);
       totalDeleted += deleted;
     }
 
-    if (totalDeleted > 0) {
-      // Show which keys were deleted (without the prefix for readability)
-      const keyNames = allDeletedKeys.map(k => {
-        const parts = k.split(':');
-        return parts.length > 1 ? parts.slice(1).join(':') : k;
-      }).join(', ');
-      const keyInfo = keyNames ? ` (${keyNames})` : '';
-      console.log(`🗑️  Invalidated ${totalDeleted} cache entries for user: ${userId}${keyInfo}`);
-    }
+    if (totalDeleted > 0) logger.debug('User cache entries invalidated', { count: totalDeleted });
   }
 
   /**
    * Get cache statistics
    */
-  async getStats(): Promise<{ enabled: boolean; stats: any }> {
+  async getStats(): Promise<CacheStats> {
     if (!redisConfig.isAvailable()) {
       return { enabled: false, stats: null };
     }
@@ -145,7 +120,16 @@ export class CacheService {
   isAvailable(): boolean {
     return redisConfig.isAvailable();
   }
-}
 
-// Export singleton instance
-export const cacheService = new CacheService();
+  private async readProjection<Value>(key: string, codec: CacheCodec<Value>): Promise<Value | null> {
+    const cached = await redisConfig.get(key);
+    if (!cached) return null;
+
+    const value = codec.decode(cached);
+    if (value !== null) return value;
+
+    await redisConfig.del(key);
+    logger.warn('Invalid cached projection evicted');
+    return null;
+  }
+}

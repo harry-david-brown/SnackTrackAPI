@@ -1,9 +1,8 @@
 import { User } from '../../models/User';
 import { Receipt, ReceiptType, DataSource } from '../../models/Receipt';
 import { GmailClient } from '../email/GmailClient';
-import { ReceiptService } from '../receipt/ReceiptService';
-import { PostgresService } from '../data/PostgresService';
-import { cacheService } from '../core/CacheService';
+import { ReceiptRepository } from '../data/ReceiptRepository';
+import { CacheService } from '../core/CacheService';
 import { ReceiptExtractor, RawEmail, ExtractionResult, ServiceType } from '../extraction';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,6 +10,7 @@ import pLimit from 'p-limit';
 import { getDefaultTimezone, parseReceiptLocalDateTime } from '../../utils/timezone';
 import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
 import { UserRepository } from '../data/UserRepository';
+import { ImportLockHandle, ImportLockService } from './ImportLockService';
 
 export const isGmailReconnectError = (error: unknown): boolean => {
   const candidate = error as any;
@@ -90,19 +90,14 @@ export const filterReceiptsAfterExportCutoffs = (
  * - Parallel receipt parsing with concurrency limiting
  */
 export class GmailImportService {
-  private gmailClient: GmailClient;
-  private extractor: ReceiptExtractor;
-  private receiptService: ReceiptService;
-  private importPreferences: ImportPreferencesRepository;
-  private users: UserRepository;
-
-  constructor(postgres: PostgresService) {
-    this.gmailClient = new GmailClient();
-    this.extractor = new ReceiptExtractor();
-    this.receiptService = new ReceiptService(postgres);
-    this.importPreferences = new ImportPreferencesRepository(postgres);
-    this.users = new UserRepository(postgres);
-  }
+  constructor(
+    private readonly gmailClient: GmailClient,
+    private readonly extractor: ReceiptExtractor,
+    private readonly receipts: ReceiptRepository,
+    private readonly importPreferences: ImportPreferencesRepository,
+    private readonly users: UserRepository,
+    private readonly cache: CacheService,
+  ) {}
 
   /**
    * Import Uber Eats receipts from Gmail for a user
@@ -115,6 +110,7 @@ export class GmailImportService {
    */
   async importFromGmail(
     user: User,
+    lockHandle: ImportLockHandle,
     triggerType: 'manual' | 'background' = 'manual'
   ): Promise<GmailImportResult> {
     const errors: string[] = [];
@@ -349,7 +345,10 @@ export class GmailImportService {
         // Incrementally merge receipts. Existing rows keep first_seen_at, while
         // tip adjustments update the order without pretending it is new.
         try {
-          const upsertResult = await this.receiptService.upsertEmailReceipts(validReceiptsList);
+          const upsertResult = await this.receipts.upsertEmailReceipts(
+            validReceiptsList,
+            () => ImportLockService.assertLockOwned(lockHandle)
+          );
           newOrders = upsertResult.newOrders;
           updatedOrders = upsertResult.updatedOrders;
           unchangedOrders = upsertResult.unchangedOrders;
@@ -374,7 +373,7 @@ export class GmailImportService {
         }
 
         // Invalidate cache for this user
-        await cacheService.invalidateAllUserCaches(user.id);
+        await this.cache.invalidateAllUserCaches(user.id);
         console.log(`✅ Imported ${importedCount} receipts for user ${user.id}`);
 
         if (criticalErrors.length > 0) {
@@ -496,23 +495,7 @@ export class GmailImportService {
   }
 
   private async getLatestCsvReceiptDates(userId: string): Promise<ExportCutoffsByReceiptType> {
-    const postgres = (this.receiptService as any).postgres as PostgresService;
-    const result = await postgres.query(
-      `SELECT receipt_type, MAX(order_date) AS latest
-       FROM receipts
-       WHERE user_id = $1 AND data_source = 'csv'
-       GROUP BY receipt_type`,
-      [userId]
-    );
-    const cutoffs: ExportCutoffsByReceiptType = {};
-    for (const row of result.rows) {
-      const receiptType = row.receipt_type as ReceiptType;
-      const date = new Date(row.latest);
-      if (Object.values(ReceiptType).includes(receiptType) && !Number.isNaN(date.getTime())) {
-        cutoffs[receiptType] = date;
-      }
-    }
-    return cutoffs;
+    return this.receipts.getLatestCsvReceiptDates(userId);
   }
 
   private async getIncrementalSearchAfter(
@@ -534,24 +517,14 @@ export class GmailImportService {
    * Get count of email-based receipts for a user
    */
   async getEmailReceiptCount(userId: string): Promise<number> {
-    const postgres = (this.receiptService as any).postgres as PostgresService;
-    const result = await postgres.query(
-      "SELECT COUNT(*) as count FROM receipts WHERE user_id = $1 AND data_source = 'email'",
-      [userId]
-    );
-    return parseInt(result.rows[0].count);
+    return (await this.receipts.getEmailReceiptStats(userId)).count;
   }
 
   /**
    * Get total amount from email-based receipts for a user
    */
   async getEmailReceiptTotal(userId: string): Promise<number> {
-    const postgres = (this.receiptService as any).postgres as PostgresService;
-    const result = await postgres.query(
-      "SELECT COALESCE(SUM(amount_spent), 0) as total FROM receipts WHERE user_id = $1 AND data_source = 'email'",
-      [userId]
-    );
-    return parseFloat(result.rows[0].total);
+    return (await this.receipts.getEmailReceiptStats(userId)).total;
   }
 
   /**

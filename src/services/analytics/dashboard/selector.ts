@@ -33,18 +33,20 @@ function related(candidate: InsightCandidate, selected: InsightCandidate[]) {
 
 function selectForSeed(candidates: InsightCandidate[], seed: string, maxCards: number): InsightCandidate[] {
   const real = ranked(eligibleRealCandidates(candidates), seed);
+  const locked = ranked(candidates.filter(candidate => candidate.locked), `${seed}:locked`)[0];
+  const realLimit = locked ? Math.max(0, maxCards - 1) : maxCards;
   const selected: InsightCandidate[] = [];
 
   for (const category of CATEGORIES) {
     const candidate = real.find(item => item.insight.category === category && !selected.includes(item) && !related(item, selected));
-    if (candidate && selected.length < maxCards) selected.push(candidate);
+    if (candidate && selected.length < realLimit) selected.push(candidate);
   }
   for (const candidate of real) {
-    if (selected.length >= maxCards) break;
+    if (selected.length >= realLimit) break;
     if (!selected.includes(candidate) && !related(candidate, selected)) selected.push(candidate);
   }
   for (const candidate of real) {
-    if (selected.length >= maxCards) break;
+    if (selected.length >= realLimit) break;
     if (!selected.includes(candidate)
       && !selected.some(existing => candidate.subjectGroup && existing.subjectGroup === candidate.subjectGroup)) {
       selected.push(candidate);
@@ -61,7 +63,6 @@ function selectForSeed(candidates: InsightCandidate[], seed: string, maxCards: n
       || a.insight.id.localeCompare(b.insight.id);
   });
 
-  const locked = ranked(candidates.filter(candidate => candidate.locked), `${seed}:locked`)[0];
   if (locked && selected.length < maxCards) selected.push(locked);
   return selected;
 }
@@ -121,7 +122,9 @@ function buildCooldownPool(
   const dayOrdinal = Math.floor(Date.parse(`${localDate}T00:00:00.000Z`) / 86_400_000);
   const userOffset = stableHash(`${userId}:${metricVersion}:cooldown-offset`) % cycleLength;
   const activeGroup = groups[(dayOrdinal + userOffset) % cycleLength];
-  return { candidates: activeGroup, cycleLength };
+  // Locked previews are a durable Gmail-only product requirement rather than
+  // rotating real insights, so keep them outside the cooldown partition.
+  return { candidates: [...activeGroup, ...candidates.filter(candidate => candidate.locked)], cycleLength };
 }
 
 export function selectDailyInsights(

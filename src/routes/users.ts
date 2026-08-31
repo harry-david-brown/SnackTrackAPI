@@ -2,32 +2,26 @@ import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { asyncHandler, NotFoundError, DatabaseError, ValidationError } from '../middleware/errorHandler';
 import { validateUUIDParam, validateUserCreation } from '../middleware/validation';
-import { userCreationRateLimit, emailOperationRateLimit } from '../middleware/security';
+import { userCreationRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
-import { cacheService } from '../services/core/CacheService';
+import { config } from '../config/AppConfig';
 import {
   detectTimezoneFromRequest,
   getDefaultTimezone,
-  getLocalDateKey,
   isValidTimezone,
 } from '../utils/timezone';
 import {
-  buildDashboardInsightEdition,
-  DASHBOARD_INSIGHT_METRIC_VERSION,
-  getDashboardInsightPreviewNow,
   MAX_DASHBOARD_INSIGHT_DEV_DAY_OFFSET,
 } from '../services/analytics/dashboard';
 
 const router = Router();
 const databaseService = container.databaseService;
+const cacheService = container.cacheService;
 
 // POST /users/:id/reset-onboarding - preserve login identity while clearing all imported data.
 router.post('/:id/reset-onboarding', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.id;
   const result = await container.accountResetService.resetForOnboarding(userId);
-
-  container.gmailConnectionHealthService.invalidate(userId);
-  await cacheService.invalidateAllUserCaches(userId);
 
   res.json({
     success: true,
@@ -73,7 +67,7 @@ router.post('/:id/reset-onboarding', authenticateToken, validateOwnership, valid
  */
 router.get('/:id/dashboard-insights', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
   const rawDevDayOffset = req.query.devDayOffset;
-  if (rawDevDayOffset !== undefined && process.env.NODE_ENV === 'production') {
+  if (rawDevDayOffset !== undefined && config.isProduction()) {
     throw new ValidationError('devDayOffset is only available outside production', 'devDayOffset');
   }
   if (rawDevDayOffset !== undefined && (
@@ -87,43 +81,13 @@ router.get('/:id/dashboard-insights', authenticateToken, validateOwnership, vali
     );
   }
   const devDayOffset = rawDevDayOffset === undefined ? 0 : Number(rawDevDayOffset);
-  const isDevPreview = devDayOffset > 0;
-  try {
-    const userId = req.params.id;
-    let user = await container.userRepository.findById(userId);
-    if (!user) throw new NotFoundError('User', userId);
-
-    const requestTimezone = detectTimezoneFromRequest(req);
-    if (requestTimezone && requestTimezone !== user.timezone) {
-      await container.userRepository.updateTimezone(userId, requestTimezone);
-      await cacheService.invalidateAllUserCaches(userId);
-      user = { ...user, timezone: requestTimezone };
-    }
-    const timezone = user.timezone || getDefaultTimezone();
-    const actualNow = new Date();
-    const now = getDashboardInsightPreviewNow(actualNow, timezone, devDayOffset);
-    const localDate = getLocalDateKey(now, timezone) ?? now.toISOString().slice(0, 10);
-    const cacheKey = `${userId}:${DASHBOARD_INSIGHT_METRIC_VERSION}:${timezone}:${localDate}`;
-    // Preview editions intentionally bypass shared caches: otherwise a future
-    // preview could poison the real edition when that calendar date arrives.
-    const cached = isDevPreview ? null : await cacheService.getDashboardInsightEdition(cacheKey);
-    if (cached) {
-      res.set('Cache-Control', 'private, no-cache');
-      return res.json(cached);
-    }
-
-    const receipts = await container.receiptRepository.findByUserId(userId);
-    const edition = buildDashboardInsightEdition(receipts, timezone, userId, now);
-    if (!isDevPreview) {
-      const ttlSeconds = (Date.parse(edition.nextRefreshAt) - actualNow.getTime()) / 1000 + 60;
-      await cacheService.cacheDashboardInsightEdition(cacheKey, edition, ttlSeconds);
-    }
-    res.set('Cache-Control', 'private, no-cache');
-    return res.json(edition);
-  } catch (error) {
-    if (error instanceof NotFoundError) throw error;
-    throw new DatabaseError('Failed to fetch dashboard insights', error as Error);
-  }
+  const edition = await container.getDashboardInsightsService.execute({
+    userId: req.params.id,
+    requestTimezone: detectTimezoneFromRequest(req) ?? undefined,
+    devDayOffset,
+  });
+  res.set('Cache-Control', 'private, no-cache');
+  res.json(edition);
 }));
 
 /**
@@ -322,187 +286,16 @@ router.get('/:id/totalSpent', authenticateToken, validateOwnership, validateUUID
  */
 // GET /users/:id/summary - Get user data summary and analytics
 router.get('/:id/summary', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const userId = req.params.id;
-    const includeWrapped = req.query.includeWrapped === 'true';
+  const summary = await container.getUserSummaryService.execute({
+    userId: req.params.id,
+    includeWrapped: req.query.includeWrapped === 'true',
+    requestTimezone: detectTimezoneFromRequest(req) ?? undefined,
+  });
 
-    // Keep the analytics timezone aligned with the signed-in device. This also
-    // repairs older Google/Apple accounts that were created with the fallback.
-    let user = await container.userRepository.findById(userId);
-    if (!user) {
-      throw new NotFoundError('User', userId);
-    }
-    const requestTimezone = detectTimezoneFromRequest(req);
-    if (requestTimezone && requestTimezone !== user.timezone) {
-      await container.userRepository.updateTimezone(userId, requestTimezone);
-      await cacheService.invalidateAllUserCaches(userId);
-      user = { ...user, timezone: requestTimezone };
-    }
-    const analyticsTimezone = user.timezone || getDefaultTimezone();
-    
-    // Timezone and metric-versioned keys prevent a device timezone correction
-    // or formula fix from returning an older cached payload.
-    const cacheKey = includeWrapped
-      ? `${userId}-wrapped-v6-${analyticsTimezone}`
-      : `${userId}-v5-${analyticsTimezone}`;
-    const cachedSummary = await cacheService.getUserSummary(cacheKey);
-    if (cachedSummary) {
-      return res.json(cachedSummary);
-    }
-    
-    // Get user's receipts
-    const receipts = await container.receiptRepository.findByUserId(userId);
-    
-    // Calculate statistics
-    const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
-    const totalSpent = roundMoney(receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0));
-    const averageSpent = receipts.length > 0 ? roundMoney(totalSpent / receipts.length) : 0;
-    const totalReceipts = receipts.length;
-    
-    // Data source breakdown
-    const dataSourceBreakdown = receipts.reduce((acc, receipt) => {
-      acc[receipt.dataSource] = (acc[receipt.dataSource] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    // Monthly breakdown
-    const monthlyBreakdown = receipts.reduce((acc, receipt) => {
-      if (!receipt.orderDate) return acc;
-      const localDate = getLocalDateKey(receipt.orderDate, analyticsTimezone);
-      if (!localDate) return acc;
-      const month = localDate.substring(0, 7); // YYYY-MM in the user's timezone
-      if (!acc[month]) {
-        acc[month] = { count: 0, total: 0 };
-      }
-      acc[month].count++;
-      acc[month].total = roundMoney(acc[month].total + receipt.amountSpent);
-      return acc;
-    }, {} as Record<string, { count: number; total: number }>);
-
-    // Top restaurants
-    const restaurantStats = receipts.reduce((acc, receipt) => {
-      const restaurant = receipt.restaurantName?.trim();
-      // Do not let blank or punctuation-only import values occupy a ranked
-      // restaurant slot. This also coalesces names with stray outer spaces.
-      if (!restaurant || !/[\p{L}\p{N}]/u.test(restaurant)) return acc;
-      if (!acc[restaurant]) {
-        acc[restaurant] = { count: 0, total: 0 };
-      }
-      acc[restaurant].count++;
-      acc[restaurant].total = roundMoney(acc[restaurant].total + receipt.amountSpent);
-      return acc;
-    }, {} as Record<string, { count: number; total: number }>);
-
-    const topRestaurants = Object.entries(restaurantStats)
-      .map(([name, stats]) => ({ name, ...stats }))
-      .sort((a, b) => b.count - a.count || b.total - a.total || a.name.localeCompare(b.name))
-      .slice(0, 10);
-
-    // Validation insights
-    const issues = [];
-    const zeroAmountReceipts = receipts.filter(r => parseFloat(r.amountSpent.toString()) === 0);
-    if (zeroAmountReceipts.length > 0) {
-      issues.push(`${zeroAmountReceipts.length} receipts have zero amount (likely refunded orders)`);
-    }
-
-    const recentReceipts = receipts
-      .filter(r => r.orderDate && r.orderDate > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
-      .sort((a, b) => (b.orderDate?.getTime() || 0) - (a.orderDate?.getTime() || 0))
-      .slice(0, 5);
-
-    const summary: any = {
-      user: {
-        id: user.id,
-        email: user.email,
-        dataSource: 'csv' // All users now come from CSV
-      },
-      statistics: {
-        totalSpent,
-        averageSpent,
-        totalReceipts,
-        dataSourceBreakdown,
-        monthlyBreakdown,
-        topRestaurants
-      },
-      validation: {
-        issues,
-        zeroAmountReceipts: zeroAmountReceipts.length,
-        refundedReceipts: zeroAmountReceipts.length
-      },
-      recentReceipts: recentReceipts.map(receipt => ({
-        restaurantName: receipt.restaurantName,
-        amountSpent: receipt.amountSpent,
-        orderDate: receipt.orderDate,
-        dataSource: receipt.dataSource
-      })),
-    };
-
-    // Optionally include Spotify Wrapped-style analytics
-    if (includeWrapped) {
-      try {
-        const wrappedAnalytics = await container.wrappedAnalyticsService.calculateWrappedAnalytics(userId);
-        summary.wrappedAnalytics = wrappedAnalytics;
-      } catch (error) {
-        console.error('Error calculating wrapped analytics:', error);
-        // Continue without wrapped analytics if there's an error
-        summary.wrappedAnalytics = null;
-      }
-    }
-
-    // Cache the summary for future requests
-    await cacheService.cacheUserSummary(cacheKey, summary);
-
-    // Prevent HTTP caching to ensure fresh data after imports
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    
-    res.json(summary);
-  } catch (error) {
-    if (error instanceof NotFoundError) throw error;
-    throw new DatabaseError('Failed to fetch user summary', error as Error);
-  }
-}));
-
-// Update user receipts from emails (with rate limiting)
-router.post('/:id/update-receipts', authenticateToken, validateOwnership, emailOperationRateLimit, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
-  try {
-    await databaseService.updateUserReceiptsForUser(req.params.id);
-    const total = await databaseService.getUserTotalSpent(req.params.id);
-    res.json({ 
-      message: 'Receipts updated successfully',
-      total 
-    });
-  } catch (error) {
-    throw new DatabaseError('Failed to update receipts', error as Error);
-  }
-}));
-
-// Debug endpoint to test email fetching and parsing
-router.get('/:id/debug/emails', authenticateToken, validateOwnership, validateUUIDParam('id'), asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const user = await databaseService.getUser(req.params.id);
-    if (!user) {
-      throw new NotFoundError('User', req.params.id);
-    }
-    
-    const emails = await container.receiptLookupService.getUserEmails(user);
-    const receipts = emails.map((email: any) => ({
-      from: email.from,
-      to: email.to,
-      body: email.body,
-      parsedReceipt: email.toReceipt()
-    }));
-    
-    res.json({
-      user: user.email,
-      emailCount: emails.length,
-      emails: receipts
-    });
-  } catch (error) {
-    if (error instanceof NotFoundError) throw error;
-    throw new DatabaseError('Failed to fetch emails', error as Error);
-  }
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.json(summary);
 }));
 
 /**

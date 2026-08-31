@@ -1,4 +1,3 @@
-import { Pool } from 'pg';
 import {
   WrappedAnalytics,
   WrappedPercentiles,
@@ -30,13 +29,13 @@ import {
 } from '../../utils/timezone';
 import {
   isLateNightHour,
-  LATE_NIGHT_END_HOUR,
-  LATE_NIGHT_START_HOUR,
 } from './shared/timeWindows';
 import {
   calculateHypotheticalInvestment,
   HYPOTHETICAL_ANNUAL_RETURN_PERCENT,
 } from './shared/investment';
+import { WrappedAnalyticsQueryRepository } from './WrappedAnalyticsQueryRepository';
+import logger from '../../config/logger';
 
 /**
  * Wrapped Analytics Service
@@ -48,7 +47,7 @@ export class WrappedAnalyticsService {
   /** Below this pool size, percentiles are noise — omit them entirely. */
   private static readonly PERCENTILE_MIN_SAMPLE = 100;
 
-  constructor(private pool: Pool) {}
+  constructor(private readonly queries: WrappedAnalyticsQueryRepository) {}
 
   /**
    * Calculate all wrapped analytics for a user
@@ -169,39 +168,14 @@ export class WrappedAnalyticsService {
    * Fetch user timezone from database
    */
   private async fetchUserTimezone(userId: string): Promise<string> {
-    const query = `SELECT timezone FROM users WHERE id = $1`;
-    const result = await this.pool.query(query, [userId]);
-    return result.rows[0]?.timezone || 'America/New_York';
+    return this.queries.getUserTimezone(userId);
   }
 
   /**
    * Fetch all receipts for analytics
    */
   private async fetchUserReceipts(userId: string): Promise<ReceiptForAnalytics[]> {
-    const query = `
-      SELECT 
-        id,
-        user_id as "userId",
-        restaurant_name as "restaurantName",
-        order_date as "orderDate",
-        amount_spent as "amountSpent",
-        items,
-        receipt_type as "receiptType",
-        data_source as "dataSource",
-        delivery_time as "deliveryTime"
-      FROM receipts
-      WHERE user_id = $1
-      ORDER BY order_date DESC
-    `;
-
-    const result = await this.pool.query(query, [userId]);
-    return result.rows.map(row => ({
-      ...row,
-      amountSpent: parseFloat(row.amountSpent),
-      orderDate: row.orderDate ? new Date(row.orderDate) : null,
-      deliveryTime: row.deliveryTime ? new Date(row.deliveryTime) : null,
-      items: Array.isArray(row.items) ? row.items : []
-    }));
+    return this.queries.getUserReceipts(userId);
   }
 
   /**
@@ -214,52 +188,14 @@ export class WrappedAnalyticsService {
    * the pool itself is too small for percentiles to mean anything.
    */
   private async calculatePercentiles(userId: string): Promise<WrappedPercentiles | undefined> {
-    const query = `
-      WITH per_user AS (
-        SELECT
-          r.user_id,
-          SUM(r.amount_spent) AS total_spent,
-          COUNT(*)::int AS order_count,
-          AVG(
-            CASE
-              WHEN r.order_date IS NULL THEN NULL
-              WHEN EXTRACT(
-                     HOUR FROM r.order_date
-                       AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
-                   ) >= ${LATE_NIGHT_START_HOUR}
-                OR EXTRACT(
-                     HOUR FROM r.order_date
-                       AT TIME ZONE COALESCE(u.timezone, 'America/New_York')
-                   ) < ${LATE_NIGHT_END_HOUR}
-              THEN 1.0 ELSE 0.0
-            END
-          ) * 100 AS night_owl_pct
-        FROM receipts r
-        JOIN users u ON u.id = r.user_id
-        GROUP BY r.user_id
-        HAVING COUNT(*) >= $2
-      ),
-      ranked AS (
-        SELECT
-          user_id,
-          PERCENT_RANK() OVER (ORDER BY total_spent) AS spent_rank,
-          PERCENT_RANK() OVER (ORDER BY order_count) AS orders_rank,
-          PERCENT_RANK() OVER (ORDER BY night_owl_pct) AS night_owl_rank,
-          COUNT(*) OVER ()::int AS sample_size
-        FROM per_user
-      )
-      SELECT * FROM ranked WHERE user_id = $1
-    `;
-
     try {
-      const result = await this.pool.query(query, [
+      const row = await this.queries.getPercentileRanks(
         userId,
-        WrappedAnalyticsService.PERCENTILE_MIN_RECEIPTS
-      ]);
-      const row = result.rows[0];
+        WrappedAnalyticsService.PERCENTILE_MIN_RECEIPTS,
+      );
       if (!row) return undefined;
 
-      const sampleSize = Number(row.sample_size);
+      const sampleSize = row.sampleSize;
       if (sampleSize < WrappedAnalyticsService.PERCENTILE_MIN_SAMPLE) return undefined;
 
       const standing = (rank: unknown): PercentileStanding => {
@@ -272,14 +208,14 @@ export class WrappedAnalyticsService {
 
       return {
         sampleSize,
-        totalSpent: standing(row.spent_rank),
-        orderCount: standing(row.orders_rank),
-        nightOwl: standing(row.night_owl_rank)
+        totalSpent: standing(row.spentRank),
+        orderCount: standing(row.ordersRank),
+        nightOwl: standing(row.nightOwlRank)
       };
     } catch (error) {
       // Percentiles are a garnish on the summary — never fail the whole
       // analytics payload over them.
-      console.error('Error calculating wrapped percentiles:', error);
+      logger.warn('Wrapped percentile calculation unavailable', { error });
       return undefined;
     }
   }

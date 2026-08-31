@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { validateApiKey } from '../middleware/security';
+import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
 
@@ -308,38 +309,12 @@ router.get('/stats', async (req: Request, res: Response) => {
  *               $ref: '#/components/schemas/Error'
  */
 // DELETE /database/users/:id - Delete user and all receipts
-router.delete('/users/:id', async (req: Request, res: Response) => {
-  try {
-    const userId = req.params.id;
-    
-    // First check if user exists
-    const user = await container.userRepository.findById(userId);
-    if (!user) {
-      return res.status(404).json({ 
-        error: 'User not found',
-        statusCode: 404,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        method: req.method
-      });
-    }
-
-    // Delete all receipts for this user
-    await container.postgres.query('DELETE FROM receipts WHERE user_id = $1', [userId]);
-    
-    // Delete the user
-    await container.postgres.query('DELETE FROM users WHERE id = $1', [userId]);
-    
-    res.json({ 
-      message: 'User and associated receipts deleted successfully' 
-    });
-  } catch (err) {
-    console.error('Error deleting user:', err);
-    res.status(500).json({ 
-      error: 'Failed to delete user', 
-      details: err instanceof Error ? err.message : 'Unknown error' 
-    });
-  }
-});
+router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
+  await container.accountDeletionService.deleteAccount(req.params.id);
+  res.json({
+    success: true,
+    message: 'User and associated data deleted successfully',
+  });
+}));
 
 export default router;

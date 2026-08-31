@@ -1,0 +1,3 @@
+interface:
+  display_name: "SnackTrack Backend Architecture"
+  short_description: "Design clean, maintainable SnackTrack API code"

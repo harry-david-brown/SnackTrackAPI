@@ -1,11 +1,12 @@
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, QueryConfigValues, QueryResult, QueryResultRow } from 'pg';
 import { config } from '../../config/AppConfig';
+import { logger } from '../../config/logger';
 
 export class PostgresService {
   private pool: Pool;
 
   constructor() {
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = config.isProduction();
 
     // Configure SSL for production databases (most cloud providers require this)
     const sslConfig = config.shouldUseDatabaseSSL() 
@@ -29,8 +30,10 @@ export class PostgresService {
 
     // Handle pool errors
     this.pool.on('error', (err) => {
-      console.error('Unexpected error on idle client', err);
-      process.exit(-1); // Exit process on critical pool errors
+      logger.error('Unexpected error on idle PostgreSQL client', {
+        error: err.message,
+        errorCode: 'DATABASE_POOL_ERROR',
+      });
     });
 
     // Log pool stats in development
@@ -47,7 +50,10 @@ export class PostgresService {
     console.log(`✅ PostgreSQL connection pool initialized (max: ${isProduction ? 20 : 10} connections)`);
   }
 
-  async query(text: string, params?: any[]): Promise<any> {
+  async query<Row extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: QueryConfigValues<unknown[]>
+  ): Promise<QueryResult<Row>> {
     const client = await this.pool.connect();
     try {
       const result = await client.query(text, params);

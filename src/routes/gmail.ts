@@ -10,15 +10,15 @@ import jwt from 'jsonwebtoken';
 import { container } from '../services/core/ServiceContainer';
 import { authenticateToken } from '../middleware/auth';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
-import { GmailImportService } from '../services/import/GmailImportService';
 import { ImportLockService } from '../services/import/ImportLockService';
-import { GmailClient } from '../services/email/GmailClient';
 import { User } from '../models/User';
 import { authConfig } from '../config/auth';
+import { config } from '../config/AppConfig';
 import { validateApiKey } from '../middleware/security';
 import { detectTimezoneFromRequest } from '../utils/timezone';
 import { GmailConnectionHealthResult } from '../services/email/GmailConnectionHealthService';
 import { resolveTrackingBaseline } from '../services/data/ImportPreferencesRepository';
+import logger from '../config/logger';
 
 const router = Router();
 const REQUIRED_GMAIL_SCOPES = new Set([
@@ -38,7 +38,7 @@ const GOOGLE_AUTH_SCOPES = [
  * Returns OAuth2Client for Gmail API access
  */
 const getCallbackRedirectUri = (): string => {
-  const redirectUri = process.env.GMAIL_REDIRECT_URI?.trim();
+  const redirectUri = config.getGmailConfig().redirectUri;
   if (!redirectUri) {
     throw new Error('GMAIL_REDIRECT_URI is not configured');
   }
@@ -46,8 +46,7 @@ const getCallbackRedirectUri = (): string => {
 };
 
 const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
-  const CLIENT_ID = process.env.GMAIL_CLIENT_ID?.trim();
-  const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET?.trim();
+  const { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET } = config.getGmailConfig();
 
   if (!CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('Gmail OAuth credentials not configured. Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env');
@@ -510,7 +509,7 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
     successRedirect.searchParams.set('gmailPurpose', decodedState.purpose);
     res.redirect(successRedirect.toString());
   } catch (callbackError: any) {
-    console.error('❌ Gmail OAuth callback failed:', callbackError);
+    logger.warn('Gmail OAuth callback failed', { error: callbackError });
     const errorRedirect = new URL(appRedirectUri);
     errorRedirect.searchParams.set('gmail', 'error');
     errorRedirect.searchParams.set('error', callbackError.message || 'gmail_oauth_failed');
@@ -578,7 +577,7 @@ router.post('/disconnect', authenticateToken, asyncHandler(async (req: Request, 
     await container.importPreferencesRepository.resetGmailImportStatus(userId);
   }
 
-  console.log(`✅ Disconnected Gmail for user: ${userId}`);
+  logger.info('Gmail disconnected', { userId });
 
   res.json({
     success: true,
@@ -772,7 +771,7 @@ router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(a
     return;
   }
 
-  const detected = await new GmailClient().hasUberExportReadyEmail(
+  const detected = await container.gmailClient.hasUberExportReadyEmail(
     user,
     uberExport.requestedAt
   );
@@ -960,8 +959,8 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
   }
 
   // Try to acquire import lock - prevents duplicate imports for same user
-  const lockAcquired = await ImportLockService.acquireLock(userId);
-  if (!lockAcquired) {
+  const lockHandle = await ImportLockService.acquireLock(userId);
+  if (!lockHandle) {
     // Import already in progress for this user
     res.status(409).json({
       success: false,
@@ -973,17 +972,18 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
   }
 
   try {
-    console.log(`📧 Starting incremental Gmail receipt sync for user: ${user.email}`);
+    logger.info('Gmail import started', { userId });
 
-    const gmailImportService = new GmailImportService(container.postgres);
-    const result = await gmailImportService.importFromGmail(user);
+    const result = await container.gmailImportService.importFromGmail(user, lockHandle);
 
-    console.log(`${result.success ? '✅ Gmail import completed' : '❌ Gmail import failed'} for user: ${user.email}`);
-    console.log(`   - Emails found: ${result.totalEmailsFound}`);
-    console.log(`   - Receipts processed: ${result.totalReceiptsProcessed}`);
-    console.log(`   - Receipts imported: ${result.totalReceiptsImported}`);
-    console.log(`   - New: ${result.newOrders}, updated: ${result.updatedOrders}, unchanged: ${result.unchangedOrders}`);
-    console.log(`   - Total amount: $${result.totalAmount.toFixed(2)}`);
+    logger.info('Gmail import finished', {
+      userId,
+      outcome: result.success ? 'success' : 'failure',
+      emailsFound: result.totalEmailsFound,
+      receiptsProcessed: result.totalReceiptsProcessed,
+      receiptsImported: result.totalReceiptsImported,
+      errorCode: result.errorCode,
+    });
 
     const responseBody = {
       success: result.success,
@@ -1013,7 +1013,7 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
     res.json(responseBody);
   } finally {
     // Always release the lock when done (success or failure)
-    await ImportLockService.releaseLock(userId);
+    await ImportLockService.releaseLock(lockHandle);
   }
 }));
 

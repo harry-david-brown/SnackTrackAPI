@@ -10,7 +10,6 @@ import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { userCreationRateLimit } from '../middleware/security';
 import { validateEmail } from '../middleware/validation';
 import { authenticateToken } from '../middleware/auth';
-import { AuthService } from '../services/AuthService';
 import { LoginRequest, RegisterRequest, RefreshTokenRequest } from '../models/Token';
 import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
 
@@ -91,7 +90,7 @@ router.post('/register', userCreationRateLimit, asyncHandler(async (req: Request
   // Detect timezone from request (header or body)
   const timezone = detectTimezoneFromRequest(req) || getDefaultTimezone();
 
-  const authService = container.get<AuthService>('authService');
+  const authService = container.authService;
   const result = await authService.register(email, password, timezone);
 
   res.status(201).json(result);
@@ -151,7 +150,7 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError('Email and password are required');
   }
 
-  const authService = container.get<AuthService>('authService');
+  const authService = container.authService;
   const result = await authService.login(email, password);
 
   res.status(200).json(result);
@@ -180,14 +179,13 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
  *         description: Login successful
  * */
 router.post('/google', asyncHandler(async (req: Request, res: Response) => {
-  console.log('Received Google Login request');
   const { idToken } = req.body;
 
   if (!idToken) {
     throw new ValidationError('ID token is required');
   }
 
-  const authService = container.get<AuthService>('authService');
+  const authService = container.authService;
   const result = await authService.loginWithGoogle(idToken);
 
   res.status(200).json(result);
@@ -247,14 +245,13 @@ router.post('/google', asyncHandler(async (req: Request, res: Response) => {
  *         description: Invalid Apple token
  */
 router.post('/apple', asyncHandler(async (req: Request, res: Response) => {
-  console.log('Received Apple Login request');
   const { identityToken, user } = req.body;
 
   if (!identityToken) {
     throw new ValidationError('Identity token is required');
   }
 
-  const authService = container.get<AuthService>('authService');
+  const authService = container.authService;
   const result = await authService.loginWithApple(identityToken, user);
 
   res.status(200).json(result);
@@ -301,7 +298,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError('Refresh token is required', 'refreshToken');
   }
 
-  const authService = container.get<AuthService>('authService');
+  const authService = container.authService;
   const tokens = await authService.refreshAccessToken(refreshToken);
 
   res.status(200).json(tokens);
@@ -349,7 +346,7 @@ router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
 
   // Implement token blacklist/revocation
   if (refreshToken) {
-    const authService = container.get<AuthService>('authService');
+    const authService = container.authService;
     await authService.revokeRefreshToken(refreshToken);
   }
 
@@ -405,8 +402,7 @@ router.delete('/delete-account', authenticateToken, asyncHandler(async (req: Req
     throw new ValidationError('User ID not found in token');
   }
 
-  const authService = container.get<AuthService>('authService');
-  await authService.deleteAccount(userId, refreshToken);
+  await container.accountDeletionService.deleteAccount(userId, refreshToken);
 
   res.status(200).json({
     success: true,
@@ -415,4 +411,3 @@ router.delete('/delete-account', authenticateToken, asyncHandler(async (req: Req
 }));
 
 export default router;
-

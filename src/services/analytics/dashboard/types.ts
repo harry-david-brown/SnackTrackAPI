@@ -1,4 +1,6 @@
-export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v14';
+export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v15';
+
+export type DashboardExportProvider = 'uber_eats' | 'doordash';
 
 export type DashboardInsightCategory = 'favorites' | 'habits' | 'extremes' | 'progress';
 export type DashboardInsightIcon =
@@ -141,5 +143,7 @@ export interface DashboardInsightEdition {
   nextRefreshAt: string;
   metricVersion: string;
   availableCandidateCount: number;
+  /** Present only when detailed export history exists for exactly one supported provider. */
+  partialExportProvider?: DashboardExportProvider;
   insights: DashboardInsight[];
 }

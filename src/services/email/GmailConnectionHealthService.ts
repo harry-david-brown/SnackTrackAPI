@@ -1,5 +1,4 @@
 import { User } from '../../models/User';
-import { PostgresService } from '../data/PostgresService';
 import { UserRepository } from '../data/UserRepository';
 import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
 import { isGmailReconnectError } from '../import/GmailImportService';
@@ -16,15 +15,13 @@ const VALIDATION_TTL_MS = 15 * 60 * 1000;
 
 /** Validates stored Gmail credentials while avoiding a Google request on every screen refresh. */
 export class GmailConnectionHealthService {
-  private gmail = new GmailClient();
-  private users: UserRepository;
-  private preferences: ImportPreferencesRepository;
   private successfulValidations = new Map<string, number>();
 
-  constructor(postgres: PostgresService) {
-    this.users = new UserRepository(postgres);
-    this.preferences = new ImportPreferencesRepository(postgres);
-  }
+  constructor(
+    private readonly gmail: Pick<GmailClient, 'validateConnection'>,
+    private readonly users: Pick<UserRepository, 'markGmailReconnectRequired'>,
+    private readonly preferences: Pick<ImportPreferencesRepository, 'markTrackingReconnectRequired'>,
+  ) {}
 
   invalidate(userId: string): void {
     this.successfulValidations.delete(userId);

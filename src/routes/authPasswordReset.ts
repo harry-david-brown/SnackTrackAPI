@@ -13,6 +13,7 @@ import {
   passwordResetIPRateLimit,
   otpVerificationRateLimit
 } from '../middleware/security';
+import logger from '../config/logger';
 
 const router = Router();
 
@@ -91,14 +92,14 @@ router.post(
     if (user && emailSender.isEnabled()) {
       const code = await otpService.storeOTP(normalizedEmail, 'password_reset');
       await emailSender.sendPasswordResetEmail(normalizedEmail, code);
-      console.log(`✅ Password reset code sent to ${normalizedEmail}`);
+      logger.info('Password reset code sent');
     } else if (user && !emailSender.isEnabled()) {
       // In development, log the code instead
       const code = await otpService.storeOTP(normalizedEmail, 'password_reset');
-      console.log(`📧 [DEV] Password reset code for ${normalizedEmail}: ${code}`);
+      logger.info('Password reset email skipped in development');
     } else {
       // User doesn't exist, but don't reveal this
-      console.log(`⚠️  Password reset requested for non-existent email: ${normalizedEmail}`);
+      logger.info('Password reset request accepted');
     }
 
     // Always return success response (60 second cooldown)
@@ -291,7 +292,7 @@ router.post(
     // Note: In a production system, you might want to invalidate all refresh tokens here
     // For now, the frontend should handle token cleanup
 
-    console.log(`✅ Password reset completed for ${normalizedEmail}`);
+    logger.info('Password reset completed');
 
     res.status(200).json({
       success: true,
@@ -301,4 +302,3 @@ router.post(
 );
 
 export default router;
-

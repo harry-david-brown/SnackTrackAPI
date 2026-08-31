@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { CsvImportService } = require('../dist/services/import/CsvImportService');
 const { ReceiptExtractor } = require('../dist/services/extraction/ReceiptExtractor');
 const { WrappedAnalyticsService } = require('../dist/services/analytics/WrappedAnalyticsService');
-const { ReceiptService } = require('../dist/services/receipt/ReceiptService');
+const { ReceiptRepository } = require('../dist/services/data/ReceiptRepository');
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const {
   ImportPreferencesRepository,
@@ -12,6 +12,7 @@ const {
 } = require('../dist/services/data/ImportPreferencesRepository');
 const { PostgresService } = require('../dist/services/data/PostgresService');
 const { AccountResetService } = require('../dist/services/data/AccountResetService');
+const { ReceiptClearService } = require('../dist/services/account/ReceiptClearService');
 const {
   filterReceiptsAfterExportCutoffs,
   isGmailReconnectError,
@@ -182,7 +183,16 @@ test('clearing receipts prevents a granted tracking consent from remaining activ
     release: () => {},
   };
   const postgres = { getClient: async () => client };
-  await new ReceiptService(postgres).deleteReceiptsByUserId('user-id');
+  const lockHandle = {
+    userId: 'user-id', ownerToken: 'owner', backend: 'memory', acquiredAt: 0, expiresAt: 1,
+  };
+  const lock = {
+    acquireLockWithWait: async () => lockHandle,
+    assertLockOwned: async () => {},
+    releaseLock: async () => true,
+  };
+  const cache = { invalidateAllUserCaches: async () => {} };
+  await new ReceiptClearService(postgres, cache, lock).clearReceipts('user-id');
   const preferenceUpdate = queries.find(({ sql }) => sql.includes("gmail_import_status = 'never_started'"));
   assert.ok(preferenceUpdate);
   assert.match(preferenceUpdate.sql, /tracking_status = 'inactive'/);
@@ -236,16 +246,23 @@ test('onboarding account reset waits for imports and restores fresh import state
     release: () => {},
   };
   const postgres = { getClient: async () => client };
+  const lockHandle = {
+    userId: 'user-id', ownerToken: 'owner', backend: 'memory', acquiredAt: 0, expiresAt: 1,
+  };
   const lock = {
     acquireLockWithWait: async (userId, timeoutMs) => {
       assert.equal(userId, 'user-id');
       assert.equal(timeoutMs, 300000);
-      return true;
+      return lockHandle;
     },
+    assertLockOwned: async () => {},
     releaseLock: async () => { released = true; },
   };
+  const cache = { invalidateAllUserCaches: async () => {} };
+  const connectionHealth = { invalidate: () => {} };
 
-  const result = await new AccountResetService(postgres, lock).resetForOnboarding('user-id');
+  const result = await new AccountResetService(postgres, cache, connectionHealth, lock)
+    .resetForOnboarding('user-id');
 
   assert.deepEqual(result, { deletedReceipts: 257 });
   assert.equal(queries[0].sql, 'BEGIN');
@@ -271,7 +288,7 @@ test('dashboard insights use local time and keep email-only cards free of export
   const insights = buildDashboardInsights(receipts, 'America/Toronto', 'user-id', new Date('2026-08-11T12:00:00.000Z'));
   assert.ok(insights.some(insight => insight.id === 'favorite-day' && insight.headline === 'Friday'));
   assert.ok(insights.some(insight => insight.id === 'peak-hunger-hour' && insight.headline === '11 PM'));
-  assert.equal(insights.filter(insight => insight.presentation === 'locked').length <= 1, true);
+  assert.equal(insights.filter(insight => insight.presentation === 'locked').length, 1);
   assert.equal(insights.some(insight => insight.id === 'most-ordered-meal' || insight.id === 'detailed-biggest-order'), false);
   assert.notEqual(insights[0]?.presentation, 'locked');
 
@@ -281,7 +298,7 @@ test('dashboard insights use local time and keep email-only cards free of export
     lockedCounts.push(cards.filter(card => card.presentation === 'locked').length);
     assert.notEqual(cards[0]?.presentation, 'locked');
   }
-  assert.ok(lockedCounts.every(count => count <= 1), 'daily editions allow at most one locked preview');
+  assert.ok(lockedCounts.every(count => count === 1), 'every Gmail-only daily edition reserves one locked preview');
 });
 
 test('dashboard insights unlock item and delivery cards only when export receipts support them', () => {
@@ -368,14 +385,15 @@ test('wrapped metrics use the local weekday and only count real single-item data
       receiptType: 'uber_eats', dataSource: 'csv', deliveryTime: null,
     },
   ];
-  const pool = {
-    query: async (sql) => {
-      if (sql.includes('SELECT timezone')) return { rows: [{ timezone: 'America/Toronto' }] };
-      if (sql.includes('WITH per_user')) return { rows: [] };
-      return { rows };
-    },
+  const queries = {
+    getUserTimezone: async () => 'America/Toronto',
+    getUserReceipts: async () => rows.map(row => ({
+      ...row,
+      amountSpent: Number(row.amountSpent),
+    })),
+    getPercentileRanks: async () => null,
   };
-  const analytics = await new WrappedAnalyticsService(pool).calculateWrappedAnalytics('user-id');
+  const analytics = await new WrappedAnalyticsService(queries).calculateWrappedAnalytics('user-id');
 
   assert.equal(analytics.shame.laziestDay.date, '2023-12-10');
   assert.equal(analytics.shame.laziestDay.dayOfWeek, 'Sunday');
@@ -411,7 +429,8 @@ test('incremental Gmail upsert distinguishes new, updated, and unchanged orders'
     'user-id', [], 15, ReceiptType.UBER_EATS, 'New Place',
     new Date('2026-08-02T22:00:00.000Z'), DataSource.EMAIL, undefined, 'order-2'
   );
-  const result = await new ReceiptService(postgres).upsertEmailReceipts([unchanged, fresh]);
+  const result = await new ReceiptRepository(postgres)
+    .upsertEmailReceipts([unchanged, fresh], async () => {});
   assert.deepEqual(result, { newOrders: 1, updatedOrders: 0, unchangedOrders: 1 });
   assert.ok(queries.some(query => query.sql.includes('ON CONFLICT (user_id, data_source, source_identity)')));
 });
@@ -463,7 +482,7 @@ test('export replacement is scoped to its provider and preserves newer matching 
     new Date('2026-08-01T22:00:00.000Z'), DataSource.CSV
   );
 
-  await new CsvImportService(postgres).importReceipts([receipt], 'user-id');
+  await new CsvImportService(postgres).importReceipts([receipt], 'user-id', async () => {});
 
   const replacement = queries.find(query => query.sql.includes('DELETE FROM receipts'));
   assert.match(replacement.sql, /data_source = 'csv'/);
@@ -504,10 +523,11 @@ test('Google invalid_grant errors require Gmail reconnection', () => {
 });
 
 test('Gmail health validation is cached but import preflight can force a fresh check', async () => {
-  const postgres = { query: async () => ({ rows: [], rowCount: 1 }) };
-  const health = new GmailConnectionHealthService(postgres);
   let validations = 0;
-  health.gmail.validateConnection = async () => { validations += 1; };
+  const gmail = { validateConnection: async () => { validations += 1; } };
+  const users = { markGmailReconnectRequired: async () => {} };
+  const preferences = { markTrackingReconnectRequired: async () => {} };
+  const health = new GmailConnectionHealthService(gmail, users, preferences);
   const user = {
     id: 'user-id', email: 'user@example.com', gmailConnected: true,
     gmailRefreshToken: 'refresh-token', gmailConnectionMode: 'offline',
@@ -521,20 +541,16 @@ test('Gmail health validation is cached but import preflight can force a fresh c
 });
 
 test('proactive Gmail validation marks rejected grants for reconnection', async () => {
-  const queries = [];
-  const postgres = {
-    query: async (sql, params) => {
-      queries.push({ sql, params });
-      return { rows: [], rowCount: 1 };
-    },
-  };
-  const health = new GmailConnectionHealthService(postgres);
-  health.gmail.validateConnection = async () => { throw new Error('invalid_grant'); };
+  let markedReconnect = false;
+  const gmail = { validateConnection: async () => { throw new Error('invalid_grant'); } };
+  const users = { markGmailReconnectRequired: async () => { markedReconnect = true; } };
+  const preferences = { markTrackingReconnectRequired: async () => {} };
+  const health = new GmailConnectionHealthService(gmail, users, preferences);
   const result = await health.validate({
     id: 'user-id', email: 'user@example.com', gmailConnected: true,
     gmailRefreshToken: 'rejected-token', gmailConnectionMode: 'offline',
   });
 
   assert.equal(result.status, 'reconnect_required');
-  assert.ok(queries.some(query => query.sql.includes('gmail_refresh_token = NULL')));
+  assert.equal(markedReconnect, true);
 });

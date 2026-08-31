@@ -38,7 +38,8 @@ export class Receipt {
     // Delivery time for DoorDash (time when order was delivered)
     public deliveryTime?: Date,
     // External Provider ID (e.g. Uber Order UUID) for deduplication
-    public externalId?: string
+    public externalId?: string,
+    public readonly id?: string
   ) { }
 
   // Helper method to get total items count
@@ -64,7 +65,7 @@ export class Receipt {
   // Helper method to get clean receipt data for API responses
   toApiResponse() {
     return {
-      id: (this as any).id, // Will be set by database
+      id: this.id,
       userId: this.userId,
       items: this.items,
       amountSpent: this.amountSpent,
@@ -73,7 +74,7 @@ export class Receipt {
       orderDate: this.orderDate,
       dataSource: this.dataSource,
       deliveryTime: this.deliveryTime,
-      externalId: (this as any).externalId
+      externalId: this.externalId
     };
   }
 }

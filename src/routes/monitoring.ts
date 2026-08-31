@@ -8,10 +8,10 @@ import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { asyncHandler } from '../middleware/errorHandler';
 import { getLogLevel, setLogLevel, getRecentLogs } from '../config/logger';
-import { cacheService } from '../services/core/CacheService';
 import { validateApiKey } from '../middleware/security';
 
 const router = Router();
+const cacheService = container.cacheService;
 
 /**
  * @swagger
@@ -735,4 +735,3 @@ router.get('/query-performance', validateApiKey, asyncHandler(async (req: Reques
 }));
 
 export default router;
-

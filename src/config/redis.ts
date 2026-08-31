@@ -6,6 +6,8 @@
  */
 
 import { createClient, RedisClientType } from 'redis';
+import { config as appConfig } from './AppConfig';
+import logger from './logger';
 
 interface RedisConfig {
   url: string;
@@ -24,15 +26,13 @@ class RedisConfigManager {
   }
 
   private loadConfig(): RedisConfig {
-    const url = process.env.REDIS_URL || 'redis://localhost:6379';
-    const password = process.env.REDIS_PASSWORD;
-    const enabled = process.env.REDIS_ENABLED !== 'false'; // Enabled by default if URL is set
+    const redis = appConfig.getRedisConfig();
 
     return {
-      url,
-      password,
-      enabled,
-      defaultTTL: 300, // 5 minutes default cache
+      url: redis.url,
+      password: redis.password,
+      enabled: redis.enabled,
+      defaultTTL: redis.defaultTTLSeconds,
     };
   }
 
@@ -41,7 +41,7 @@ class RedisConfigManager {
    */
   async initialize(): Promise<void> {
     if (!this.config.enabled) {
-      console.log('ℹ️  Redis caching disabled (set REDIS_URL to enable)');
+      logger.info('Redis caching disabled');
       return;
     }
 
@@ -58,7 +58,7 @@ class RedisConfigManager {
         socket: {
           reconnectStrategy: (retries) => {
             if (retries > 10) {
-              console.error('❌ Redis connection failed after 10 retries');
+              logger.error('Redis connection retry limit reached', { retries });
               return new Error('Redis connection failed');
             }
             return Math.min(retries * 100, 3000); // Exponential backoff, max 3s
@@ -67,15 +67,15 @@ class RedisConfigManager {
       });
 
       this.client.on('error', (err) => {
-        console.error('Redis Client Error:', err);
+        logger.error('Redis client error', { error: err });
       });
 
       this.client.on('connect', () => {
-        console.log('✅ Redis connected');
+        logger.info('Redis connected');
       });
 
       this.client.on('reconnecting', () => {
-        console.log('🔄 Redis reconnecting...');
+        logger.warn('Redis reconnecting');
       });
 
       await this.client.connect();
@@ -83,12 +83,10 @@ class RedisConfigManager {
       // Test connection
       await this.client.ping();
       
-      console.log(`✅ Redis cache initialized (${this.config.url})`);
-      console.log(`   Default TTL: ${this.config.defaultTTL}s`);
+      logger.info('Redis cache initialized', { defaultTtlSeconds: this.config.defaultTTL });
       
     } catch (error) {
-      console.error('❌ Failed to connect to Redis:', error);
-      console.log('ℹ️  Continuing without caching (degraded performance)');
+      logger.error('Failed to connect to Redis; caching unavailable', { error });
       this.client = null;
     } finally {
       this.connecting = false;
@@ -109,6 +107,10 @@ class RedisConfigManager {
     return this.client !== null && this.client.isOpen;
   }
 
+  isEnabled(): boolean {
+    return this.config.enabled;
+  }
+
   /**
    * Get a cached value
    */
@@ -120,7 +122,7 @@ class RedisConfigManager {
     try {
       return await this.client!.get(key);
     } catch (error) {
-      console.error(`Redis GET error for key ${key}:`, error);
+      logger.error('Redis get failed', { error });
       return null;
     }
   }
@@ -138,7 +140,7 @@ class RedisConfigManager {
       await this.client!.setEx(key, ttl, value);
       return true;
     } catch (error) {
-      console.error(`Redis SET error for key ${key}:`, error);
+      logger.error('Redis set failed', { error });
       return false;
     }
   }
@@ -155,7 +157,7 @@ class RedisConfigManager {
       await this.client!.del(key);
       return true;
     } catch (error) {
-      console.error(`Redis DEL error for key ${key}:`, error);
+      logger.error('Redis delete failed', { error });
       return false;
     }
   }
@@ -178,7 +180,49 @@ class RedisConfigManager {
       });
       return result === 'OK';
     } catch (error) {
-      console.error(`Redis SETNX error for key ${key}:`, error);
+      logger.error('Redis conditional set failed', { error });
+      return false;
+    }
+  }
+
+  /** Delete a distributed lock only when the caller still owns it. */
+  async deleteIfValueMatches(key: string, expectedValue: string): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+
+    try {
+      const result = await this.client!.eval(
+        `if redis.call('get', KEYS[1]) == ARGV[1] then
+           return redis.call('del', KEYS[1])
+         end
+         return 0`,
+        { keys: [key], arguments: [expectedValue] }
+      );
+      return Number(result) === 1;
+    } catch (error) {
+      logger.error('Redis compare-and-delete failed', { error });
+      return false;
+    }
+  }
+
+  /** Extend a distributed lock lease only when the caller still owns it. */
+  async expireIfValueMatches(
+    key: string,
+    expectedValue: string,
+    ttlSeconds: number
+  ): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+
+    try {
+      const result = await this.client!.eval(
+        `if redis.call('get', KEYS[1]) == ARGV[1] then
+           return redis.call('expire', KEYS[1], ARGV[2])
+         end
+         return 0`,
+        { keys: [key], arguments: [expectedValue, String(ttlSeconds)] }
+      );
+      return Number(result) === 1;
+    } catch (error) {
+      logger.error('Redis compare-and-expire failed', { error });
       return false;
     }
   }
@@ -195,7 +239,7 @@ class RedisConfigManager {
       const count = await this.client!.exists(key);
       return count > 0;
     } catch (error) {
-      console.error(`Redis EXISTS error for key ${key}:`, error);
+      logger.error('Redis exists check failed', { error });
       return false;
     }
   }
@@ -209,14 +253,14 @@ class RedisConfigManager {
     }
 
     try {
-      const keys = await this.client!.keys(pattern);
-      if (keys.length === 0) {
-        return 0;
+      let deleted = 0;
+      for await (const keys of this.client!.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+        if (keys.length === 0) continue;
+        deleted += await this.client!.del(keys);
       }
-      await this.client!.del(keys);
-      return keys.length;
+      return deleted;
     } catch (error) {
-      console.error(`Redis DEL pattern error for ${pattern}:`, error);
+      logger.error('Redis pattern delete failed', { error });
       return 0;
     }
   }
@@ -237,7 +281,7 @@ class RedisConfigManager {
         memory: this.parseMemoryUsage(info)
       };
     } catch (error) {
-      console.error('Redis stats error:', error);
+      logger.error('Redis stats read failed', { error });
       return null;
     }
   }
@@ -252,13 +296,12 @@ class RedisConfigManager {
    */
   async close(): Promise<void> {
     if (this.client && this.client.isOpen) {
-      console.log('🔌 Closing Redis connection...');
+      logger.info('Closing Redis connection');
       await this.client.quit();
-      console.log('✅ Redis connection closed');
+      logger.info('Redis connection closed');
     }
   }
 }
 
 // Export singleton instance
 export const redisConfig = new RedisConfigManager();
-

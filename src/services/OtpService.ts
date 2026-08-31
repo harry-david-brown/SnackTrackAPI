@@ -8,7 +8,7 @@
 import bcrypt from 'bcryptjs';
 import { PostgresService } from './data/PostgresService';
 import { authConfig } from '../config/auth';
-import { AuthenticationError } from '../middleware/errorHandler';
+import { AuthenticationError } from '../core/errors';
 
 export type CodeType = 'password_reset' | 'email_verification';
 
@@ -153,4 +153,3 @@ export class OtpService {
     return result.rowCount || 0;
   }
 }
-

@@ -538,7 +538,11 @@ export class CsvImportService {
    * Import receipts to database
    * Uses batch insert for performance (much faster than individual inserts)
    */
-  async importReceipts(receipts: Receipt[], userId: string): Promise<void> {
+  async importReceipts(
+    receipts: Receipt[],
+    userId: string,
+    assertWriteAllowed: () => Promise<void>
+  ): Promise<void> {
     if (receipts.length === 0) return;
 
     const receiptTypes = [...new Set(receipts.map(receipt => receipt.receiptType))];
@@ -558,6 +562,7 @@ export class CsvImportService {
 
     try {
       await client.query('BEGIN');
+      await assertWriteAllowed();
 
       // Replace only this provider's previous export. Preserve every receipt
       // from other providers, plus same-provider Gmail orders newer than this
@@ -606,6 +611,7 @@ export class CsvImportService {
         `, values);
       }
 
+      await assertWriteAllowed();
       await client.query('COMMIT');
     } catch (error: any) {
       await client.query('ROLLBACK');

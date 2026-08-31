@@ -204,7 +204,7 @@ export const securityHeaders = helmet({
 // CORS configuration
 export const corsConfig = cors({
   origin: config.isProduction() 
-    ? (process.env.CORS_ORIGIN?.split(',') || ['https://snacktrack.app']) 
+    ? [...config.getSecurityConfig().corsOrigins]
     : true, // Allow all origins in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -257,7 +257,7 @@ export const ipWhitelist = (allowedIPs: string[]) => {
 // API key validation middleware (for sensitive endpoints)
 export const validateApiKey = (req: Request, res: Response, next: NextFunction) => {
   const apiKey = req.get('X-API-Key') || req.query.apiKey;
-  const validApiKey = process.env.API_KEY?.trim();
+  const validApiKey = config.getSecurityConfig().apiKey;
   
   if (!validApiKey) {
     console.error('❌ API_KEY environment variable is not configured for protected admin endpoint access');

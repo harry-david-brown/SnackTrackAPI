@@ -3,6 +3,7 @@
  * 
  * Manages JWT token settings and authentication-related configuration
  */
+import { config as appConfig } from './AppConfig';
 
 export interface AuthConfig {
   jwt: {
@@ -31,12 +32,13 @@ class AuthConfigManager {
   }
 
   private loadConfig(): AuthConfig {
+    const auth = appConfig.getAuthConfig();
     return {
       jwt: {
-        secret: process.env.JWT_SECRET?.trim() || '',
-        refreshSecret: process.env.JWT_REFRESH_SECRET?.trim() || '',
-        accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
-        refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY || '7d'
+        secret: auth.jwtSecret,
+        refreshSecret: auth.jwtRefreshSecret,
+        accessTokenExpiry: auth.accessTokenExpiry,
+        refreshTokenExpiry: auth.refreshTokenExpiry
       },
       bcrypt: {
         saltRounds: 12 // High security, good balance of speed and security

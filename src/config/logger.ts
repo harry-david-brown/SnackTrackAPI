@@ -24,12 +24,7 @@ import { config } from './AppConfig';
 const { combine, timestamp, errors, json, printf, colorize } = winston.format;
 
 // Dynamic log level (can be changed at runtime without restart)
-let currentLogLevel: string = (() => {
-  if (process.env.LOG_LEVEL) {
-    return process.env.LOG_LEVEL.toLowerCase();
-  }
-  return 'info';
-})();
+let currentLogLevel: string = config.getObservabilityConfig().logLevel;
 
 // Get current log level
 export const getLogLevel = (): string => {
@@ -298,6 +293,45 @@ const logBuffer: Array<{
 }> = [];
 const MAX_BUFFER_SIZE = 1000;
 
+const isSensitiveLogKey = (key: string): boolean => {
+  const normalized = key.replace(/[_-]/g, '').toLowerCase();
+  return normalized.includes('token')
+    || normalized.includes('password')
+    || normalized.includes('secret')
+    || normalized.includes('authorization')
+    || normalized.includes('cookie')
+    || normalized.includes('verificationcode')
+    || normalized.includes('resetcode')
+    || normalized === 'otp'
+    || normalized.includes('emailbody')
+    || normalized.includes('emailcontent')
+    || normalized.includes('rawemail')
+    || normalized.includes('receiptpayload');
+};
+
+export const redactLogMetadata = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (Array.isArray(value)) return value.map((entry) => redactLogMetadata(entry, seen));
+  if (typeof value !== 'object' || value === null) return value;
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message, stack: value.stack };
+  }
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    isSensitiveLogKey(key) ? '[REDACTED]' : redactLogMetadata(entry, seen),
+  ]));
+};
+
+const redactionFormat = winston.format((info) => {
+  for (const [key, value] of Object.entries(info)) {
+    if (isSensitiveLogKey(key)) info[key] = '[REDACTED]';
+    else if (typeof value === 'object' && value !== null) info[key] = redactLogMetadata(value);
+  }
+  return info;
+});
+
 // Custom format to capture logs in memory buffer
 // This will be added to the console transport format
 const memoryCaptureFormat = winston.format((info) => {
@@ -324,16 +358,17 @@ export const logger = winston.createLogger({
   // Don't set default format here - each transport will have its own format
   defaultMeta: {
     service: 'snack-track-api',
-    environment: config.isProduction() ? 'production' : 'development',
-    ...(process.env.RAILWAY_ENVIRONMENT && {
-      railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
-      railwayServiceId: process.env.RAILWAY_SERVICE_ID
+    environment: config.getEnvironment(),
+    ...(config.getObservabilityConfig().railwayEnvironment && {
+      railwayEnvironment: config.getObservabilityConfig().railwayEnvironment,
+      railwayServiceId: config.getObservabilityConfig().railwayServiceId
     })
   },
   transports: [
     // Console transport - ALWAYS human-readable format (clean, scannable)
     new winston.transports.Console({
       format: combine(
+        redactionFormat(),
         memoryCaptureFormat(), // Capture logs in memory buffer (must be first)
         errors({ stack: true }), // Capture stack traces
         timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
@@ -352,6 +387,7 @@ export const logger = winston.createLogger({
   exceptionHandlers: [
     new winston.transports.Console({
       format: combine(
+        redactionFormat(),
         errors({ stack: true }),
         timestamp({ format: 'HH:mm:ss' }),
         config.isDevelopment() ? colorize() : winston.format((info) => info)(),
@@ -362,6 +398,7 @@ export const logger = winston.createLogger({
   rejectionHandlers: [
     new winston.transports.Console({
       format: combine(
+        redactionFormat(),
         errors({ stack: true }),
         timestamp({ format: 'HH:mm:ss' }),
         config.isDevelopment() ? colorize() : winston.format((info) => info)(),
@@ -396,7 +433,7 @@ export const getRecentLogs = (options?: {
 };
 
 // Add Better Stack/Logtail transport (optional - sends JSON for aggregation)
-const logtailToken = process.env.LOGTAIL_TOKEN;
+const logtailToken = config.getObservabilityConfig().logtailToken;
 if (logtailToken) {
   try {
     const { Logtail } = require('@logtail/node');
@@ -406,6 +443,7 @@ if (logtailToken) {
     logger.add(new LogtailTransport(logtail, {
       level: getLogLevel(),
       format: combine(
+        redactionFormat(),
         timestamp(),
         json() // JSON format for Better Stack
       )

@@ -1,160 +1,210 @@
-/**
- * Import Lock Service
- * 
- * Prevents concurrent import operations for the same user.
- * Uses Redis for distributed locking (works across multiple servers).
- * Falls back to in-memory locking if Redis is unavailable.
- * 
- * Features:
- * - Distributed lock via Redis SETNX
- * - Automatic lock expiry (prevents deadlocks if server crashes)
- * - In-memory fallback for single-server deployments
- */
-
+import { randomUUID } from 'crypto';
+import { config } from '../../config/AppConfig';
+import { logger } from '../../config/logger';
 import { redisConfig } from '../../config/redis';
 
+export type ImportLockBackend = 'redis' | 'memory';
+
+export interface ImportLockHandle {
+  readonly userId: string;
+  readonly ownerToken: string;
+  readonly backend: ImportLockBackend;
+  readonly acquiredAt: number;
+  readonly expiresAt: number;
+}
+
+interface InMemoryLock {
+  ownerToken: string;
+  expiresAt: number;
+}
+
+interface RenewalState {
+  timer: NodeJS.Timeout;
+  lostOwnership: boolean;
+}
+
+export class ImportLockOwnershipLostError extends Error {
+  readonly code = 'LOCK_OWNERSHIP_LOST';
+
+  constructor() {
+    super('The user receipt writer lock lease was lost.');
+    this.name = 'ImportLockOwnershipLostError';
+  }
+}
+
+/** Coordinates every receipt/import-lifecycle writer for one user. */
 export class ImportLockService {
   private static readonly LOCK_PREFIX = 'import_lock:';
-  private static readonly LOCK_TTL_SECONDS = 600; // 10 minutes max import time
-  
-  // In-memory fallback for when Redis is unavailable
-  private static inMemoryLocks = new Map<string, { expiresAt: number }>();
+  private static readonly LOCK_TTL_SECONDS = 600;
+  private static readonly RENEWAL_INTERVAL_MS = 200000;
+  private static readonly inMemoryLocks = new Map<string, InMemoryLock>();
+  private static readonly renewalStates = new Map<string, RenewalState>();
 
-  /**
-   * Try to acquire an import lock for a user
-   * Returns true if lock acquired, false if already locked
-   */
-  static async acquireLock(userId: string): Promise<boolean> {
-    const lockKey = `${this.LOCK_PREFIX}${userId}`;
-    const lockValue = `${Date.now()}`; // Timestamp as lock value for debugging
+  static async acquireLock(userId: string): Promise<ImportLockHandle | null> {
+    const ownerToken = randomUUID();
+    const acquiredAt = Date.now();
+    const expiresAt = acquiredAt + this.LOCK_TTL_SECONDS * 1000;
+    const lockKey = this.lockKey(userId);
 
-    // Try Redis first
     if (redisConfig.isAvailable()) {
-      const acquired = await redisConfig.setNX(lockKey, lockValue, this.LOCK_TTL_SECONDS);
-      if (acquired) {
-        console.log(`🔒 Acquired import lock for user ${userId} (Redis)`);
-      } else {
-        console.log(`⚠️  Import already in progress for user ${userId} (Redis lock exists)`);
-      }
-      return acquired;
+      const acquired = await redisConfig.setNX(
+        lockKey,
+        ownerToken,
+        this.LOCK_TTL_SECONDS
+      );
+      if (!acquired) return null;
+
+      logger.info('User receipt writer lock acquired', { userId, backend: 'redis' });
+      const handle = { userId, ownerToken, backend: 'redis' as const, acquiredAt, expiresAt };
+      this.startRenewal(handle);
+      return handle;
     }
 
-    // Fallback to in-memory locking
-    return this.acquireInMemoryLock(userId);
+    // Production must fail closed when Redis was configured but is unavailable.
+    // The fallback coordinates only this Node process and is safe solely for a
+    // deliberately Redis-free deployment or local/test execution.
+    if (redisConfig.isEnabled() && config.isProduction()) {
+      logger.error('User receipt writer lock unavailable', {
+        userId,
+        backend: 'redis',
+        errorCode: 'LOCK_BACKEND_UNAVAILABLE',
+      });
+      return null;
+    }
+
+    this.cleanupExpiredInMemoryLocks();
+    const existing = this.inMemoryLocks.get(userId);
+    if (existing && existing.expiresAt > acquiredAt) return null;
+
+    this.inMemoryLocks.set(userId, { ownerToken, expiresAt });
+    logger.warn('User receipt writer lock acquired with single-process fallback', {
+      userId,
+      backend: 'memory',
+    });
+    const handle = { userId, ownerToken, backend: 'memory' as const, acquiredAt, expiresAt };
+    this.startRenewal(handle);
+    return handle;
   }
 
-  /** Wait for the user's current import to finish, then acquire its lock. */
   static async acquireLockWithWait(
     userId: string,
     timeoutMs = 300000,
     pollIntervalMs = 250
-  ): Promise<boolean> {
+  ): Promise<ImportLockHandle | null> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
 
     do {
-      if (!await this.isLocked(userId) && await this.acquireLock(userId)) return true;
-      if (Date.now() >= deadline) return false;
+      const handle = await this.acquireLock(userId);
+      if (handle) return handle;
+      if (Date.now() >= deadline) return null;
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     } while (Date.now() < deadline);
 
-    return false;
+    return null;
   }
 
-  /**
-   * Release an import lock for a user
-   */
-  static async releaseLock(userId: string): Promise<void> {
-    const lockKey = `${this.LOCK_PREFIX}${userId}`;
-
-    // Release from Redis
-    if (redisConfig.isAvailable()) {
-      await redisConfig.del(lockKey);
-      console.log(`🔓 Released import lock for user ${userId} (Redis)`);
+  static async renewLock(handle: ImportLockHandle): Promise<boolean> {
+    if (handle.backend === 'redis') {
+      return redisConfig.expireIfValueMatches(
+        this.lockKey(handle.userId),
+        handle.ownerToken,
+        this.LOCK_TTL_SECONDS
+      );
     }
 
-    // Also release from in-memory (in case Redis became unavailable mid-import)
-    this.releaseInMemoryLock(userId);
-  }
-
-  /**
-   * Check if a user has an active import lock
-   */
-  static async isLocked(userId: string): Promise<boolean> {
-    const lockKey = `${this.LOCK_PREFIX}${userId}`;
-
-    // Check Redis first
-    if (redisConfig.isAvailable()) {
-      return await redisConfig.exists(lockKey);
-    }
-
-    // Fallback to in-memory check
-    return this.isInMemoryLocked(userId);
-  }
-
-  /**
-   * In-memory lock acquisition (fallback)
-   */
-  private static acquireInMemoryLock(userId: string): boolean {
-    // Clean up expired locks first
-    this.cleanupExpiredInMemoryLocks();
-
-    const existing = this.inMemoryLocks.get(userId);
-    if (existing && existing.expiresAt > Date.now()) {
-      console.log(`⚠️  Import already in progress for user ${userId} (in-memory lock exists)`);
-      return false;
-    }
-
-    // Acquire the lock
-    this.inMemoryLocks.set(userId, {
-      expiresAt: Date.now() + (this.LOCK_TTL_SECONDS * 1000)
-    });
-    console.log(`🔒 Acquired import lock for user ${userId} (in-memory)`);
+    const current = this.inMemoryLocks.get(handle.userId);
+    if (!current || current.ownerToken !== handle.ownerToken) return false;
+    current.expiresAt = Date.now() + this.LOCK_TTL_SECONDS * 1000;
     return true;
   }
 
-  /**
-   * In-memory lock release (fallback)
-   */
-  private static releaseInMemoryLock(userId: string): void {
-    if (this.inMemoryLocks.has(userId)) {
-      this.inMemoryLocks.delete(userId);
-      console.log(`🔓 Released import lock for user ${userId} (in-memory)`);
+  static async assertLockOwned(handle: ImportLockHandle): Promise<void> {
+    const state = this.renewalStates.get(handle.ownerToken);
+    if (!state || state.lostOwnership || !await this.renewLock(handle)) {
+      if (state) state.lostOwnership = true;
+      throw new ImportLockOwnershipLostError();
     }
   }
 
-  /**
-   * Check if user has in-memory lock
-   */
+  static async releaseLock(handle: ImportLockHandle): Promise<boolean> {
+    this.stopRenewal(handle.ownerToken);
+    let released = false;
+    if (handle.backend === 'redis') {
+      released = await redisConfig.deleteIfValueMatches(
+        this.lockKey(handle.userId),
+        handle.ownerToken
+      );
+    } else {
+      const current = this.inMemoryLocks.get(handle.userId);
+      if (current?.ownerToken === handle.ownerToken) {
+        released = this.inMemoryLocks.delete(handle.userId);
+      }
+    }
+
+    logger.info('User receipt writer lock release attempted', {
+      userId: handle.userId,
+      backend: handle.backend,
+      outcome: released ? 'released' : 'ownership_lost',
+    });
+    return released;
+  }
+
+  static async isLocked(userId: string): Promise<boolean> {
+    if (redisConfig.isAvailable()) {
+      return redisConfig.exists(this.lockKey(userId));
+    }
+    return this.isInMemoryLocked(userId);
+  }
+
+  static getInMemoryLockCount(): number {
+    this.cleanupExpiredInMemoryLocks();
+    return this.inMemoryLocks.size;
+  }
+
+  private static lockKey(userId: string): string {
+    return `${this.LOCK_PREFIX}${userId}`;
+  }
+
   private static isInMemoryLocked(userId: string): boolean {
     const existing = this.inMemoryLocks.get(userId);
     if (!existing) return false;
-    
-    // Check if expired
     if (existing.expiresAt <= Date.now()) {
       this.inMemoryLocks.delete(userId);
       return false;
     }
-    
     return true;
   }
 
-  /**
-   * Clean up expired in-memory locks
-   */
   private static cleanupExpiredInMemoryLocks(): void {
     const now = Date.now();
     for (const [userId, lock] of this.inMemoryLocks.entries()) {
-      if (lock.expiresAt <= now) {
-        this.inMemoryLocks.delete(userId);
-      }
+      if (lock.expiresAt <= now) this.inMemoryLocks.delete(userId);
     }
   }
 
-  /**
-   * Get current lock count (for monitoring/debugging)
-   */
-  static getInMemoryLockCount(): number {
-    this.cleanupExpiredInMemoryLocks();
-    return this.inMemoryLocks.size;
+  private static startRenewal(handle: ImportLockHandle): void {
+    const state: RenewalState = {
+      lostOwnership: false,
+      timer: setInterval(() => {
+        void this.renewLock(handle).then((renewed) => {
+          if (renewed) return;
+          state.lostOwnership = true;
+          clearInterval(state.timer);
+          logger.error('User receipt writer lock lease lost', {
+            userId: handle.userId,
+            backend: handle.backend,
+            errorCode: 'LOCK_OWNERSHIP_LOST',
+          });
+        });
+      }, this.RENEWAL_INTERVAL_MS),
+    };
+    state.timer.unref();
+    this.renewalStates.set(handle.ownerToken, state);
+  }
+
+  private static stopRenewal(ownerToken: string): void {
+    const state = this.renewalStates.get(ownerToken);
+    if (state) clearInterval(state.timer);
+    this.renewalStates.delete(ownerToken);
   }
 }

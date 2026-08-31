@@ -445,10 +445,35 @@ test('daily selection is deterministic, varied, category-aware, and capped at se
   const next = selectDailyInsights(candidates, 'user-id', '2026-08-14', DASHBOARD_INSIGHT_METRIC_VERSION);
   assert.deepEqual(first, repeat);
   assert.equal(first.length, 7);
-  assert.equal(first.filter(card => card.presentation === 'locked').length, 0, 'locked cards never displace seven real cards');
+  assert.equal(first.filter(card => card.presentation === 'locked').length, 1, 'Gmail-only editions reserve one locked preview slot');
+  assert.equal(first.at(-1).presentation, 'locked');
   assert.ok(new Set(first.map(card => card.category)).size >= 3);
   assert.notDeepEqual(first.map(card => card.id), next.map(card => card.id));
   assert.notEqual(first[0].id, next[0].id);
+});
+
+test('Gmail-only locked previews survive large-catalogue cooldown selection', () => {
+  const candidates = Array.from({ length: 21 }, (_, index) => ({
+    family: `cooldown-family-${index}`,
+    score: 70 + index,
+    insight: {
+      id: `cooldown-insight-${index}`,
+      presentation: 'hero',
+      category: ['favorites', 'habits', 'extremes', 'progress'][index % 4],
+      icon: 'sparkles', eyebrow: 'Test', title: `Insight ${index}`, value: index, valueFormat: 'number',
+    },
+  }));
+  candidates.push({
+    family: 'locked', score: 20, locked: true,
+    insight: { id: 'locked', presentation: 'locked', category: 'favorites', icon: 'lock', eyebrow: 'Locked', title: 'Locked', action: 'open_export' },
+  });
+
+  for (let day = 13; day <= 16; day++) {
+    const edition = selectDailyInsights(candidates, 'gmail-only-user', `2026-08-${day}`, DASHBOARD_INSIGHT_METRIC_VERSION);
+    assert.equal(edition.length, 7);
+    assert.equal(edition.filter(card => card.presentation === 'locked').length, 1);
+    assert.equal(edition.at(-1).presentation, 'locked');
+  }
 });
 
 test('large catalogues enforce a two-day cooldown without shrinking the edition', () => {
@@ -527,6 +552,21 @@ test('edition metadata and next local midnight are correct across DST', () => {
   assert.equal(edition.metricVersion, DASHBOARD_INSIGHT_METRIC_VERSION);
   assert.equal(edition.insights.length, 0);
   assert.equal(edition.nextRefreshAt, '2026-08-14T04:00:00.000Z');
+});
+
+test('edition exposes partial export coverage only for exactly one supported provider', () => {
+  const uber = receipt({ date: '2026-08-01T18:00:00.000Z' });
+  const doorDash = new Receipt(
+    'user-id', [], 25, ReceiptType.DOORDASH, 'DoorDash Kitchen',
+    new Date('2026-08-02T18:00:00.000Z'), DataSource.CSV,
+  );
+  const gmail = receipt({ date: '2026-08-03T18:00:00.000Z', source: DataSource.EMAIL });
+  const now = new Date('2026-08-13T15:00:00.000Z');
+
+  assert.equal(buildDashboardInsightEdition([uber], 'UTC', 'user-id', now).partialExportProvider, 'uber_eats');
+  assert.equal(buildDashboardInsightEdition([doorDash], 'UTC', 'user-id', now).partialExportProvider, 'doordash');
+  assert.equal(buildDashboardInsightEdition([uber, doorDash], 'UTC', 'user-id', now).partialExportProvider, undefined);
+  assert.equal(buildDashboardInsightEdition([gmail], 'UTC', 'user-id', now).partialExportProvider, undefined);
 });
 
 test('development day previews advance by local calendar date across DST', () => {

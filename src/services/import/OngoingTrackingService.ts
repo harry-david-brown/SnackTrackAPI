@@ -1,8 +1,8 @@
-import { PostgresService } from '../data/PostgresService';
 import { UserRepository } from '../data/UserRepository';
 import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
 import { GmailImportService, GmailImportResult } from './GmailImportService';
 import { ImportLockService } from './ImportLockService';
+import logger from '../../config/logger';
 
 export interface TrackingBatchResult {
   eligible: number;
@@ -15,14 +15,13 @@ export interface TrackingBatchResult {
 
 /** Runs consented receipt checks from either the app or an external scheduler. */
 export class OngoingTrackingService {
-  private users: UserRepository;
-  private preferences: ImportPreferencesRepository;
   private batchRunning = false;
 
-  constructor(private postgres: PostgresService) {
-    this.users = new UserRepository(postgres);
-    this.preferences = new ImportPreferencesRepository(postgres);
-  }
+  constructor(
+    private readonly users: UserRepository,
+    private readonly preferences: ImportPreferencesRepository,
+    private readonly gmailImport: GmailImportService,
+  ) {}
 
   async checkUser(userId: string): Promise<GmailImportResult | null> {
     const [user, preferences] = await Promise.all([
@@ -46,11 +45,12 @@ export class OngoingTrackingService {
       return null;
     }
 
-    if (!await ImportLockService.acquireLock(userId)) return null;
+    const lockHandle = await ImportLockService.acquireLock(userId);
+    if (!lockHandle) return null;
     try {
-      return await new GmailImportService(this.postgres).importFromGmail(user, 'background');
+      return await this.gmailImport.importFromGmail(user, lockHandle, 'background');
     } finally {
-      await ImportLockService.releaseLock(userId);
+      await ImportLockService.releaseLock(lockHandle);
     }
   }
 
@@ -82,10 +82,21 @@ export class OngoingTrackingService {
           summary.newOrders += result.newOrders;
           summary.updatedOrders += result.updatedOrders;
           if (!result.success) summary.failed++;
-        } catch {
+        } catch (error) {
           summary.failed++;
+          logger.warn('Background Gmail tracking failed for user', {
+            userId,
+            operation: 'gmail_tracking',
+            outcome: 'failure',
+            error,
+          });
         }
       }
+      logger.info('Background Gmail tracking batch finished', {
+        operation: 'gmail_tracking_batch',
+        outcome: summary.failed > 0 ? 'partial_failure' : 'success',
+        ...summary,
+      });
       return summary;
     } finally {
       this.batchRunning = false;

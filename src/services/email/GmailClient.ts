@@ -22,23 +22,21 @@ interface GmailOAuthConfig {
 
 export class GmailClient implements EmailClient {
   private getRequiredOAuthConfig(): GmailOAuthConfig {
-    const clientId = process.env.GMAIL_CLIENT_ID?.trim();
-    const clientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
-    const redirectUri = process.env.GMAIL_REDIRECT_URI?.trim();
+    const { clientId, clientSecret, redirectUri } = config.getGmailConfig();
 
-    const missingVars: string[] = [];
-    if (!clientId) missingVars.push('GMAIL_CLIENT_ID');
-    if (!clientSecret) missingVars.push('GMAIL_CLIENT_SECRET');
-    if (!redirectUri) missingVars.push('GMAIL_REDIRECT_URI');
-
-    if (missingVars.length > 0) {
+    if (!clientId || !clientSecret || !redirectUri) {
+      const missingVars = [
+        !clientId && 'GMAIL_CLIENT_ID',
+        !clientSecret && 'GMAIL_CLIENT_SECRET',
+        !redirectUri && 'GMAIL_REDIRECT_URI',
+      ].filter((name): name is string => Boolean(name));
       throw new Error(`Missing required Gmail OAuth environment variables: ${missingVars.join(', ')}`);
     }
 
     return {
-      clientId: clientId!,
-      clientSecret: clientSecret!,
-      redirectUri: redirectUri!,
+      clientId,
+      clientSecret,
+      redirectUri,
     };
   }
 

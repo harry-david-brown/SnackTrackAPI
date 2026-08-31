@@ -264,7 +264,7 @@ export class ImportPreferencesRepository {
        WHERE user_id = $1`,
       [userId, decision, consentVersion || null]
     );
-    if (updateResult.rowCount > 0) {
+    if ((updateResult.rowCount ?? 0) > 0) {
       await this.recordEvent(userId, `monitoring_consent_${decision}`, {
         consentVersion: consentVersion || null,
       });
@@ -283,7 +283,7 @@ export class ImportPreferencesRepository {
        WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
       [userId, provider]
     );
-    if (updateResult.rowCount > 0) {
+    if ((updateResult.rowCount ?? 0) > 0) {
       await this.recordEvent(userId, 'export_requested', { provider });
     }
   }
@@ -316,10 +316,10 @@ export class ImportPreferencesRepository {
       failed: 'export_failed',
     };
     const eventName = eventNameByStatus[status];
-    if (result.rowCount > 0 && eventName) {
+    if ((result.rowCount ?? 0) > 0 && eventName) {
       await this.recordEvent(userId, eventName, { provider });
     }
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async confirmExportReady(userId: string, provider: ExportProvider): Promise<boolean> {
@@ -337,10 +337,10 @@ export class ImportPreferencesRepository {
          AND status <> 'import_processing'`,
       [userId, provider]
     );
-    if (result.rowCount > 0) {
+    if ((result.rowCount ?? 0) > 0) {
       await this.recordEvent(userId, 'export_file_ready', { provider, source: 'user_confirmed' });
     }
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async setOngoingTrackingConsent(

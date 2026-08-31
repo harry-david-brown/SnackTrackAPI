@@ -15,6 +15,7 @@
 import * as Sentry from '@sentry/node';
 import { Express } from 'express';
 import { logger } from './logger';
+import { config as appConfig } from './AppConfig';
 
 interface SentryConfig {
   dsn: string;
@@ -33,9 +34,10 @@ class SentryConfigManager {
   }
 
   private loadConfig(): SentryConfig {
-    const dsn = process.env.SENTRY_DSN || '';
-    const environment = process.env.NODE_ENV || 'development';
-    const release = process.env.SENTRY_RELEASE || this.getVersion();
+    const observability = appConfig.getObservabilityConfig();
+    const dsn = observability.sentryDsn || '';
+    const environment = appConfig.getEnvironment();
+    const release = observability.sentryRelease || this.getVersion();
 
     const enabled = !!dsn && environment !== 'test';
 
@@ -294,4 +296,3 @@ class SentryConfigManager {
 
 // Export singleton instance
 export const sentryConfig = new SentryConfigManager();
-

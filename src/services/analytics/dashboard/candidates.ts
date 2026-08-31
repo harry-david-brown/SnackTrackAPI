@@ -683,7 +683,7 @@ function addInvestmentStory(dataset: DashboardDataset, eligible: InsightCandidat
 }
 
 function addLockedCandidate(dataset: DashboardDataset, eligible: InsightCandidate[]) {
-  if (dataset.positive.length < 3 || dataset.exportReceipts.length) return;
+  if (dataset.sourceCoverage !== 'email') return;
   add(eligible, { id: 'locked-menu-soulmate', presentation: 'locked', category: 'favorites', icon: 'lock', eyebrow: 'Hidden in your history', title: 'What is your exact menu soulmate?', detail: 'An Uber data export includes the items needed to find your most repeated basket.', action: 'open_export' }, 'locked-export', 20, { locked: true });
   add(eligible, { id: 'locked-item-obsession', presentation: 'locked', category: 'favorites', icon: 'lock', eyebrow: 'Quantity unknown', title: 'How many hash browns are in your history?', detail: 'Export item details can reveal the physical totals hiding in your order history.', action: 'open_export' }, 'locked-export', 20, { locked: true });
   add(eligible, { id: 'locked-delivery-record', presentation: 'locked', category: 'extremes', icon: 'lock', eyebrow: 'Worth the wait?', title: 'Which delivery took the longest?', detail: 'Upload an Uber export to unlock delivery-window records.', action: 'open_export' }, 'locked-export', 20, { locked: true });

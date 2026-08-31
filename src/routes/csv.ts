@@ -6,16 +6,11 @@ import path from 'path';
 import { container } from '../services/core/ServiceContainer';
 import { csvImportRateLimit } from '../middleware/security';
 import { authenticateToken, validateOwnership } from '../middleware/auth';
-import { ZipExtractor } from '../services/import/ZipExtractor';
-import { ValidationError } from '../middleware/errorHandler';
-import { cacheService } from '../services/core/CacheService';
+import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { concurrencyLimiter } from '../middleware/concurrencyLimiter';
-import { ImportLockService } from '../services/import/ImportLockService';
-import type { ExportProvider } from '../services/data/ImportPreferencesRepository';
+import logger from '../config/logger';
 
 const router = Router();
-const csvImportService = container.csvImportService;
-const zipExtractor = new ZipExtractor();
 
 // Configure multer for file uploads (CSV and ZIP) with Disk Storage
 // Saves to temp directory to prevent RAM exhaustion
@@ -137,161 +132,37 @@ router.post('/import',
   concurrencyLimiter,
   upload.single('csvFile'),
   validateOwnership,
-  async (req: Request, res: Response) => {
-
-    // Ensure file was uploaded
+  asyncHandler(async (req: Request, res: Response) => {
     if (!req.file) {
-      return res.status(400).json({
-        error: 'No file uploaded. Please upload a CSV or ZIP file.'
-      });
+      throw new ValidationError('No file uploaded. Please upload a CSV or ZIP file.', 'csvFile');
     }
 
     const filePath = req.file.path;
-    let exportLifecycleStarted = false;
-    let exportCompleted = false;
-    let lifecycleUserId: string | null = null;
-    let lifecycleProvider: ExportProvider | null = null;
-    let importLockAcquired = false;
-
     try {
-      const userId = req.body.userId;
-      if (!userId) {
-        // Should be caught by validateOwnership if it wasn't empty, but good to double check
-        return res.status(400).json({ error: 'userId is required' });
-      }
-      lifecycleUserId = userId;
-      importLockAcquired = await ImportLockService.acquireLock(userId);
-      if (!importLockAcquired) {
-        return res.status(409).json({
-          error: 'Another import or account reset is already in progress',
-          code: 'IMPORT_IN_PROGRESS',
-        });
-      }
-      let csvBuffer: Buffer;
-      let fileName = req.file.originalname;
+      const userId = typeof req.body.userId === 'string' ? req.body.userId : undefined;
+      if (!userId) throw new ValidationError('userId is required', 'userId');
 
-      // Check if file is a ZIP (using new Promise-based check from disk)
-      const isZip = await zipExtractor.isZipFile(filePath);
+      let csvBuffer: Buffer;
+      const isZip = await container.zipExtractor.isZipFile(filePath);
 
       if (isZip) {
-        console.log(`📦 Processing ZIP file: ${fileName}`);
-
-        // Extract CSV from ZIP (Streaming from disk, with zip bomb protection)
-        // No need to call validateZipFile separately as extractCSV handles it
-        try {
-          const extractedFile = await zipExtractor.extractCSV(filePath);
-          csvBuffer = extractedFile.content;
-          fileName = extractedFile.filename;
-
-          const platform = extractedFile.platform === 'uber' ? 'Uber Eats' :
-            extractedFile.platform === 'doordash' ? 'DoorDash' : 'Unknown';
-          console.log(`✅ Extracted ${platform} CSV from ZIP: ${extractedFile.path}`);
-        } catch (error: any) {
-          if (error instanceof ValidationError) {
-            return res.status(400).json({
-              error: error.message,
-              hint: 'Make sure you uploaded the complete Uber Eats or DoorDash data export ZIP file'
-            });
-          }
-          throw error;
-        }
+        const extractedFile = await container.zipExtractor.extractCSV(filePath);
+        csvBuffer = extractedFile.content;
       } else {
-        console.log(`📄 Processing CSV file: ${fileName}`);
-        // For CSV files, we read from disk
         csvBuffer = await fs.promises.readFile(filePath);
       }
 
-      // Validate CSV format (auto-detects Uber Eats or DoorDash)
-      const validation = csvImportService.validateCsvFormat(csvBuffer);
-      if (!validation.valid) {
-        const format = csvImportService.detectCsvFormat(csvBuffer);
-        const platformHint = format === 'unknown'
-          ? 'Uber Eats or DoorDash'
-          : format === 'uber'
-            ? 'Uber Eats'
-            : 'DoorDash';
-
-        return res.status(400).json({
-          error: 'Invalid CSV format',
-          details: validation.errors,
-          hint: `Please download a fresh export from ${platformHint}`
-        });
-      }
-
-      const detectedFormat = csvImportService.detectCsvFormat(csvBuffer);
-      if (detectedFormat === 'unknown') {
-        throw new ValidationError('Could not determine whether this export is from Uber Eats or DoorDash.');
-      }
-      lifecycleProvider = detectedFormat === 'uber' ? 'uber_eats' : 'doordash';
-      exportLifecycleStarted = await container.importPreferencesRepository
-        .setExportStatus(userId, lifecycleProvider, 'import_processing');
-
-      // Process CSV synchronously (in-memory is fine for the CSV content itself if < 50MB)
-      // Future improvement: Stream CSV parsing directly to DB to avoid large buffer in RAM
-      const importResult = await csvImportService.parseCsvFile(csvBuffer, userId);
-
-      // Check if we have any valid receipts to import
-      if (importResult.receipts.length === 0) {
-        return res.status(400).json({
-          error: 'No valid orders found in file',
-          details: importResult.errors.length > 0 ? importResult.errors : ['File contains no valid order data'],
-          hint: 'Please ensure your data export includes completed orders. If you just placed an order, wait a few minutes for it to appear in your data export.'
-        });
-      }
-
-      if (importResult.success && importResult.receipts.length > 0) {
-        await csvImportService.importReceipts(importResult.receipts, userId);
-        await container.importPreferencesRepository.setExportStatus(userId, lifecycleProvider, 'completed');
-        exportCompleted = true;
-
-        // Invalidate cached analytics since user data changed
-        await cacheService.invalidateAllUserCaches(userId);
-
-        console.log(`✅ Imported ${importResult.totalReceipts} receipts for user ${userId}`);
-      }
-
-      res.json({
-        message: isZip
-          ? 'ZIP file processed and receipts imported successfully'
-          : 'CSV imported successfully',
-        importedCount: importResult.totalReceipts,
-        totalAmount: importResult.totalAmount,
+      const result = await container.csvImportUseCase.execute({
+        userId,
+        csvBuffer,
         fileType: isZip ? 'zip' : 'csv',
-        provider: lifecycleProvider,
       });
-
-    } catch (error) {
-      console.error('File import error:', error);
-
-      if (error instanceof ValidationError) {
-        return res.status(400).json({
-          error: error.message
-        });
-      }
-
-      res.status(500).json({
-        error: 'Failed to import file',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      res.json(result);
     } finally {
-      if (exportLifecycleStarted && !exportCompleted && lifecycleUserId && lifecycleProvider) {
-        await container.importPreferencesRepository
-          .setExportStatus(lifecycleUserId, lifecycleProvider, 'failed', 'EXPORT_IMPORT_FAILED')
-          .catch((statusError) => {
-            console.error('Failed to update export lifecycle after import failure:', statusError);
-          });
-      }
-
-      // Critical: Clean up temp file
-      if (req.file && req.file.path) {
-        fs.unlink(req.file.path, (err) => {
-          if (err) console.error('Failed to delete temp file:', err);
-        });
-      }
-      if (importLockAcquired && lifecycleUserId) {
-        await ImportLockService.releaseLock(lifecycleUserId);
-      }
+      await fs.promises.unlink(filePath).catch((error) => {
+        logger.warn('Failed to delete temporary import file', { error });
+      });
     }
-  });
+  }));
 
 export default router;

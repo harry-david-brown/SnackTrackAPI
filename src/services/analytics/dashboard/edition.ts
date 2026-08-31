@@ -1,4 +1,4 @@
-import { Receipt } from '../../../models/Receipt';
+import { DataSource, Receipt, ReceiptType } from '../../../models/Receipt';
 import { getLocalDateKey, getLocalDateTimeParts, zonedDateTimeToUtc } from '../../../utils/timezone';
 import { buildCandidateCatalogue, CandidateCatalogue } from './candidates';
 import { buildDashboardDataset } from './normalization';
@@ -65,6 +65,15 @@ export function buildDashboardInsightEdition(
   const dataset = buildDashboardDataset(receipts, timezone, now);
   const catalogue = buildCandidateCatalogue(dataset);
   const localDate = getLocalDateKey(now, timezone) ?? now.toISOString().slice(0, 10);
+  const exportProviders = new Set(receipts
+    .filter(receipt => receipt.dataSource === DataSource.CSV)
+    .map(receipt => receipt.receiptType)
+    .filter((provider): provider is ReceiptType.UBER_EATS | ReceiptType.DOORDASH => (
+      provider === ReceiptType.UBER_EATS || provider === ReceiptType.DOORDASH
+    )));
+  const partialExportProvider = exportProviders.size === 1
+    ? [...exportProviders][0]
+    : undefined;
   return {
     localDate,
     timezone,
@@ -72,6 +81,7 @@ export function buildDashboardInsightEdition(
     nextRefreshAt: getNextLocalMidnight(now, timezone).toISOString(),
     metricVersion: DASHBOARD_INSIGHT_METRIC_VERSION,
     availableCandidateCount: catalogue.eligible.length,
+    partialExportProvider,
     insights: selectDailyInsights(catalogue.eligible, userId, localDate, DASHBOARD_INSIGHT_METRIC_VERSION, 7),
   };
 }

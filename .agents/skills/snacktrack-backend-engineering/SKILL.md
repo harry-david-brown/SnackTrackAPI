@@ -9,16 +9,17 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 
 ## Required workflow
 
-1. Use `snacktrack-codebase-navigation` to trace route → service → repository/database → cache → tests.
-2. Identify the authoritative mutation owner and every concurrent writer before editing.
-3. Read the relevant references:
+1. Load `snacktrack-backend-architecture` for module ownership, dependency direction, type design, contracts, and cleanup rules.
+2. Use `snacktrack-codebase-navigation` to trace route → service → repository/database → cache → tests.
+3. Identify the authoritative mutation owner and every concurrent writer before editing.
+4. Read the relevant references:
    - transactions, services, and caches: [references/transactions-and-caches.md](references/transactions-and-caches.md)
    - locks, schedulers, and races: [references/concurrency.md](references/concurrency.md)
    - safe diagnosis and verification: [references/diagnostics-and-testing.md](references/diagnostics-and-testing.md)
-4. Define the response/error contract and postcondition before implementation.
-5. Implement the narrowest cohesive service operation. Keep routes responsible for authentication, validation, and response construction.
-6. Add regression tests at the durable service/repository boundary and any affected route contract.
-7. Run `npm run build` as the API TypeScript check. Do not run focused or full tests unless the user explicitly requests them.
+5. Define the response/error contract and postcondition before implementation.
+6. Implement the narrowest cohesive service operation. Keep routes responsible for authentication, validation, and response construction.
+7. Add regression tests at the durable service/repository boundary and any affected route contract.
+8. Run `npm run build` as the API TypeScript check. Do not run focused or full tests unless the user explicitly requests them.
 
 ## Core rules
 

@@ -41,17 +41,11 @@ jobs:
       - name: Run TypeScript compiler
         run: npm run build
 
-      - name: Check for TypeScript errors
-        run: npx tsc --noEmit
+      - name: Enforce architecture boundaries
+        run: npm run check:architecture
 
-      - name: Run linter (if configured)
-        run: npm run lint || echo "No linter configured"
-        continue-on-error: true
-
-      - name: Check file formatting
-        run: |
-          echo "Checking for common issues..."
-          ! git diff --name-only | grep -E '\.(ts|js)$' | xargs grep -l 'console\.log' || echo "Warning: console.log found in code"
+      - name: Run automated tests
+        run: npm test
 
   docker-build:
     runs-on: ubuntu-latest
@@ -85,4 +79,3 @@ jobs:
 
       - name: Check for outdated dependencies
         run: npm outdated || true
-

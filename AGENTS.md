@@ -4,6 +4,7 @@ This repository contains the SnackTrack Express/PostgreSQL API.
 
 ## Required skills
 
+- Load `snacktrack-backend-architecture` for every API feature, bug fix, refactor, code review, route, service, repository, provider integration, or code-cleanup change in this repository.
 - Load `snacktrack-backend-engineering` for every route, service, repository, schema, migration, destructive mutation, background job, cache, concurrency, or production-data change in this repository.
 - Load `snacktrack-codebase-navigation` before tracing ownership, planning cross-stack work, or editing an unfamiliar feature when that workspace skill is available.
 - Also load `snacktrack-import-flow` for Gmail receipt imports, Uber/DoorDash exports, export-ready alerts, consent, OAuth health, ongoing tracking, deduplication, or import state machines.
@@ -12,6 +13,7 @@ This repository contains the SnackTrack Express/PostgreSQL API.
 
 ## Repository rules
 
+- Follow the dependency direction and transition policy in `snacktrack-backend-architecture`: routes and middleware depend on application services/use cases; application code depends on pure domain logic and narrow repository/provider ports; concrete adapters are wired at the composition root.
 - Keep routes responsible for authentication, validation, and response construction. Put durable business mutations in cohesive services and persistence logic in the established repository/data boundary.
 - Define the response, stable machine-readable error codes, and postconditions before implementation. Never report a provider or persistence failure as a successful import.
 - Use one transaction for writes that must succeed or roll back together. Acquire coordination locks before transactions or external calls, release them in `finally`, and ensure every writer follows the same protocol.

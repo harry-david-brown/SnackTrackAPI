@@ -1,16 +1,42 @@
 import { Router, Request, Response } from 'express';
 import { container } from '../services/core/ServiceContainer';
 import { ReceiptType } from '../models/Receipt';
-import { PostgresService } from '../services/data/PostgresService';
-import { ReceiptService, ReceiptFilters } from '../services/receipt/ReceiptService';
+import { ReceiptListFilters } from '../services/data/ReceiptRepository';
 import { paginationMiddleware, parsePagination, createPaginatedResponse } from '../middleware/pagination';
 import { authenticateToken } from '../middleware/auth';
-import { asyncHandler, AuthenticationError, ValidationError } from '../middleware/errorHandler';
-import { cacheService } from '../services/core/CacheService';
+import {
+  asyncHandler,
+  AuthenticationError,
+  AuthorizationError,
+  ValidationError,
+} from '../middleware/errorHandler';
 
 const router = Router();
-const postgresService = container.postgres;
-const receiptService = new ReceiptService(postgresService);
+const receiptTypes = new Set<string>(Object.values(ReceiptType));
+const isReceiptType = (value: string): value is ReceiptType => receiptTypes.has(value);
+
+const queryString = (value: unknown, field: string): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new ValidationError('Must be a string', field);
+  const normalized = value.trim();
+  return normalized || undefined;
+};
+
+const queryNumber = (value: unknown, field: string): number | undefined => {
+  const text = queryString(value, field);
+  if (text === undefined) return undefined;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed)) throw new ValidationError('Must be a finite number', field);
+  return parsed;
+};
+
+const queryDate = (value: unknown, field: string): Date | undefined => {
+  const text = queryString(value, field);
+  if (text === undefined) return undefined;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) throw new ValidationError('Must be a valid date', field);
+  return parsed;
+};
 
 // Apply pagination middleware to all routes
 router.use(paginationMiddleware);
@@ -112,100 +138,44 @@ router.use(paginationMiddleware);
  */
 // GET /receipts - Get all receipts with optional filters
 // Requires authentication - users can only query their own receipts
-router.get('/', authenticateToken, async (req: Request, res: Response) => {
-  try {
-    const filters: ReceiptFilters = {};
-    const { page, limit, offset } = parsePagination(req);
+router.get('/', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const authenticatedUserId = req.user?.userId;
+  if (!authenticatedUserId) throw new AuthenticationError();
 
-    // Require userId filter and ensure it matches authenticated user
-    if (!req.query.userId) {
-      throw new ValidationError('userId query parameter is required');
-    }
-    
-    const requestedUserId = req.query.userId as string;
-    
-    // Ensure user can only query their own receipts
-    if (req.user?.userId !== requestedUserId) {
-      throw new ValidationError('You can only query your own receipts');
-    }
-    
-    filters.userId = requestedUserId;
-    if (req.query.receiptType) filters.receiptType = req.query.receiptType as ReceiptType;
-    if (req.query.restaurantName) filters.restaurantName = req.query.restaurantName as string;
-    if (req.query.startDate) filters.startDate = new Date(req.query.startDate as string);
-    if (req.query.endDate) filters.endDate = new Date(req.query.endDate as string);
-    if (req.query.minAmount) filters.minAmount = parseFloat(req.query.minAmount as string);
-    if (req.query.maxAmount) filters.maxAmount = parseFloat(req.query.maxAmount as string);
-
-    const receipts = await receiptService.getReceipts(filters, limit, offset);
-    
-    // Ensure items are properly serialized as arrays
-    const serializedReceipts = receipts.map(receipt => {
-      const receiptObj = receipt.toApiResponse ? receipt.toApiResponse() : receipt;
-      // Ensure items is always an array
-      if (!Array.isArray(receiptObj.items)) {
-        receiptObj.items = [];
-      }
-      return receiptObj;
-    });
-    
-    // Get total count for pagination (with filters applied)
-    // Build WHERE clause for count query to match filters
-    let countQuery = 'SELECT COUNT(*) as count FROM receipts WHERE 1=1';
-    const countParams: any[] = [];
-    let paramIndex = 1;
-    
-    if (filters.userId) {
-        countQuery += ` AND user_id = $${paramIndex}`;
-        countParams.push(filters.userId);
-        paramIndex++;
-    }
-    if (filters.startDate) {
-        countQuery += ` AND order_date >= $${paramIndex}`;
-        countParams.push(filters.startDate);
-        paramIndex++;
-    }
-    if (filters.endDate) {
-        countQuery += ` AND order_date <= $${paramIndex}`;
-        countParams.push(filters.endDate);
-        paramIndex++;
-    }
-    if (filters.restaurantName) {
-        countQuery += ` AND restaurant_name = $${paramIndex}`;
-        countParams.push(filters.restaurantName);
-        paramIndex++;
-    }
-    if (filters.minAmount !== undefined) {
-        countQuery += ` AND amount_spent >= $${paramIndex}`;
-        countParams.push(filters.minAmount);
-        paramIndex++;
-    }
-    if (filters.maxAmount !== undefined) {
-        countQuery += ` AND amount_spent <= $${paramIndex}`;
-        countParams.push(filters.maxAmount);
-        paramIndex++;
-    }
-    if (filters.receiptType) {
-        countQuery += ` AND receipt_type = $${paramIndex}`;
-        countParams.push(filters.receiptType);
-        paramIndex++;
-    }
-    
-    const totalResult = await postgresService.query(countQuery, countParams);
-    const total = parseInt(totalResult.rows[0].count);
-    
-    res.json(createPaginatedResponse(serializedReceipts, total, page, limit));
-  } catch (err) {
-    console.error('Error fetching receipts:', err);
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    const errorDetails = err instanceof Error ? err.stack : String(err);
-    console.error('Error details:', errorDetails);
-    res.status(500).json({ 
-      error: 'Failed to fetch receipts',
-      message: errorMessage
-    });
+  // `userId` is accepted temporarily for released clients, but identity comes
+  // exclusively from the verified access token.
+  const requestedUserId = queryString(req.query.userId, 'userId');
+  if (requestedUserId && requestedUserId !== authenticatedUserId) {
+    throw new AuthorizationError('You can only query your own receipts');
   }
-});
+
+  const receiptType = queryString(req.query.receiptType, 'receiptType');
+  let normalizedReceiptType: ReceiptType | undefined;
+  if (receiptType) {
+    if (!isReceiptType(receiptType)) {
+      throw new ValidationError('Unsupported receipt type', 'receiptType');
+    }
+    normalizedReceiptType = receiptType;
+  }
+  const filters: ReceiptListFilters = {
+    userId: authenticatedUserId,
+    receiptType: normalizedReceiptType,
+    restaurantName: queryString(req.query.restaurantName, 'restaurantName'),
+    startDate: queryDate(req.query.startDate, 'startDate'),
+    endDate: queryDate(req.query.endDate, 'endDate'),
+    minAmount: queryNumber(req.query.minAmount, 'minAmount'),
+    maxAmount: queryNumber(req.query.maxAmount, 'maxAmount'),
+  };
+  const { page, limit, offset } = parsePagination(req);
+  const result = await container.listReceiptsService.execute({ filters, limit, offset });
+
+  res.json(createPaginatedResponse(
+    result.receipts.map((receipt) => receipt.toApiResponse()),
+    result.total,
+    page,
+    limit
+  ));
+}));
 
 /**
  * @swagger
@@ -247,8 +217,8 @@ router.delete('/', authenticateToken, asyncHandler(async (req: Request, res: Res
     throw new AuthenticationError('Authentication required');
   }
 
-  const deletedCount = await receiptService.deleteReceiptsByUserId(authenticatedUserId);
-  await cacheService.invalidateAllUserCaches(authenticatedUserId);
+  const { deletedReceipts: deletedCount } = await container.receiptClearService
+    .clearReceipts(authenticatedUserId);
 
   res.json({
     success: true,

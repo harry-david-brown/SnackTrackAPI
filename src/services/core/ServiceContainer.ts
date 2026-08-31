@@ -1,170 +1,150 @@
-import { PostgresService } from '../data/PostgresService';
-import { UserRepository } from '../data/UserRepository';
-import { ReceiptRepository } from '../data/ReceiptRepository';
-import { ReceiptLookupService } from '../receipt/ReceiptLookupService';
-import { DatabaseService } from './DatabaseService';
-import { CsvImportService } from '../import/CsvImportService';
-import { ReceiptParserService } from '../receipt/ReceiptParserService';
-import { EmailFilterService } from '../email/EmailFilterService';
+import { AccountDeletionService } from '../account/AccountDeletionService';
+import { ReceiptClearService } from '../account/ReceiptClearService';
+import { AlertingService } from '../monitoring/AlertingService';
 import { AuthService } from '../AuthService';
 import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
-import { OtpService } from '../OtpService';
-import { EmailSenderService } from '../email/EmailSender';
-import { AlertingService } from '../monitoring/AlertingService';
-import { OAuthRepository } from '../data/OAuthRepository';
-import { CacheService } from './CacheService';
-import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
-import { OngoingTrackingService } from '../import/OngoingTrackingService';
-import { GmailConnectionHealthService } from '../email/GmailConnectionHealthService';
+import { WrappedAnalyticsQueryRepository } from '../analytics/WrappedAnalyticsQueryRepository';
 import { AccountResetService } from '../data/AccountResetService';
+import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import { OAuthRepository } from '../data/OAuthRepository';
+import { PostgresService } from '../data/PostgresService';
+import { ReceiptRepository } from '../data/ReceiptRepository';
+import { UserRepository } from '../data/UserRepository';
+import { EmailSenderService } from '../email/EmailSender';
+import { GmailConnectionHealthService } from '../email/GmailConnectionHealthService';
+import { GmailClient } from '../email/GmailClient';
+import { ReceiptExtractor } from '../extraction';
+import { CsvImportService } from '../import/CsvImportService';
+import { CsvImportUseCase } from '../import/CsvImportUseCase';
+import { GmailImportService } from '../import/GmailImportService';
+import { OngoingTrackingService } from '../import/OngoingTrackingService';
+import { OtpService } from '../OtpService';
+import { ListReceiptsService } from '../receipt/ListReceiptsService';
+import { GetUserSummaryService } from '../user/GetUserSummaryService';
+import { GetDashboardInsightsService } from '../user/GetDashboardInsightsService';
+import { CacheService } from './CacheService';
+import { DatabaseService } from './DatabaseService';
+import { OAuth2Client } from 'google-auth-library';
+import { config } from '../../config/AppConfig';
+import appleSignin from 'apple-signin-auth';
+import { ZipExtractor } from '../import/ZipExtractor';
+import { ImportLockService } from '../import/ImportLockService';
 
-/**
- * Simple service container for dependency injection
- * Manages service instances and their dependencies
- * 
- * Used by API routes to access services without manual instantiation
- * Centralizes all service creation and dependency management
- */
+/** The process-wide, typed composition root and resource owner. */
 export class ServiceContainer {
-  private static instance: ServiceContainer;
-  private services: Map<string, any> = new Map();
+  private static instance: ServiceContainer | undefined;
+
+  readonly postgres: PostgresService;
+  readonly userRepository: UserRepository;
+  readonly oauthRepository: OAuthRepository;
+  readonly receiptRepository: ReceiptRepository;
+  readonly importPreferencesRepository: ImportPreferencesRepository;
+  readonly cacheService: CacheService;
+  readonly authService: AuthService;
+  readonly databaseService: DatabaseService;
+  readonly csvImportService: CsvImportService;
+  readonly csvImportUseCase: CsvImportUseCase;
+  readonly zipExtractor: ZipExtractor;
+  readonly gmailClient: GmailClient;
+  readonly gmailImportService: GmailImportService;
+  readonly ongoingTrackingService: OngoingTrackingService;
+  readonly gmailConnectionHealthService: GmailConnectionHealthService;
+  readonly accountResetService: AccountResetService;
+  readonly receiptClearService: ReceiptClearService;
+  readonly listReceiptsService: ListReceiptsService;
+  readonly accountDeletionService: AccountDeletionService;
+  readonly wrappedAnalyticsService: WrappedAnalyticsService;
+  readonly wrappedAnalyticsQueryRepository: WrappedAnalyticsQueryRepository;
+  readonly otpService: OtpService;
+  readonly emailSender: EmailSenderService;
+  readonly alertingService: AlertingService;
+  readonly getUserSummaryService: GetUserSummaryService;
+  readonly getDashboardInsightsService: GetDashboardInsightsService;
 
   private constructor() {
-    this.initializeServices();
+    this.postgres = new PostgresService();
+    this.userRepository = new UserRepository(this.postgres);
+    this.oauthRepository = new OAuthRepository(this.postgres);
+    this.receiptRepository = new ReceiptRepository(this.postgres);
+    this.importPreferencesRepository = new ImportPreferencesRepository(this.postgres);
+    this.cacheService = new CacheService();
+    const gmailConfig = config.getGmailConfig();
+    const googleAudiences = [gmailConfig.clientId, gmailConfig.iosClientId, gmailConfig.webClientId]
+      .filter((value): value is string => Boolean(value));
+    this.authService = new AuthService(
+      this.userRepository,
+      this.oauthRepository,
+      new OAuth2Client(googleAudiences[0]),
+      googleAudiences,
+      appleSignin,
+      config.getAppleConfig().clientIds,
+    );
+    this.databaseService = new DatabaseService(
+      this.userRepository,
+      this.receiptRepository
+    );
+    this.csvImportService = new CsvImportService(this.postgres);
+    this.csvImportUseCase = new CsvImportUseCase(
+      this.csvImportService,
+      this.importPreferencesRepository,
+      this.cacheService,
+      ImportLockService,
+    );
+    this.zipExtractor = new ZipExtractor();
+    this.gmailClient = new GmailClient();
+    this.gmailImportService = new GmailImportService(
+      this.gmailClient,
+      new ReceiptExtractor(),
+      this.receiptRepository,
+      this.importPreferencesRepository,
+      this.userRepository,
+      this.cacheService,
+    );
+    this.ongoingTrackingService = new OngoingTrackingService(
+      this.userRepository,
+      this.importPreferencesRepository,
+      this.gmailImportService,
+    );
+    this.gmailConnectionHealthService = new GmailConnectionHealthService(
+      this.gmailClient,
+      this.userRepository,
+      this.importPreferencesRepository,
+    );
+    this.accountResetService = new AccountResetService(
+      this.postgres,
+      this.cacheService,
+      this.gmailConnectionHealthService
+    );
+    this.receiptClearService = new ReceiptClearService(this.postgres, this.cacheService);
+    this.listReceiptsService = new ListReceiptsService(this.receiptRepository);
+    this.accountDeletionService = new AccountDeletionService(
+      this.postgres,
+      this.cacheService,
+      this.gmailConnectionHealthService,
+      this.authService
+    );
+    this.wrappedAnalyticsQueryRepository = new WrappedAnalyticsQueryRepository(this.postgres);
+    this.wrappedAnalyticsService = new WrappedAnalyticsService(this.wrappedAnalyticsQueryRepository);
+    this.getUserSummaryService = new GetUserSummaryService(
+      this.userRepository,
+      this.receiptRepository,
+      this.wrappedAnalyticsService,
+      this.cacheService,
+    );
+    this.getDashboardInsightsService = new GetDashboardInsightsService(
+      this.userRepository,
+      this.receiptRepository,
+      this.cacheService,
+    );
+    this.otpService = new OtpService(this.postgres);
+    this.emailSender = new EmailSenderService();
+    this.alertingService = new AlertingService(this.postgres);
   }
 
   static getInstance(): ServiceContainer {
-    if (!ServiceContainer.instance) {
-      ServiceContainer.instance = new ServiceContainer();
-    }
-    return ServiceContainer.instance;
-  }
-
-  private initializeServices(): void {
-    // Core services
-    this.services.set('postgres', new PostgresService());
-
-    // Repositories
-    this.services.set('userRepository', new UserRepository(this.get('postgres')));
-    this.services.set('oauthRepository', new OAuthRepository(this.get('postgres')));
-    this.services.set('receiptRepository', new ReceiptRepository(this.get('postgres')));
-    this.services.set('importPreferencesRepository', new ImportPreferencesRepository(this.get('postgres')));
-
-    // Cache service
-    this.services.set('cacheService', new CacheService());
-
-    // Authentication service
-    this.services.set('authService', new AuthService(
-      this.get('userRepository'),
-      this.get('oauthRepository'),
-      this.get('receiptRepository'),
-      this.get('cacheService')
-    ));
-
-    // Business services
-    this.services.set('receiptLookupService', new ReceiptLookupService());
-    this.services.set('databaseService', new DatabaseService(
-      this.get('receiptLookupService'),
-      this.get('userRepository'),
-      this.get('receiptRepository')
-    ));
-
-    // Utility services
-    this.services.set('csvImportService', new CsvImportService(this.get('postgres')));
-    this.services.set('receiptParserService', new ReceiptParserService());
-    this.services.set('emailFilterService', new EmailFilterService());
-    this.services.set('ongoingTrackingService', new OngoingTrackingService(this.get('postgres')));
-    this.services.set('gmailConnectionHealthService', new GmailConnectionHealthService(this.get('postgres')));
-    this.services.set('accountResetService', new AccountResetService(this.get('postgres')));
-
-    // Analytics services
-    this.services.set('wrappedAnalyticsService', new WrappedAnalyticsService(this.get<PostgresService>('postgres').getPool()));
-
-    // OTP and Email services
-    this.services.set('otpService', new OtpService(this.get('postgres')));
-    this.services.set('emailSender', new EmailSenderService());
-
-    // Monitoring services
-    this.services.set('alertingService', new AlertingService(this.get('postgres')));
-  }
-
-  get<T>(serviceName: string): T {
-    const service = this.services.get(serviceName);
-    if (!service) {
-      throw new Error(`Service '${serviceName}' not found`);
-    }
-    return service as T;
-  }
-
-  // Convenience getters for commonly used services
-  get postgres(): PostgresService {
-    return this.get<PostgresService>('postgres');
-  }
-
-  get userRepository(): UserRepository {
-    return this.get<UserRepository>('userRepository');
-  }
-
-  get receiptRepository(): ReceiptRepository {
-    return this.get<ReceiptRepository>('receiptRepository');
-  }
-
-  get importPreferencesRepository(): ImportPreferencesRepository {
-    return this.get<ImportPreferencesRepository>('importPreferencesRepository');
-  }
-
-  get receiptLookupService(): ReceiptLookupService {
-    return this.get<ReceiptLookupService>('receiptLookupService');
-  }
-
-  get databaseService(): DatabaseService {
-    return this.get<DatabaseService>('databaseService');
-  }
-
-  get csvImportService(): CsvImportService {
-    return this.get<CsvImportService>('csvImportService');
-  }
-
-  get receiptParserService(): ReceiptParserService {
-    return this.get<ReceiptParserService>('receiptParserService');
-  }
-
-  get emailFilterService(): EmailFilterService {
-    return this.get<EmailFilterService>('emailFilterService');
-  }
-
-  get authService(): AuthService {
-    return this.get<AuthService>('authService');
-  }
-
-  get wrappedAnalyticsService(): WrappedAnalyticsService {
-    return this.get<WrappedAnalyticsService>('wrappedAnalyticsService');
-  }
-
-  get otpService(): OtpService {
-    return this.get<OtpService>('otpService');
-  }
-
-  get emailSender(): EmailSenderService {
-    return this.get<EmailSenderService>('emailSender');
-  }
-
-  get alertingService(): AlertingService {
-    return this.get<AlertingService>('alertingService');
-  }
-
-  get ongoingTrackingService(): OngoingTrackingService {
-    return this.get<OngoingTrackingService>('ongoingTrackingService');
-  }
-
-  get gmailConnectionHealthService(): GmailConnectionHealthService {
-    return this.get<GmailConnectionHealthService>('gmailConnectionHealthService');
-  }
-
-  get accountResetService(): AccountResetService {
-    return this.get<AccountResetService>('accountResetService');
+    if (!this.instance) this.instance = new ServiceContainer();
+    return this.instance;
   }
 }
 
-// Export singleton instance
 export const container = ServiceContainer.getInstance();

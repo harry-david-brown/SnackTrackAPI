@@ -16,7 +16,7 @@
 import yauzl from 'yauzl';
 import fs from 'fs';
 import path from 'path';
-import { ValidationError } from '../../middleware/errorHandler';
+import { ValidationError } from '../../core/errors';
 
 export interface ExtractedFile {
   content: Buffer;

@@ -155,8 +155,19 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
           properties: {
             error: {
               type: 'object',
-              required: ['message', 'statusCode', 'timestamp'],
+              required: ['version', 'code', 'message', 'statusCode', 'timestamp'],
               properties: {
+                version: {
+                  type: 'string',
+                  enum: ['1'],
+                  description: 'Error envelope schema version',
+                  example: '1'
+                },
+                code: {
+                  type: 'string',
+                  description: 'Stable machine-readable error code',
+                  example: 'VALIDATION_ERROR'
+                },
                 message: {
                   type: 'string',
                   description: 'Error message',
@@ -382,6 +393,7 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
             localDate: { type: 'string', format: 'date' }, timezone: { type: 'string' },
             generatedAt: { type: 'string', format: 'date-time' }, nextRefreshAt: { type: 'string', format: 'date-time' },
             metricVersion: { type: 'string' }, availableCandidateCount: { type: 'integer' },
+            partialExportProvider: { type: 'string', enum: ['uber_eats', 'doordash'] },
             insights: {
               type: 'array', maxItems: 7,
               items: {

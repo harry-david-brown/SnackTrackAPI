@@ -12,6 +12,7 @@ import {
   emailVerificationSendRateLimit,
   otpVerificationRateLimit
 } from '../middleware/security';
+import logger from '../config/logger';
 
 const router = Router();
 
@@ -96,10 +97,10 @@ router.post(
     // Send email if enabled
     if (emailSender.isEnabled()) {
       await emailSender.sendVerificationEmail(normalizedEmail, code);
-      console.log(`✅ Verification code sent to ${normalizedEmail}`);
+      logger.info('Verification code sent');
     } else {
       // In development, log the code
-      console.log(`📧 [DEV] Verification code for ${normalizedEmail}: ${code}`);
+      logger.info('Verification email skipped in development');
     }
 
     res.status(200).json({
@@ -199,7 +200,7 @@ router.post(
     // Mark email as verified
     await userRepository.updateEmailVerified(normalizedEmail, true);
 
-    console.log(`✅ Email verified for ${normalizedEmail}`);
+    logger.info('Email verification completed');
 
     res.status(200).json({
       success: true,
@@ -209,4 +210,3 @@ router.post(
 );
 
 export default router;
-

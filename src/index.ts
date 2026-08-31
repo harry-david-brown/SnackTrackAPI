@@ -12,23 +12,15 @@ import csvRouter from './routes/csv';
 import databaseRouter from './routes/database';
 import monitoringRouter from './routes/monitoring';
 import gmailRouter from './routes/gmail';
-import { PostgresService } from './services/data/PostgresService';
 import { config } from './config/AppConfig';
 import { errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
 import { sentryConfig } from './config/sentry';
 import { redisConfig } from './config/redis';
-import { logger, logRequest } from './config/logger';
+import { getLogLevel, logger, logRequest } from './config/logger';
 import * as Sentry from '@sentry/node';
 import { container } from './services/core/ServiceContainer';
 
-// Helper to get log level (for conditional logging)
-const getLogLevel = (): string => {
-  if (process.env.LOG_LEVEL) {
-    return process.env.LOG_LEVEL.toLowerCase();
-  }
-  return config.isProduction() ? 'info' : 'debug';
-};
 import {
   securityHeaders,
   corsConfig,
@@ -65,7 +57,7 @@ app.use(express.json({ limit: config.isProduction() ? '10mb' : '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: config.isProduction() ? '10mb' : '50mb' }));
 
 // Initialize database
-const postgresService = new PostgresService();
+const postgresService = container.postgres;
 
 /**
  * @swagger
@@ -210,10 +202,7 @@ async function startServer() {
     // In production, ongoing tracking runs hourly by default. Set
     // TRACKING_SYNC_INTERVAL_MINUTES=0 when an external scheduler calls the
     // protected batch endpoint instead.
-    const configuredTrackingInterval = Number(process.env.TRACKING_SYNC_INTERVAL_MINUTES);
-    const trackingIntervalMinutes = Number.isFinite(configuredTrackingInterval)
-      ? Math.max(0, configuredTrackingInterval)
-      : config.isProduction() ? 60 : 0;
+    const trackingIntervalMinutes = config.getTrackingIntervalMinutes();
     const trackingTimer = trackingIntervalMinutes > 0
       ? setInterval(() => {
           void container.ongoingTrackingService.runEligibleBatch(100)

@@ -293,7 +293,7 @@ export class UserRepository {
       'DELETE FROM users WHERE id = $1',
       [userId]
     );
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
 }

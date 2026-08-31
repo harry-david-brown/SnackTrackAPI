@@ -16,6 +16,8 @@ export interface EmailSender {
  */
 import nodemailer, { Transporter } from 'nodemailer';
 import sgMail from '@sendgrid/mail';
+import { config } from '../../config/AppConfig';
+import { logger } from '../../config/logger';
 
 interface SendGridTransporter {
   type: 'sendgrid';
@@ -32,34 +34,33 @@ export class EmailSenderService implements EmailSender {
 
   private initialize(): void {
     // Check for SendGrid API key (preferred) or SMTP credentials
-    const sendGridApiKey = process.env.SENDGRID_API_KEY;
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    const mail = config.getMailConfig();
+    const sendGridApiKey = mail.sendGridApiKey;
+    const smtpHost = mail.smtpHost;
+    const smtpUser = mail.smtpUser;
+    const smtpPass = mail.smtpPassword;
 
     if (sendGridApiKey) {
       // Use SendGrid REST API (more reliable on cloud platforms)
       sgMail.setApiKey(sendGridApiKey);
       this.transporter = { type: 'sendgrid', sgMail };
       this.enabled = true;
-      console.log('✅ Email sender service initialized (SendGrid REST API)');
+      logger.info('Email sender initialized', { provider: 'sendgrid' });
     } else if (smtpHost && smtpUser && smtpPass) {
       // Fallback to SMTP if SendGrid API key not available
-      const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-      const smtpSecure = process.env.SMTP_SECURE === 'true';
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
-        port: smtpPort,
-        secure: smtpSecure,
+        port: mail.smtpPort,
+        secure: mail.smtpSecure,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
       });
       this.enabled = true;
-      console.log('✅ Email sender service initialized (SMTP)');
+      logger.info('Email sender initialized', { provider: 'smtp' });
     } else {
-      console.warn('⚠️  Email service not configured. Set SENDGRID_API_KEY or SMTP variables to enable.');
+      logger.warn('Email service not configured');
       this.enabled = false;
     }
   }
@@ -88,18 +89,18 @@ export class EmailSenderService implements EmailSender {
   ): Promise<void> {
     if (!this.enabled || !this.transporter) {
       // In development, log the email instead of sending
-      if (process.env.NODE_ENV === 'development') {
-        console.log('📧 [DEV MODE] Email would be sent:');
-        console.log(`   To: ${to}`);
-        console.log(`   Subject: ${subject}`);
-        console.log(`   Code: ${text.split(': ')[1]}`);
+      if (config.isDevelopment()) {
+        logger.info('Transactional email skipped in development', {
+          operation: 'send_transactional_email',
+          outcome: 'not_configured',
+        });
         return;
       }
       throw new Error('Email service not configured. Set SENDGRID_API_KEY or SMTP environment variables.');
     }
 
     try {
-      const fromEmail = process.env.SMTP_FROM || process.env.SENDGRID_FROM || '"Snack Track" <noreply@getsnacktrack.com>';
+      const fromEmail = config.getMailConfig().from;
 
       // Use SendGrid REST API if available
       if (this.transporter && 'type' in this.transporter && this.transporter.type === 'sendgrid') {
@@ -118,7 +119,7 @@ export class EmailSenderService implements EmailSender {
             'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
           }
         });
-        console.log(`✅ Email sent to ${to} via SendGrid`);
+        logger.info('Transactional email sent', { provider: 'sendgrid' });
       } else {
         // Fallback to SMTP (nodemailer)
         const smtpTransporter = this.transporter as Transporter;
@@ -129,10 +130,10 @@ export class EmailSenderService implements EmailSender {
           text,
           html,
         });
-        console.log(`✅ Email sent to ${to} via SMTP`);
+        logger.info('Transactional email sent', { provider: 'smtp' });
       }
     } catch (error) {
-      console.error(`❌ Failed to send email to ${to}:`, error);
+      logger.error('Transactional email delivery failed', { error });
       throw new Error('Failed to send email');
     }
   }
@@ -203,4 +204,3 @@ export class EmailSenderService implements EmailSender {
     return this.enabled;
   }
 }
-
