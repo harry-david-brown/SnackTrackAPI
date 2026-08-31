@@ -6,7 +6,7 @@ import { Email } from './Email';
  * Allows for easy swapping of different email providers
  */
 export interface EmailClient {
-  getEmails(user: User): Promise<Email[]>;
+  getEmails(user: User, options?: { after?: Date }): Promise<Email[]>;
 }
 
 /**

@@ -18,6 +18,7 @@ import { authConfig } from '../config/auth';
 import { validateApiKey } from '../middleware/security';
 import { detectTimezoneFromRequest } from '../utils/timezone';
 import { GmailConnectionHealthResult } from '../services/email/GmailConnectionHealthService';
+import { resolveTrackingBaseline } from '../services/data/ImportPreferencesRepository';
 
 const router = Router();
 const REQUIRED_GMAIL_SCOPES = new Set([
@@ -58,7 +59,20 @@ const getOAuth2Client = (redirectUri?: string): Auth.OAuth2Client => {
 interface GmailOAuthStatePayload {
   userId: string;
   redirectUri: string;
+  purpose: GmailConnectionPurpose;
 }
+
+const GMAIL_CONNECTION_PURPOSES = [
+  'receipt_import',
+  'export_ready_alerts',
+  'ongoing_tracking',
+  'connection_recovery',
+  'manage_connection',
+] as const;
+type GmailConnectionPurpose = typeof GMAIL_CONNECTION_PURPOSES[number];
+
+const isGmailConnectionPurpose = (value: unknown): value is GmailConnectionPurpose =>
+  typeof value === 'string' && GMAIL_CONNECTION_PURPOSES.includes(value as GmailConnectionPurpose);
 
 const signOAuthState = (payload: GmailOAuthStatePayload): string => {
   return jwt.sign(payload, authConfig.getJWTSecret(), {
@@ -177,7 +191,19 @@ const buildImportPreferencesResponse = async (userId: string) => {
        )::int AS uber_eats_export_count,
        COUNT(*) FILTER (
          WHERE data_source = 'csv' AND receipt_type = 'doordash'
-       )::int AS doordash_export_count
+       )::int AS doordash_export_count,
+       MIN(order_date) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+       ) AS uber_eats_export_earliest,
+       MAX(order_date) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+       ) AS uber_eats_export_latest,
+       MIN(order_date) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'doordash'
+       ) AS doordash_export_earliest,
+       MAX(order_date) FILTER (
+         WHERE data_source = 'csv' AND receipt_type = 'doordash'
+       ) AS doordash_export_latest
      FROM receipts WHERE user_id = $1`,
     [userId]
   );
@@ -185,9 +211,23 @@ const buildImportPreferencesResponse = async (userId: string) => {
   const exportReceiptCount = Number(sourceResult.rows[0]?.export_count || 0);
   const uberEatsExportReceiptCount = Number(sourceResult.rows[0]?.uber_eats_export_count || 0);
   const doorDashExportReceiptCount = Number(sourceResult.rows[0]?.doordash_export_count || 0);
+  const toIsoString = (value: unknown): string | null => value instanceof Date
+    ? value.toISOString()
+    : typeof value === 'string' ? value : null;
+  const uberEatsExportEarliest = toIsoString(sourceResult.rows[0]?.uber_eats_export_earliest);
+  const uberEatsExportLatest = toIsoString(sourceResult.rows[0]?.uber_eats_export_latest);
+  const doorDashExportEarliest = toIsoString(sourceResult.rows[0]?.doordash_export_earliest);
+  const doorDashExportLatest = toIsoString(sourceResult.rows[0]?.doordash_export_latest);
+  const trackingBaseline = resolveTrackingBaseline({
+    gmailBaselineCompletedAt: preferences.gmailBaselineCompletedAt,
+    uberEatsExportCount: uberEatsExportReceiptCount,
+    doorDashExportCount: doorDashExportReceiptCount,
+  });
   const providerExports = await container.importPreferencesRepository.getProviderExports(userId);
   const providerStatuses = [providerExports.uber_eats.status, providerExports.doordash.status];
-  const aggregateExportStatus = providerExports.uber_eats.status === 'file_ready'
+  // Compatibility summary for older clients. Provider-specific UI must use
+  // export.providers plus receipt-derived coverage instead of this value.
+  const aggregateExportStatus = providerStatuses.includes('file_ready')
     ? 'file_ready'
     : providerStatuses.includes('import_processing')
       ? 'import_processing'
@@ -226,12 +266,16 @@ const buildImportPreferencesResponse = async (userId: string) => {
     effectiveState = 'not_offered';
   }
 
-  let ongoingTrackingEffectiveState: 'not_offered' | 'declined' | 'active' | 'paused' | 'reconnect_required' | 'error';
+  let ongoingTrackingEffectiveState: 'not_offered' | 'declined' | 'setting_up' | 'active' | 'paused' | 'reconnect_required' | 'error';
   if (preferences.ongoingTrackingConsentState === 'granted') {
     if (!gmailStatus.connected || !gmailStatus.canImport || gmailStatus.connectionMode !== 'offline') {
       ongoingTrackingEffectiveState = 'reconnect_required';
     } else if (preferences.trackingStatus === 'error') {
       ongoingTrackingEffectiveState = 'error';
+    } else if (preferences.trackingStatus === 'setting_up') {
+      ongoingTrackingEffectiveState = 'setting_up';
+    } else if (preferences.trackingStatus === 'inactive' || preferences.trackingStatus === 'paused') {
+      ongoingTrackingEffectiveState = 'paused';
     } else {
       ongoingTrackingEffectiveState = 'active';
     }
@@ -266,7 +310,8 @@ const buildImportPreferencesResponse = async (userId: string) => {
       status: aggregateExportStatus,
       requestedAt: providerRequestedDates.at(-1) ?? null,
       updatedAt: aggregateExportStatus === 'file_ready'
-        ? providerExports.uber_eats.updatedAt
+        ? [providerExports.uber_eats, providerExports.doordash]
+          .find((provider) => provider.status === 'file_ready')?.updatedAt ?? null
         : providerUpdatedDates.at(-1) ?? null,
       providers: {
         uberEats: providerExports.uber_eats,
@@ -279,7 +324,17 @@ const buildImportPreferencesResponse = async (userId: string) => {
       importedCount: preferences.gmailImportedCount,
       errorCode: preferences.gmailImportErrorCode,
       receiptCount: emailReceiptCount,
-      hasImported: preferences.gmailImportStatus === 'completed',
+      hasImported: preferences.gmailBaselineCompletedAt !== null,
+    },
+    gmailBaseline: {
+      hasCompleted: preferences.gmailBaselineCompletedAt !== null,
+      completedAt: preferences.gmailBaselineCompletedAt,
+      latestAttempt: {
+        status: preferences.gmailImportStatus,
+        updatedAt: preferences.gmailImportUpdatedAt,
+        importedCount: preferences.gmailImportedCount,
+        errorCode: preferences.gmailImportErrorCode,
+      },
     },
     ongoingTracking: {
       consentState: preferences.ongoingTrackingConsentState,
@@ -288,6 +343,10 @@ const buildImportPreferencesResponse = async (userId: string) => {
       revokedAt: preferences.ongoingTrackingRevokedAt,
       status: preferences.trackingStatus,
       effectiveState: ongoingTrackingEffectiveState,
+      baseline: {
+        eligible: trackingBaseline.eligible,
+        source: trackingBaseline.source,
+      },
       capability: {
         gmailConnected: gmailStatus.connected,
         durableAccess: gmailStatus.connectionMode === 'offline',
@@ -316,10 +375,14 @@ const buildImportPreferencesResponse = async (userId: string) => {
         uberEats: {
           receiptCount: uberEatsExportReceiptCount,
           hasData: uberEatsExportReceiptCount > 0,
+          earliestOrderDate: uberEatsExportEarliest,
+          latestOrderDate: uberEatsExportLatest,
         },
         doorDash: {
           receiptCount: doorDashExportReceiptCount,
           hasData: doorDashExportReceiptCount > 0,
+          earliestOrderDate: doorDashExportEarliest,
+          latestOrderDate: doorDashExportLatest,
         },
       },
     },
@@ -328,7 +391,7 @@ const buildImportPreferencesResponse = async (userId: string) => {
 
 router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
-  const { redirectUri } = req.body;
+  const { redirectUri, purpose } = req.body;
 
   if (!userId) {
     throw new ValidationError('User ID not found in token');
@@ -337,6 +400,11 @@ router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, re
   if (!redirectUri || typeof redirectUri !== 'string') {
     throw new ValidationError('redirectUri is required');
   }
+
+  if (purpose !== undefined && !isGmailConnectionPurpose(purpose)) {
+    throw new ValidationError('purpose is invalid');
+  }
+  const connectionPurpose: GmailConnectionPurpose = purpose ?? 'receipt_import';
 
   let parsedRedirectUri: URL;
   try {
@@ -355,6 +423,7 @@ router.post('/auth-url', authenticateToken, asyncHandler(async (req: Request, re
   const state = signOAuthState({
     userId,
     redirectUri,
+    purpose: connectionPurpose,
   });
 
   const authUrl = oAuth2Client.generateAuthUrl({
@@ -388,6 +457,7 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
       const errorRedirect = new URL(appRedirectUri);
       errorRedirect.searchParams.set('gmail', 'error');
       errorRedirect.searchParams.set('error', String(error));
+      errorRedirect.searchParams.set('gmailPurpose', decodedState.purpose);
       res.redirect(errorRedirect.toString());
       return;
     }
@@ -437,12 +507,23 @@ router.get('/callback', asyncHandler(async (req: Request, res: Response) => {
     const successRedirect = new URL(appRedirectUri);
     successRedirect.searchParams.set('gmail', 'success');
     successRedirect.searchParams.set('connectionMode', connectionMode);
+    successRedirect.searchParams.set('gmailPurpose', decodedState.purpose);
     res.redirect(successRedirect.toString());
   } catch (callbackError: any) {
     console.error('❌ Gmail OAuth callback failed:', callbackError);
     const errorRedirect = new URL(appRedirectUri);
     errorRedirect.searchParams.set('gmail', 'error');
     errorRedirect.searchParams.set('error', callbackError.message || 'gmail_oauth_failed');
+    const callbackPurpose = typeof state === 'string'
+      ? (() => {
+          try {
+            return verifyOAuthState(state).purpose;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+    if (callbackPurpose) errorRedirect.searchParams.set('gmailPurpose', callbackPurpose);
     res.redirect(errorRedirect.toString());
   }
 }));
@@ -562,22 +643,35 @@ router.put('/preferences/ongoing-tracking-consent', authenticateToken, asyncHand
     throw new ValidationError('consentVersion is required when granting ongoing tracking consent');
   }
   if (decision === 'granted') {
-    const preferences = await container.importPreferencesRepository.get(userId);
-    if (preferences.gmailImportStatus !== 'completed') {
+    const baseline = await container.importPreferencesRepository.getTrackingBaseline(userId);
+    if (!baseline.eligible) {
       res.status(409).json({
         success: false,
-        code: 'GMAIL_HISTORY_IMPORT_REQUIRED',
-        message: 'Complete the one-time Gmail history import before enabling ongoing tracking.',
+        code: 'HISTORICAL_BASELINE_REQUIRED',
+        message: 'Import Gmail history or a provider export before enabling ongoing tracking.',
       });
       return;
     }
     const { health, status: gmailStatus } = await getValidatedGmailStatus(userId, true);
+    if (health.status === 'unavailable') {
+      res.status(503).json({
+        success: false,
+        code: 'GMAIL_VALIDATION_UNAVAILABLE',
+        message: 'Gmail could not be reached. Your connection is unchanged; try again shortly.',
+      });
+      return;
+    }
     if (
       health.status !== 'valid'
       || !gmailStatus.connected
       || gmailStatus.connectionMode !== 'offline'
     ) {
-      throw new ValidationError('Reconnect Gmail with durable access before enabling ongoing tracking.');
+      res.status(409).json({
+        success: false,
+        code: 'GMAIL_RECONNECT_REQUIRED',
+        message: 'Reconnect Gmail with durable access before enabling ongoing tracking.',
+      });
+      return;
     }
   }
   await container.importPreferencesRepository.setOngoingTrackingConsent(
@@ -625,6 +719,29 @@ router.post('/preferences/export-requested', authenticateToken, asyncHandler(asy
   res.json(await buildImportPreferencesResponse(userId));
 }));
 
+router.post('/preferences/export-ready', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    throw new ValidationError('User ID not found in token');
+  }
+
+  const provider = req.body?.provider;
+  if (provider !== 'uber_eats' && provider !== 'doordash') {
+    throw new ValidationError('provider must be uber_eats or doordash');
+  }
+
+  const updated = await container.importPreferencesRepository.confirmExportReady(userId, provider);
+  if (!updated) {
+    res.status(409).json({
+      success: false,
+      code: 'EXPORT_ALREADY_PROCESSING',
+      message: 'This provider archive is already being processed.',
+    });
+    return;
+  }
+  res.json(await buildImportPreferencesResponse(userId));
+}));
+
 router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   if (!userId) {
@@ -660,7 +777,13 @@ router.post('/preferences/check-export-ready', authenticateToken, asyncHandler(a
     uberExport.requestedAt
   );
   if (detected) {
-    await container.importPreferencesRepository.setExportStatus(userId, 'uber_eats', 'file_ready');
+    await container.importPreferencesRepository.setExportStatus(
+      userId,
+      'uber_eats',
+      'file_ready',
+      undefined,
+      'detected_email'
+    );
   }
 
   res.json({
@@ -866,6 +989,11 @@ router.post('/import', authenticateToken, asyncHandler(async (req: Request, res:
       success: result.success,
       totalEmailsFound: result.totalEmailsFound,
       totalReceiptsProcessed: result.totalReceiptsProcessed,
+      emailsExamined: result.emailsExamined,
+      supportedReceiptsFound: result.supportedReceiptsFound,
+      exportCoveredReceipts: result.exportCoveredReceipts,
+      eligibleReceipts: result.eligibleReceipts,
+      deduplicatedReceipts: result.deduplicatedReceipts,
       totalReceiptsImported: result.totalReceiptsImported,
       newOrders: result.newOrders,
       updatedOrders: result.updatedOrders,

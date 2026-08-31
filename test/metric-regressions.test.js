@@ -6,12 +6,16 @@ const { ReceiptExtractor } = require('../dist/services/extraction/ReceiptExtract
 const { WrappedAnalyticsService } = require('../dist/services/analytics/WrappedAnalyticsService');
 const { ReceiptService } = require('../dist/services/receipt/ReceiptService');
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
-const { ImportPreferencesRepository } = require('../dist/services/data/ImportPreferencesRepository');
+const {
+  ImportPreferencesRepository,
+  resolveTrackingBaseline,
+} = require('../dist/services/data/ImportPreferencesRepository');
 const { PostgresService } = require('../dist/services/data/PostgresService');
 const { AccountResetService } = require('../dist/services/data/AccountResetService');
 const {
   filterReceiptsAfterExportCutoffs,
   isGmailReconnectError,
+  resolveIncrementalGmailSearchAfter,
 } = require('../dist/services/import/GmailImportService');
 const { GmailConnectionHealthService } = require('../dist/services/email/GmailConnectionHealthService');
 const { buildDashboardInsightCatalogue, buildDashboardInsights } = require('../dist/services/analytics/DashboardInsightService');
@@ -33,6 +37,64 @@ test('timezone helpers preserve local calendar dates and receipt wall time', () 
     parseReceiptLocalDateTime('Jul 23, 2026', '6:50 p.m.', 'America/Toronto').toISOString(),
     '2026-07-23T22:50:00.000Z'
   );
+});
+
+test('tracking baseline accepts Gmail or any receipt-backed provider export', () => {
+  assert.deepEqual(resolveTrackingBaseline({
+    gmailBaselineCompletedAt: null,
+    uberEatsExportCount: 10,
+    doorDashExportCount: 5,
+  }), { eligible: true, source: 'exports' });
+  assert.deepEqual(resolveTrackingBaseline({
+    gmailBaselineCompletedAt: null,
+    uberEatsExportCount: 10,
+    doorDashExportCount: 0,
+  }), { eligible: true, source: 'exports' });
+  assert.deepEqual(resolveTrackingBaseline({
+    gmailBaselineCompletedAt: null,
+    uberEatsExportCount: 0,
+    doorDashExportCount: 0,
+  }), { eligible: false, source: 'none' });
+  assert.deepEqual(resolveTrackingBaseline({
+    gmailBaselineCompletedAt: '2026-08-01T00:00:00.000Z',
+    uberEatsExportCount: 0,
+    doorDashExportCount: 0,
+  }), { eligible: true, source: 'gmail' });
+});
+
+test('incremental Gmail search starts from the earliest provider cutoff with a lookback', () => {
+  const initial = resolveIncrementalGmailSearchAfter({
+    lastSuccessfulCheckAt: null,
+    gmailBaselineCompletedAt: null,
+    csvCutoffs: {
+      uber_eats: new Date('2026-08-20T00:00:00.000Z'),
+      doordash: new Date('2026-08-18T00:00:00.000Z'),
+    },
+  });
+  assert.equal(initial.toISOString(), '2026-08-16T00:00:00.000Z');
+
+  const subsequent = resolveIncrementalGmailSearchAfter({
+    lastSuccessfulCheckAt: '2026-08-24T12:00:00.000Z',
+    gmailBaselineCompletedAt: null,
+    csvCutoffs: { uber_eats: new Date('2026-08-20T00:00:00.000Z') },
+  });
+  assert.equal(subsequent.toISOString(), '2026-08-22T12:00:00.000Z');
+});
+
+test('scheduled tracking eligibility accepts Gmail or either receipt-backed provider export', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+  await new ImportPreferencesRepository(postgres).getEligibleTrackingUserIds(25);
+  const eligibilityQuery = queries[0];
+  assert.match(eligibilityQuery.sql, /gmail_baseline_completed_at IS NOT NULL/);
+  assert.match(eligibilityQuery.sql, /receipt_type = 'uber_eats'/);
+  assert.match(eligibilityQuery.sql, /receipt_type = 'doordash'/);
+  assert.deepEqual(eligibilityQuery.params, [25]);
 });
 
 test('onboarding reset clears the Gmail import lifecycle explicitly', async () => {
@@ -81,7 +143,49 @@ test('manual and background Gmail runs update separate lifecycle fields', async 
   }, 'background');
   const completionUpdate = queries.find(({ sql }) => sql.includes('last_successful_check_at = NOW()'));
   assert.ok(completionUpdate);
+  assert.match(completionUpdate.sql, /tracking_status = CASE/);
+  assert.match(completionUpdate.sql, /THEN 'active'/);
   assert.doesNotMatch(completionUpdate.sql, /gmail_import_status/);
+
+  queries.length = 0;
+  await repository.failSyncRun('run-id', 'user-id', 'GMAIL_SYNC_FAILED', 'background');
+  const failureUpdate = queries.find(({ sql }) => sql.includes('last_tracking_error_at = NOW()'));
+  assert.ok(failureUpdate);
+  assert.match(failureUpdate.sql, /THEN 'error'/);
+  assert.doesNotMatch(failureUpdate.sql, /gmail_import_status/);
+});
+
+test('first ongoing consent enters setup instead of claiming tracking is active', async () => {
+  const queries = [];
+  const postgres = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      if (sql.includes('SELECT user_id')) return { rows: [{ user_id: 'user-id' }], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  await new ImportPreferencesRepository(postgres)
+    .setOngoingTrackingConsent('user-id', 'granted', 'consent-v2');
+  const consentUpdate = queries.find(({ sql }) => sql.includes('ongoing_tracking_consent_state = $2'));
+  assert.ok(consentUpdate);
+  assert.match(consentUpdate.sql, /last_successful_check_at IS NULL THEN 'setting_up'/);
+  assert.deepEqual(consentUpdate.params, ['user-id', 'granted', 'consent-v2']);
+});
+
+test('clearing receipts prevents a granted tracking consent from remaining active', async () => {
+  const queries = [];
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [], rowCount: sql.includes('DELETE FROM receipts') ? 4 : 1 };
+    },
+    release: () => {},
+  };
+  const postgres = { getClient: async () => client };
+  await new ReceiptService(postgres).deleteReceiptsByUserId('user-id');
+  const preferenceUpdate = queries.find(({ sql }) => sql.includes("gmail_import_status = 'never_started'"));
+  assert.ok(preferenceUpdate);
+  assert.match(preferenceUpdate.sql, /tracking_status = 'inactive'/);
 });
 
 test('provider export failures preserve existing imported coverage', async () => {

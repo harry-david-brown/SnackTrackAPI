@@ -172,7 +172,7 @@ export class GmailClient implements EmailClient {
       || matchesKnownTemplate;
   }
 
-  async getEmails(user: User): Promise<Email[]> {
+  async getEmails(user: User, options?: { after?: Date }): Promise<Email[]> {
     if (config.shouldUseMockData() && !config.isProduction()) {
       console.log('🧪 USE_MOCK_DATA enabled, loading emails from debug-emails folder.');
       return this.loadEmailsFromDebugFolder(user);
@@ -183,7 +183,13 @@ export class GmailClient implements EmailClient {
 
     try {
       // Use centralized config for Gmail search query
-      const searchQuery = config.getGmailSearchQuery();
+      const baseSearchQuery = config.getGmailSearchQuery();
+      const afterSeconds = options?.after
+        ? Math.floor(options.after.getTime() / 1000)
+        : null;
+      const searchQuery = afterSeconds && Number.isFinite(afterSeconds)
+        ? `(${baseSearchQuery}) after:${afterSeconds}`
+        : baseSearchQuery;
 
       if (config.shouldEnableDetailedLogging()) {
         console.log('🔍 Gmail API: Searching for Uber emails with query:', searchQuery);

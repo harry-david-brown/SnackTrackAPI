@@ -31,9 +31,10 @@ export class OngoingTrackingService {
     ]);
     if (
       !user
-      || preferences.gmailImportStatus !== 'completed'
       || preferences.ongoingTrackingConsentState !== 'granted'
     ) return null;
+    const baseline = await this.preferences.getTrackingBaseline(userId);
+    if (!baseline.eligible) return null;
 
     const durableConnection = Boolean(
       user.gmailConnected

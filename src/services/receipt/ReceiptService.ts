@@ -388,6 +388,7 @@ export class ReceiptService {
         'DELETE FROM receipts WHERE user_id = $1',
         [userId]
       );
+      await client.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
 
       // Clearing all receipt data starts the historical-export journey over,
       // but deliberately leaves the user's Gmail monitoring consent intact.
@@ -400,12 +401,14 @@ export class ReceiptService {
              gmail_import_updated_at = NOW(),
              gmail_imported_count = 0,
              gmail_import_error_code = NULL,
+             gmail_baseline_completed_at = NULL,
              last_check_attempt_at = NULL,
              last_successful_check_at = NULL,
              last_stats_updated_at = NULL,
              last_new_order_at = NULL,
              last_tracking_error_at = NULL,
              last_tracking_error_code = NULL,
+             tracking_status = 'inactive',
              updated_at = NOW()
          WHERE user_id = $1`,
         [userId]

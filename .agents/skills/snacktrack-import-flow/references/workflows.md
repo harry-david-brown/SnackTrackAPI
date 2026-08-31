@@ -1,10 +1,10 @@
 # Import workflows
 
-## Gmail historical import
+## Gmail baseline and catch-up check
 
 1. User connects or reconnects Gmail through OAuth.
 2. API validates credentials before presenting/running an import action.
-3. User explicitly starts the historical receipt import.
+3. User explicitly starts the baseline or catch-up check.
 4. API acquires the per-user import lock.
 5. Gmail messages are fetched and parsed.
 6. Receipts are upserted using stable source identity and reported as new, updated, or unchanged.
@@ -37,12 +37,14 @@ The ready email links to Uber’s download page; it does not attach the archive.
 
 ## Ongoing tracking
 
-1. Historical import completion and Gmail connection make tracking valuable, not automatically authorized.
+1. A completed Gmail baseline or receipt-backed coverage from a provider export makes tracking eligible, but not automatically authorized.
 2. Ask explicit permission for ongoing future receipt monitoring.
 3. Validate Gmail health before enabling or invoking tracking.
-4. Scheduled/import-on-open work processes new receipts incrementally.
-5. Dashboard shows active monitoring without asking the user to manually scan Gmail.
-6. On `invalid_grant`, transition to reconnect required and show a reconnect action.
+4. For export-backed setup, enter `setting_up` and run the first consented check from the provider-specific export cutoffs without marking the Gmail baseline complete.
+5. Scheduled/import-on-open work processes new receipts incrementally using the prior successful check with a bounded lookback.
+6. A successful zero-result first check activates tracking; a failure preserves imported history and exposes retry/reconnect.
+7. Dashboard shows active monitoring without asking the user to manually scan Gmail.
+8. On `invalid_grant`, transition to reconnect required and show a reconnect action.
 
 Background tracking runs update tracking activity and runtime errors only. They must never start, complete, or fail the one-time Gmail history lifecycle.
 

@@ -27,6 +27,11 @@ export interface GmailImportResult {
   success: boolean;
   totalEmailsFound: number;
   totalReceiptsProcessed: number;
+  emailsExamined: number;
+  supportedReceiptsFound: number;
+  exportCoveredReceipts: number;
+  eligibleReceipts: number;
+  deduplicatedReceipts: number;
   totalReceiptsImported: number;
   totalAmount: number;
   errors: string[];
@@ -37,7 +42,35 @@ export interface GmailImportResult {
   errorCode: string | null;
 }
 
-type ExportCutoffsByReceiptType = Partial<Record<ReceiptType, Date>>;
+export type ExportCutoffsByReceiptType = Partial<Record<ReceiptType, Date>>;
+
+export const resolveIncrementalGmailSearchAfter = ({
+  lastSuccessfulCheckAt,
+  gmailBaselineCompletedAt,
+  csvCutoffs,
+}: {
+  lastSuccessfulCheckAt: string | null;
+  gmailBaselineCompletedAt: string | null;
+  csvCutoffs: ExportCutoffsByReceiptType;
+}): Date | undefined => {
+  const lastSuccessfulCheck = lastSuccessfulCheckAt
+    ? new Date(lastSuccessfulCheckAt)
+    : null;
+  const exportDates = Object.values(csvCutoffs)
+    .filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()));
+  const firstExportCutoff = exportDates.length > 0
+    ? new Date(Math.min(...exportDates.map(value => value.getTime())))
+    : null;
+  const gmailBaseline = gmailBaselineCompletedAt
+    ? new Date(gmailBaselineCompletedAt)
+    : null;
+  const anchor = lastSuccessfulCheck && !Number.isNaN(lastSuccessfulCheck.getTime())
+    ? lastSuccessfulCheck
+    : firstExportCutoff
+      ?? (gmailBaseline && !Number.isNaN(gmailBaseline.getTime()) ? gmailBaseline : null);
+  if (!anchor) return undefined;
+  return new Date(anchor.getTime() - 48 * 60 * 60 * 1000);
+};
 
 export const filterReceiptsAfterExportCutoffs = (
   receipts: Receipt[],
@@ -98,9 +131,17 @@ export class GmailImportService {
         throw new Error('User does not have a usable Gmail connection');
       }
 
+      // Export coverage is provider-specific. It both prevents historical
+      // duplicates and gives the first consented tracking check its starting
+      // point without pretending the explicit Gmail baseline ran.
+      const csvCutoffs = await this.getLatestCsvReceiptDates(user.id);
+      const searchAfter = triggerType === 'background'
+        ? await this.getIncrementalSearchAfter(user.id, csvCutoffs)
+        : undefined;
+
       // Fetch emails from Gmail (already parallelized in GmailClient)
       console.log(`📧 Fetching emails from Gmail for user: ${user.email}`);
-      const emails = await this.gmailClient.getEmails(user);
+      const emails = await this.gmailClient.getEmails(user, { after: searchAfter });
       console.log(`📧 Found ${emails.length} emails from Gmail`);
 
       // OPTIMIZATION: Parallel extraction with combined classification + parsing
@@ -216,8 +257,8 @@ export class GmailImportService {
       // Each provider's export is authoritative only for that provider through
       // its latest order. Do not let a DoorDash cutoff suppress Uber receipts,
       // or vice versa.
-      const csvCutoffs = await this.getLatestCsvReceiptDates(user.id);
       const validReceipts = filterReceiptsAfterExportCutoffs(foodReceipts, csvCutoffs);
+      const exportCoveredReceipts = foodReceipts.length - validReceipts.length;
       if (Object.keys(csvCutoffs).length > 0) {
         console.log(`📧 Skipped ${foodReceipts.length - validReceipts.length} Gmail receipts already covered by the uploaded export`);
       }
@@ -346,6 +387,10 @@ export class GmailImportService {
             {
               emailsScanned: emails.length,
               receiptsProcessed: receipts.length,
+              supportedReceiptsFound: foodReceipts.length,
+              exportCoveredReceipts,
+              eligibleReceipts: validReceipts.length,
+              deduplicatedReceipts: validReceiptsList.length,
               newOrders,
               updatedOrders,
               unchangedOrders,
@@ -362,6 +407,11 @@ export class GmailImportService {
           success: criticalErrors.length === 0,
           totalEmailsFound: emails.length,
           totalReceiptsProcessed: receipts.length, // Count of emails that were receipts
+          emailsExamined: emails.length,
+          supportedReceiptsFound: foodReceipts.length,
+          exportCoveredReceipts,
+          eligibleReceipts: validReceipts.length,
+          deduplicatedReceipts: validReceiptsList.length,
           totalReceiptsImported: importedCount,
           totalAmount: finalTotal, // Use deduped total
           errors,
@@ -376,6 +426,10 @@ export class GmailImportService {
       await this.importPreferences.completeSyncRun(syncRunId, user.id, 'success', {
         emailsScanned: emails.length,
         receiptsProcessed: receipts.length,
+        supportedReceiptsFound: foodReceipts.length,
+        exportCoveredReceipts,
+        eligibleReceipts: validReceipts.length,
+        deduplicatedReceipts: 0,
         newOrders: 0,
         updatedOrders: 0,
         unchangedOrders: 0,
@@ -386,6 +440,11 @@ export class GmailImportService {
         success: criticalErrors.length === 0,
         totalEmailsFound: emails.length,
         totalReceiptsProcessed: receipts.length, // Count of emails that were receipts
+        emailsExamined: emails.length,
+        supportedReceiptsFound: foodReceipts.length,
+        exportCoveredReceipts,
+        eligibleReceipts: validReceipts.length,
+        deduplicatedReceipts: 0,
         totalReceiptsImported: importedCount,
         totalAmount: 0,
         errors,
@@ -410,6 +469,11 @@ export class GmailImportService {
         success: false,
         totalEmailsFound: 0,
         totalReceiptsProcessed: 0,
+        emailsExamined: 0,
+        supportedReceiptsFound: 0,
+        exportCoveredReceipts: 0,
+        eligibleReceipts: 0,
+        deduplicatedReceipts: 0,
         totalReceiptsImported: 0,
         totalAmount: 0,
         errors: [errorMsg],
@@ -449,6 +513,21 @@ export class GmailImportService {
       }
     }
     return cutoffs;
+  }
+
+  private async getIncrementalSearchAfter(
+    userId: string,
+    csvCutoffs: ExportCutoffsByReceiptType
+  ): Promise<Date | undefined> {
+    const preferences = await this.importPreferences.get(userId);
+    // Gmail's `after` filter uses message time, while export cutoffs use order
+    // time. Re-read a small window so delayed or updated receipts are not lost;
+    // stable source identities make this idempotent.
+    return resolveIncrementalGmailSearchAfter({
+      lastSuccessfulCheckAt: preferences.lastSuccessfulCheckAt,
+      gmailBaselineCompletedAt: preferences.gmailBaselineCompletedAt,
+      csvCutoffs,
+    });
   }
 
   /**

@@ -8,12 +8,14 @@ Do not collapse these axes. Similar-looking UI states often have different recov
 | --- | --- | --- |
 | Gmail identity | Which account the user connected | absent, known email |
 | Credential health | Whether current tokens can access Gmail | healthy, unavailable, reconnect required |
-| Historical Gmail import | One-time/backfill import progress | never started, importing, completed, failed |
+| Gmail baseline | Whether an explicit one-time/catch-up scan has ever succeeded | never completed, completed at timestamp |
+| Latest Gmail attempt | The most recent explicit scan, independent of the baseline | never started, importing, completed, failed |
 | Provider export lifecycle | Independent Uber Eats/DoorDash request and upload progress | not started, requested, ready, processing, completed, failed |
 | Receipt source coverage | What data actually exists | Gmail-only, export-only, both, neither |
 | Export-alert consent | Permission to inspect mail for Uber’s ready message | not offered, declined, granted, revoked |
 | Ongoing tracking consent | Permission to monitor future receipt emails | not offered, declined, granted, revoked |
-| Tracking runtime | Current operational monitoring state | inactive, active, paused, reconnect required, error |
+| Tracking baseline | Which durable history makes incremental monitoring safe | none, Gmail baseline, provider export |
+| Tracking runtime | Current operational monitoring state | inactive, setting up, active, paused, reconnect required, error |
 
 `connected`, `hasImported`, `hasExportData`, and `canTrack` are not interchangeable.
 
@@ -24,8 +26,9 @@ Verify current declarations in `SnackTrackApp/services/gmailApi.ts`. The establi
 - monitoring consent: `not_offered`, `declined`, `granted`, `revoked`;
 - effective monitoring: `not_offered`, `declined`, `enabled`, `disabled`, `reconnect_required`;
 - provider export lifecycle: `not_started`, `requested`, `file_ready`, `import_processing`, `completed`, `failed`;
-- Gmail import: `never_started`, `importing`, `completed`, `failed`;
-- effective ongoing tracking: `not_offered`, `declined`, `active`, `paused`, `reconnect_required`, `error`.
+- Gmail baseline: sticky `hasCompleted` plus `completedAt`;
+- latest Gmail attempt: `never_started`, `importing`, `completed`, `failed`;
+- effective ongoing tracking: `not_offered`, `declined`, `setting_up`, `active`, `paused`, `reconnect_required`, `error`.
 
 If the source has evolved, update this reference in the same change.
 
@@ -47,7 +50,8 @@ For example, Uber Eats CSV receipts make Uber Eats complete even if its preferen
 2. The user explicitly starts the one-time Gmail history import.
 3. Uber Eats and DoorDash exports can be requested or uploaded independently in any order.
 4. Uber export-ready alerts authorize only the Uber data-ready email check while the app is active.
-5. Ongoing tracking requires a completed Gmail history scan, healthy durable Gmail access, and explicit tracking consent.
+5. Ongoing tracking requires either a completed Gmail baseline or receipt-backed coverage from a provider export, healthy durable Gmail access, and explicit tracking consent.
+6. Export-backed tracking setup starts from each provider's latest exported order without completing the explicit Gmail-history lifecycle.
 
 ## Fresh-account reset state
 

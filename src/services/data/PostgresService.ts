@@ -257,13 +257,14 @@ export class PostgresService {
           gmail_import_updated_at TIMESTAMPTZ,
           gmail_imported_count INTEGER NOT NULL DEFAULT 0,
           gmail_import_error_code VARCHAR(80),
+          gmail_baseline_completed_at TIMESTAMPTZ,
           ongoing_tracking_consent_state VARCHAR(24) NOT NULL DEFAULT 'not_offered'
             CHECK (ongoing_tracking_consent_state IN ('not_offered', 'declined', 'granted', 'revoked')),
           ongoing_tracking_consent_version VARCHAR(50),
           ongoing_tracking_consented_at TIMESTAMPTZ,
           ongoing_tracking_revoked_at TIMESTAMPTZ,
           tracking_status VARCHAR(24) NOT NULL DEFAULT 'inactive'
-            CHECK (tracking_status IN ('inactive', 'active', 'paused', 'reconnect_required', 'error')),
+            CHECK (tracking_status IN ('inactive', 'setting_up', 'active', 'paused', 'reconnect_required', 'error')),
           last_check_attempt_at TIMESTAMPTZ,
           last_successful_check_at TIMESTAMPTZ,
           last_stats_updated_at TIMESTAMPTZ,
@@ -296,12 +297,19 @@ export class PostgresService {
           requested_at TIMESTAMPTZ,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           error_code VARCHAR(80),
+          ready_source VARCHAR(24)
+            CHECK (ready_source IS NULL OR ready_source IN ('detected_email', 'user_confirmed')),
           PRIMARY KEY (user_id, provider)
         )
       `);
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_user_export_provider_status
         ON user_export_provider_preferences(provider, status)
+      `);
+      await this.query(`
+        ALTER TABLE user_export_provider_preferences
+          ADD COLUMN IF NOT EXISTS ready_source VARCHAR(24)
+            CHECK (ready_source IS NULL OR ready_source IN ('detected_email', 'user_confirmed'))
       `);
       // Only Uber has an automated data-ready email detector. Other legacy
       // request states are provider-ambiguous and are intentionally not guessed.
@@ -322,19 +330,31 @@ export class PostgresService {
           ADD COLUMN IF NOT EXISTS gmail_import_updated_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS gmail_imported_count INTEGER NOT NULL DEFAULT 0,
           ADD COLUMN IF NOT EXISTS gmail_import_error_code VARCHAR(80),
+          ADD COLUMN IF NOT EXISTS gmail_baseline_completed_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS ongoing_tracking_consent_state VARCHAR(24) NOT NULL DEFAULT 'not_offered'
             CHECK (ongoing_tracking_consent_state IN ('not_offered', 'declined', 'granted', 'revoked')),
           ADD COLUMN IF NOT EXISTS ongoing_tracking_consent_version VARCHAR(50),
           ADD COLUMN IF NOT EXISTS ongoing_tracking_consented_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS ongoing_tracking_revoked_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS tracking_status VARCHAR(24) NOT NULL DEFAULT 'inactive'
-            CHECK (tracking_status IN ('inactive', 'active', 'paused', 'reconnect_required', 'error')),
+            CHECK (tracking_status IN ('inactive', 'setting_up', 'active', 'paused', 'reconnect_required', 'error')),
           ADD COLUMN IF NOT EXISTS last_check_attempt_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS last_successful_check_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS last_stats_updated_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS last_new_order_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS last_tracking_error_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS last_tracking_error_code VARCHAR(80)
+      `);
+      await this.query(`
+        ALTER TABLE user_import_preferences
+          DROP CONSTRAINT IF EXISTS user_import_preferences_tracking_status_check
+      `);
+      await this.query(`
+        ALTER TABLE user_import_preferences
+          ADD CONSTRAINT user_import_preferences_tracking_status_check
+          CHECK (tracking_status IN (
+            'inactive', 'setting_up', 'active', 'paused', 'reconnect_required', 'error'
+          ))
       `);
 
       await this.query(`
@@ -449,8 +469,39 @@ export class PostgresService {
           new_orders INTEGER NOT NULL DEFAULT 0,
           updated_orders INTEGER NOT NULL DEFAULT 0,
           unchanged_orders INTEGER NOT NULL DEFAULT 0,
+          supported_receipts_found INTEGER NOT NULL DEFAULT 0,
+          export_covered_receipts INTEGER NOT NULL DEFAULT 0,
+          eligible_receipts INTEGER NOT NULL DEFAULT 0,
+          deduplicated_receipts INTEGER NOT NULL DEFAULT 0,
           error_code VARCHAR(80)
         )
+      `);
+      await this.query(`
+        ALTER TABLE gmail_sync_runs
+          ADD COLUMN IF NOT EXISTS supported_receipts_found INTEGER NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS export_covered_receipts INTEGER NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS eligible_receipts INTEGER NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS deduplicated_receipts INTEGER NOT NULL DEFAULT 0
+      `);
+      await this.query(`
+        UPDATE user_import_preferences
+        SET gmail_baseline_completed_at = COALESCE(gmail_import_updated_at, NOW())
+        WHERE gmail_baseline_completed_at IS NULL
+          AND gmail_import_status = 'completed'
+      `);
+      await this.query(`
+        UPDATE user_import_preferences preferences
+        SET gmail_baseline_completed_at = successful_run.completed_at
+        FROM (
+          SELECT user_id, MAX(completed_at) AS completed_at
+          FROM gmail_sync_runs
+          WHERE trigger_type = 'manual'
+            AND outcome IN ('success', 'partial')
+            AND completed_at IS NOT NULL
+          GROUP BY user_id
+        ) successful_run
+        WHERE preferences.user_id = successful_run.user_id
+          AND preferences.gmail_baseline_completed_at IS NULL
       `);
       await this.query(`
         CREATE INDEX IF NOT EXISTS idx_gmail_sync_runs_user_started

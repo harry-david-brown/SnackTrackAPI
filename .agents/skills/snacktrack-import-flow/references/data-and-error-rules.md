@@ -13,6 +13,7 @@
 - One-time OAuth/import permission and ongoing email monitoring permission are separate product decisions.
 - Obtain explicit permission before background inspection for future receipts or Uber data-ready messages.
 - Store consent state and timestamps server-side; do not infer consent from connection alone.
+- If consent also authorizes an initial catch-up from imported export cutoffs, state that scope clearly and version the changed consent copy.
 - Revocation must stop scheduled reads promptly.
 - Keep copy specific about what is read and why. Never imply SnackTrack can automatically download Uber’s export archive.
 
