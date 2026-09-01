@@ -1,16 +1,9 @@
-/**
- * Authentication Middleware
- * 
- * Handles JWT token validation and user authentication
- */
-
-import { Request, Response, NextFunction } from 'express';
-import { container } from '../services/core/ServiceContainer';
-import { AuthenticationError, AuthorizationError } from './errorHandler';
+import { NextFunction, Request, RequestHandler, Response } from 'express';
+import { AuthenticationError, AuthorizationError } from '../core/errors';
 import { TokenPayload } from '../models/Token';
-import { sentryConfig } from '../config/sentry';
+import { TokenService } from '../services/auth/TokenService';
+import { StructuredLogger } from '../services/core/StructuredLogger';
 
-// Extend Express Request type to include user
 declare global {
   namespace Express {
     interface Request {
@@ -19,105 +12,103 @@ declare global {
   }
 }
 
-/**
- * Middleware to authenticate requests using JWT
- * Extracts token from Authorization header and validates it
- */
-export const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
-  try {
-    // Get token from Authorization header
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.startsWith('Bearer ') 
-      ? authHeader.substring(7) 
-      : null;
+interface AuthenticationObservability {
+  setUserContext(userId: string, email: string): void;
+}
 
-    if (!token) {
-      throw new AuthenticationError('Access token is required');
-    }
+export interface AuthenticationMiddlewareDependencies {
+  readonly tokens: Pick<TokenService, 'verifyAccessToken'>;
+  readonly observability: AuthenticationObservability;
+  readonly logger: StructuredLogger;
+}
 
-    // Get auth service from container
-    const authService = container.authService;
-
-    // Verify token and extract user data
-    const decoded = authService.verifyAccessToken(token);
-
-    // Attach user to request
-    req.user = decoded;
-
-    // Set user context in Sentry for error tracking
-    sentryConfig.setUserContext(decoded.userId, decoded.email);
-
-    next();
-  } catch (error) {
-    if (error instanceof AuthenticationError) {
-      next(error);
-    } else {
-      next(new AuthenticationError('Invalid or expired token'));
-    }
+const bearerToken = (req: Request): string | undefined => {
+  const header = req.get('Authorization');
+  if (!header) return undefined;
+  if (!header.startsWith('Bearer ')) {
+    throw new AuthenticationError('Authorization header must use Bearer authentication');
   }
+  const token = header.slice('Bearer '.length).trim();
+  if (!token) throw new AuthenticationError('Access token is required');
+  return token;
 };
 
+export const createAuthenticateToken = (
+  dependencies: AuthenticationMiddlewareDependencies,
+): RequestHandler => {
+  return (req, _res, next) => {
+    try {
+      const token = bearerToken(req);
+      if (!token) throw new AuthenticationError('Access token is required');
+      const payload = dependencies.tokens.verifyAccessToken(token);
+      req.user = payload;
+      dependencies.observability.setUserContext(payload.userId, payload.email);
+      next();
+    } catch (error) {
+      next(
+        error instanceof AuthenticationError
+          ? error
+          : new AuthenticationError('Access token is invalid', 'ACCESS_TOKEN_INVALID'),
+      );
+    }
+  };
+};
+
+export type InvalidOptionalCredentialPolicy = 'reject' | 'continue_anonymous';
+
 /**
- * Middleware to validate that the authenticated user owns the resource
- * Compares userId from token with userId in request params or body
+ * Optional authentication is anonymous only when no credential is presented.
+ * Callers must explicitly choose whether an invalid presented credential is rejected.
  */
-export const validateOwnership = (req: Request, res: Response, next: NextFunction) => {
-  try {
-    if (!req.user) {
-      throw new AuthenticationError('Authentication required');
-    }
-
-    // Get userId from params or body
-    const resourceUserId = req.params.userId || req.params.id || req.body.userId;
-
-    if (!resourceUserId) {
-      // If no userId in request, skip validation (e.g., list endpoints)
+export const createOptionalAuthentication = (
+  dependencies: AuthenticationMiddlewareDependencies,
+  invalidCredentialPolicy: InvalidOptionalCredentialPolicy = 'reject',
+): RequestHandler => {
+  return (req, _res, next) => {
+    try {
+      const token = bearerToken(req);
+      if (!token) return next();
+      const payload = dependencies.tokens.verifyAccessToken(token);
+      req.user = payload;
+      dependencies.observability.setUserContext(payload.userId, payload.email);
       return next();
+    } catch (error) {
+      const known = error instanceof AuthenticationError;
+      dependencies.logger.warn('Optional authentication credential could not be verified', {
+        requestId: req.requestId,
+        operation: 'optional_authentication',
+        outcome: invalidCredentialPolicy === 'reject' ? 'rejected' : 'continued_anonymous',
+        errorCode: known ? error.code : 'INTERNAL_ERROR',
+      });
+      if (invalidCredentialPolicy === 'continue_anonymous' && known) return next();
+      return next(
+        known ? error : new AuthenticationError('Access token is invalid', 'ACCESS_TOKEN_INVALID'),
+      );
     }
+  };
+};
 
-    // Check if authenticated user owns the resource
-    if (req.user.userId !== resourceUserId) {
+export const validateOwnership = (req: Request, _res: Response, next: NextFunction): void => {
+  try {
+    if (!req.user) throw new AuthenticationError('Authentication required');
+    const body: unknown = req.body;
+    const bodyUserId =
+      typeof body === 'object' &&
+      body !== null &&
+      'userId' in body &&
+      typeof body.userId === 'string'
+        ? body.userId
+        : undefined;
+    const resourceUserId = req.params.userId || req.params.id || bodyUserId;
+    if (resourceUserId && req.user.userId !== resourceUserId) {
       throw new AuthorizationError('You do not have permission to access this resource');
     }
-
     next();
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Combined middleware for authentication + ownership validation
- * Use this for routes that require both auth and ownership check
- */
-export const authenticateAndValidateOwnership = [
-  authenticateToken,
-  validateOwnership
-];
-
-/**
- * Optional authentication middleware
- * Attaches user if token is present, but doesn't require it
- */
-export const optionalAuthentication = (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.startsWith('Bearer ') 
-      ? authHeader.substring(7) 
-      : null;
-
-    if (!token) {
-      // No token present, continue without user
-      return next();
-    }
-
-    const authService = container.authService;
-    const decoded = authService.verifyAccessToken(token);
-    req.user = decoded;
-
-    next();
-  } catch (error) {
-    // Token present but invalid - continue without user
-    next();
-  }
-};
+export const createAuthenticateAndValidateOwnership = (
+  dependencies: AuthenticationMiddlewareDependencies,
+): readonly RequestHandler[] => [createAuthenticateToken(dependencies), validateOwnership];

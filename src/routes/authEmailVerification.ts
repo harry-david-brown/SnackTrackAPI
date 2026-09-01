@@ -1,212 +1,51 @@
-/**
- * Email Verification Routes
- * 
- * Handles email verification flow: send code and confirm
- */
-
-import { Router, Request, Response } from 'express';
-import { container } from '../services/core/ServiceContainer';
-import { asyncHandler, ValidationError, NotFoundError, AuthenticationError } from '../middleware/errorHandler';
+import { RequestHandler, Router } from 'express';
+import { ValidationError } from '../core/errors';
+import { requireStringField } from '../http/validation/requestValues';
+import { asyncHandler } from '../middleware/errorHandler';
 import { validateEmail } from '../middleware/validation';
-import {
-  emailVerificationSendRateLimit,
-  otpVerificationRateLimit
-} from '../middleware/security';
-import logger from '../config/logger';
+import { EmailVerificationService } from '../services/auth/EmailVerificationService';
 
-const router = Router();
+export interface EmailVerificationRouterDependencies {
+  readonly verification: Pick<EmailVerificationService, 'send' | 'confirm'>;
+  readonly rateLimitSend: RequestHandler;
+  readonly rateLimitConfirmation: RequestHandler;
+}
 
-/**
- * @swagger
- * /auth/email/verify/send:
- *   post:
- *     summary: Send email verification code
- *     description: Send a 6-digit OTP code to user's email for verification. Triggered after registration or login with unverified email.
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: user@example.com
- *     responses:
- *       200:
- *         description: Verification code sent successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 expiresIn:
- *                   type: integer
- *                   description: Cooldown in seconds before resend is allowed
- *                   example: 60
- *                 message:
- *                   type: string
- *                   example: Verification code sent to your email
- *       400:
- *         $ref: '#/components/responses/ValidationError'
- *       404:
- *         description: Email not found
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
- */
-router.post(
-  '/send',
-  emailVerificationSendRateLimit,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { email } = req.body;
+const emailField = (body: unknown): string => {
+  const email = requireStringField(body, 'email');
+  if (!validateEmail(email)) throw new ValidationError('Invalid email format', 'email');
+  return email;
+};
 
-    if (!email) {
-      throw new ValidationError('Email is required', 'email');
-    }
+const codeField = (body: unknown): string => {
+  const code = requireStringField(body, 'code');
+  if (!/^\d{6}$/.test(code)) throw new ValidationError('Must be a 6-digit code', 'code');
+  return code;
+};
 
-    if (!validateEmail(email)) {
-      throw new ValidationError('Invalid email format', 'email');
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const otpService = container.otpService;
-    const emailSender = container.emailSender;
-    const userRepository = container.userRepository;
-
-    // Check if user exists
-    const user = await userRepository.findByEmail(normalizedEmail);
-    if (!user) {
-      throw new NotFoundError('Email not found');
-    }
-
-    // Only send if user's email is not already verified
-    if (user.emailVerified) {
-      throw new ValidationError('Email is already verified');
-    }
-
-    // Generate and store OTP
-    const code = await otpService.storeOTP(normalizedEmail, 'email_verification');
-
-    // Send email if enabled
-    if (emailSender.isEnabled()) {
-      await emailSender.sendVerificationEmail(normalizedEmail, code);
-      logger.info('Verification code sent');
-    } else {
-      // In development, log the code
-      logger.info('Verification email skipped in development');
-    }
-
-    res.status(200).json({
-      success: true,
-      expiresIn: 60, // Cooldown in seconds
-      message: 'Verification code sent to your email'
-    });
-  })
-);
-
-/**
- * @swagger
- * /auth/email/verify/confirm:
- *   post:
- *     summary: Confirm email verification
- *     description: Verify email address with 6-digit OTP code. Updates user's emailVerified status to true.
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - code
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: user@example.com
- *               code:
- *                 type: string
- *                 pattern: '^[0-9]{6}$'
- *                 description: 6-digit numeric code from email
- *                 example: "123456"
- *     responses:
- *       200:
- *         description: Email verified successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Email verified successfully
- *       400:
- *         $ref: '#/components/responses/ValidationError'
- *       401:
- *         description: Invalid or expired code
- *       404:
- *         description: No pending verification request found
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
- */
-router.post(
-  '/confirm',
-  otpVerificationRateLimit,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { email, code } = req.body;
-
-    if (!email || !code) {
-      throw new ValidationError('Email and code are required');
-    }
-
-    if (!validateEmail(email)) {
-      throw new ValidationError('Invalid email format', 'email');
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const otpService = container.otpService;
-    const userRepository = container.userRepository;
-
-    // Check if user exists
-    const user = await userRepository.findByEmail(normalizedEmail);
-    if (!user) {
-      throw new NotFoundError('Email not found');
-    }
-
-    // Check if there's a valid code
-    const hasValidCode = await otpService.hasValidCode(normalizedEmail, 'email_verification');
-    if (!hasValidCode) {
-      throw new NotFoundError('No pending verification request for this email');
-    }
-
-    // Verify the code
-    const isValid = await otpService.verifyOTP(normalizedEmail, code, 'email_verification');
-    
-    if (!isValid) {
-      throw new AuthenticationError('Invalid or expired code');
-    }
-
-    // Mark email as verified
-    await userRepository.updateEmailVerified(normalizedEmail, true);
-
-    logger.info('Email verification completed');
-
-    res.status(200).json({
-      success: true,
-      message: 'Email verified successfully'
-    });
-  })
-);
-
-export default router;
+export const createEmailVerificationRouter = (
+  dependencies: EmailVerificationRouterDependencies,
+): Router => {
+  const router = Router();
+  router.post(
+    '/send',
+    dependencies.rateLimitSend,
+    asyncHandler(async (req, res) => {
+      await dependencies.verification.send(emailField(req.body));
+      res.status(200).json({
+        success: true,
+        expiresIn: 60,
+        message: 'Verification code sent to your email',
+      });
+    }),
+  );
+  router.post(
+    '/confirm',
+    dependencies.rateLimitConfirmation,
+    asyncHandler(async (req, res) => {
+      await dependencies.verification.confirm(emailField(req.body), codeField(req.body));
+      res.status(200).json({ success: true, message: 'Email verified successfully' });
+    }),
+  );
+  return router;
+};

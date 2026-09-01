@@ -6,9 +6,11 @@ import {
   DashboardInsightEdition,
   getDashboardInsightPreviewNow,
 } from '../analytics/dashboard';
-import { CacheService } from '../core/CacheService';
-import { ReceiptRepository } from '../data/ReceiptRepository';
-import { UserRepository } from '../data/UserRepository';
+import type { DashboardCachePort, UserProfilePort } from '../ports/ProjectionPorts';
+import type { ReceiptReadPort } from '../ports/ReceiptPorts';
+
+type DashboardUserPort = UserProfilePort;
+type DashboardReceiptPort = Pick<ReceiptReadPort, 'findByUserId'>;
 
 export interface GetDashboardInsightsInput {
   userId: string;
@@ -19,9 +21,9 @@ export interface GetDashboardInsightsInput {
 /** Owns dashboard timezone repair, daily projection assembly, and cache policy. */
 export class GetDashboardInsightsService {
   constructor(
-    private readonly users: UserRepository,
-    private readonly receipts: ReceiptRepository,
-    private readonly cache: CacheService,
+    private readonly users: DashboardUserPort,
+    private readonly receipts: DashboardReceiptPort,
+    private readonly cache: DashboardCachePort,
   ) {}
 
   async execute(input: GetDashboardInsightsInput): Promise<DashboardInsightEdition> {

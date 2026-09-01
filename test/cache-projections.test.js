@@ -23,12 +23,14 @@ test('user summary cache codec accepts the documented projection', () => {
       topRestaurants: [{ name: 'Test Kitchen', count: 1, total: 12.5 }],
     },
     validation: { issues: [], zeroAmountReceipts: 0, refundedReceipts: 0 },
-    recentReceipts: [{
-      restaurantName: 'Test Kitchen',
-      amountSpent: 12.5,
-      orderDate: '2026-08-01T12:00:00.000Z',
-      dataSource: 'email',
-    }],
+    recentReceipts: [
+      {
+        restaurantName: 'Test Kitchen',
+        amountSpent: 12.5,
+        orderDate: '2026-08-01T12:00:00.000Z',
+        dataSource: 'email',
+      },
+    ],
   };
 
   assert.deepEqual(userSummaryCacheCodec.decode(userSummaryCacheCodec.encode(summary)), summary);

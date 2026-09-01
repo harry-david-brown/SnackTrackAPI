@@ -147,35 +147,55 @@ API and frontend changes are in scope. Existing contracts are evidence of curren
 - 2026-08-31 — Added recursive structured-log redaction before console, in-memory, and external transports, and removed credential/OTP/email-address logging from authentication, Gmail orchestration, and transactional email delivery paths. Added redaction coverage; API build passes and tests were not run per repository policy.
 - 2026-08-31 — Added the versioned coded error-envelope builder and aligned OpenAPI, consolidated UUID/request validation at the HTTP boundary, and extracted wrapped-analytics SQL/row normalization behind a typed query repository. The calculation service no longer owns a raw PostgreSQL pool. API build passes.
 - 2026-08-31 — Runtime-validated JWT claim shapes and credential failure modes, lowered expected operational failures to warning severity, and added per-user plus batch-level background tracking outcomes. Final checkpoint: API build, app type-check, and whitespace checks pass; test files were added but suites were not run per repository policy.
+- 2026-08-31 — Recorded the current and target cross-stack contracts for every app-consumed endpoint in `docs/API_CONTRACT_CATALOG.md`, including authentication, request/success/error schemas, stable recovery codes, cache/state ownership, import/consent/tracking/export and destructive-operation semantics, rollout choices, and dated compatibility-removal gates.
+- 2026-08-31 — Extracted Gmail connection/import-preference projection into a typed application service and moved receipt-backed source coverage behind a runtime-validating query adapter. Gmail routes now delegate status reads without raw SQL, DoorDash export coverage participates in the shared historical-baseline policy, and focused fake-port/adapter tests pass alongside the API build and architecture check.
+- 2026-08-31 — Extracted monitoring consent, tracking consent, provider-export request/confirmation, and export-ready detection into a typed import-preferences application service. Preconditions now run before lifecycle writes, routes delegate to one operation, and focused tests cover missing baselines, provider unavailability, ordered success, ineligible checks, and detected export transitions.
+- 2026-08-31 — Moved normalized Gmail/import contracts out of the transport client into the import-flow feature boundary and migrated all hooks, resolvers, UI, and tests off `gmailApi` type imports. Tightened the canonical preference normalizer, repaired stale transport fixtures, and fixed resolver precedence so receipt coverage outranks stale lifecycle state without hiding reconnect recovery. App type-check and 44 focused transport/hook/journey tests pass.
+- 2026-08-31 — Completed the high-risk behavior characterization gate with onboarding-reset rollback/lock-release coverage and removed the remaining stale frontend journey fixtures. Full verification at this checkpoint: API 78 tests, build, architecture check, and whitespace check pass; app type-check, lint, whitespace check, and all 413 tests pass.
+- 2026-08-31 — Extracted PostgreSQL `EXPLAIN (FORMAT JSON)` decoding from monitoring routes into a pure runtime-validating query-plan parser. All four diagnostics now share recursive index detection and typed timing/row fields; malformed plan coverage, API build, and architecture checks pass.
+- 2026-08-31 — Completed the administrator/monitoring read-model slice: route-local SQL moved into runtime-validating query adapters and application operations, user statistics now use one paginated aggregate instead of per-user reads, all sensitive diagnostics require the API key, and administrator deletion continues through the authoritative account-deletion use case. Centralized shared query/UUID validation and removed the last route-SQL architecture exceptions. Full API verification passes with 88 tests, build, architecture, and whitespace checks.
+- 2026-08-31 — Completed the PostgreSQL lifecycle/migration slice. `PostgresService` now owns only typed pool, query, scoped transaction, statistics, and idempotent close behavior; application modules depend on narrow database ports, while a dedicated health adapter owns readiness policy. Four immutable checksum-recorded migrations replace startup DDL/backfills under a PostgreSQL advisory lock, with a standalone release command and expand/backfill/contract guidance. Bootstrap owns migrations, Redis, monitoring timers, HTTP, PostgreSQL, Sentry, signals, and one-shot shutdown. Full combined verification passes with 105 API tests, including empty and representative legacy schemas on local PostgreSQL, plus build, architecture, and whitespace checks.
+- 2026-08-31 — Split the combined import-preferences persistence adapter into lifecycle commands, append-only audit events, Gmail sync runs, and read-only query projections with one canonical lifecycle vocabulary. Preference reads no longer insert or self-heal database rows; receipt-backed completion is derived without mutation. Runtime row decoders now reject malformed import enums, timestamps, counts, provider values, and UUIDs. Full verification passes with 112 API tests, including DoorDash import and real PostgreSQL migration coverage, plus build, architecture, and whitespace checks.
+- 2026-08-31 — Narrowed user-summary and dashboard application dependencies to only the user, receipt, analytics, and cache capabilities each operation consumes. Removed the unused pre-migration `DatabaseOptimizations` raw-pool class; versioned migrations and typed monitoring adapters remain the sole owners of its former schema and diagnostics responsibilities.
+- 2026-08-31 — Extracted Gmail OAuth state, authorization URL, token exchange, scope validation, credential persistence, and disconnect lifecycle into a provider adapter plus application operation behind a focused route factory. Extracted historical Gmail preflight, writer locking, execution, failure mapping, structured outcomes, and unconditional lock release into its own use case. Focused tests cover invalid redirects/state/scopes, provider denial, durable credential persistence, consent reset, unavailable/busy imports, success, provider failure, and unexpected cleanup.
+- 2026-08-31 — Made permanent account deletion retry-idempotent and made its post-commit cache, connection-health, and refresh-token cleanup explicitly best effort and observable, so a committed deletion cannot be reported as a failure. Added the complete relational/cache/provider inventory and distinct clear/reset/delete contracts in `docs/ACCOUNT_DATA_LIFECYCLE.md`, deterministic bounded-wait and cancellation ownership tests, and real PostgreSQL table-by-table tests for permanent deletion, source clear, and onboarding reset.
+- 2026-08-31 — Added a narrow structured logger port and removed direct console output from Gmail acquisition/import and CSV parsing. Operational logs now use consistent user/operation/provider/outcome/count/duration/error-code fields without addresses, subjects, bodies, receipt samples, or provider identities. Replaced raw debug-email and rejected-receipt dumps with a disabled-by-default adapter that writes only recursively redacted operational summaries; architecture checks prevent console calls from returning.
+- 2026-08-31 — Added strict ESLint and Prettier gates, documented exact temporary type-safety exceptions for the parallel provider-auth worktree, and made build, architecture, lint, format, tests, and the security audit blocking CI steps. Replaced remaining unsafe request/database boundary access outside that allowlist, made timezone detection framework-independent, and upgraded vulnerable direct/transitive dependencies until `npm audit --audit-level=moderate` reported zero findings. Full verification passes with all 130 API tests on local PostgreSQL (no skips), TypeScript build, lint, format, architecture, and whitespace checks.
+- 2026-08-31 — Completed the version-1 operational-error transport boundary outside the parallel auth slice. The API now maps typed and unknown failures centrally, classifies database availability by stable driver codes rather than message text, and retains only the OAuth redirect recovery catch in routes. The app validates the complete envelope once, rejects malformed/status-mismatched or legacy payloads, and routes all secondary error helpers through the canonical parser. Added validated `X-Request-ID` correlation to response headers, envelopes, and structured request/error logs, plus explicit operation/import/provider/duration/outcome/error-code context fields and focused cross-stack tests.
+- 2026-08-31 — Completed the CSV/export cross-stack slice. Unexpected parser/write failures now become the stable `EXPORT_IMPORT_FAILED` contract while validation failures retain their exact source-specific codes in lifecycle state. The app consumes one runtime-validated export result, uses one TanStack mutation as the pending authority, blocks duplicate submissions, waits for committed-success cache invalidation before presentation changes, and retains the selected file for visible retry. Removed the unsafe legacy AsyncStorage `File` retry queue and its stale pending banner. Full verification passes with all 135 API tests against local PostgreSQL (no skips), API build/architecture/lint/format gates, app type/lint/theme gates, and all 415 app tests.
+- 2026-08-31 — Completed the receipt/dashboard cross-stack migration. `GET /receipts` now emits only canonical `items/pageInfo` from an HTTP mapper; token identity replaced the temporary query user, and snake-case, `_id`, `createdAt`, old pagination, and dashboard-barrel compatibility paths were removed. Receipt and wrapped-analytics database projections reject malformed JSON, enums, dates, amounts, aggregate counts, and percentile rows. Wrapped formulas now run in a pure calculator behind query orchestration. TanStack receipt keys include every filter, analytics/dashboard keys remain parameter-complete, and explicit loading/empty/refresh/error states retain committed data during background work. Full verification passes with 149 API tests against local PostgreSQL (no skips), all API architecture/build/lint/format gates, and all 424 app tests plus type/lint/theme gates.
+- 2026-08-31 — Completed the Gmail/import cross-stack migration. The Gmail router is now a composition-only shell over OAuth, preference, tracking, and import route factories with injected HTTP policies. Historical acquisition, provider-neutral batch extraction, pure deduplication, lock-guarded persistence/cache invalidation, and durable lifecycle transitions are separate capabilities. Import preferences now include the canonical Gmail connection projection and are the app's sole query-cache authority for connection, consent, lifecycle, coverage, tracking baseline, and recovery state. Removed the aggregate export response, `gmailImport` aliases, the separate Gmail-status cache/query, optimistic import lifecycle overrides, duplicate import mutations, and fallback synthesis. Canonical import results are runtime-required at the frontend boundary. Full verification passes with 156 API tests against local PostgreSQL (no skips), API build/lint/architecture gates, and all 423 app tests plus type/lint gates.
+- 2026-08-31 — Completed the authentication/account cross-stack slice. Removed the monolithic `AuthService` and global auth route/middleware service lookups in favor of injected credential, token/session, identity-provider, password-reset, and email-verification capabilities. JWT, provider, and request payloads are decoded at entry; refresh rotation and optional-auth policy expose stable absent/expired/malformed/revoked codes; verification-code consumption and its account mutation now share one transaction. The app normalizes one required session DTO, recognizes canonical auth/code failures without endpoint-message parsing, retains credentials during temporary refresh or failed deletion, and clears credentials, user-bound device state, and query state only after confirmed deletion. Focused API and app auth/session/account lifecycle tests pass with build, lint, type, and architecture gates.
+- 2026-09-01 — Completed the hardening and final-audit milestone. Application services now depend on provider-neutral authentication, database, receipt, projection, import-lifecycle, mailbox, cache, and lock ports; CI rejects application-to-adapter imports and direct PostgreSQL-driver leakage. Removed the final legacy user endpoints and service-locator API, added shared API/OpenAPI and frontend contract fixtures, deterministic fakes, a behavioral core-coverage manifest, test responsibility mapping, and canonical OpenAPI schemas. The final audit and manual external-system checklist record the sole released-client CSV compatibility gate. Full verification passes with all 177 API tests against isolated local PostgreSQL schemas (no skips), API build/architecture/core-coverage/lint/format/security gates, and all 430 app tests plus theme/type/lint gates.
 
 ### Phase 0 — freeze behavior and establish safety rails
 
-- [ ] Create an API contract inventory for every frontend-consumed endpoint before changing implementations.
-  - [ ] Record method, path, authentication policy, request schema, success schema, error envelope, stable error codes, and relevant cache behavior.
-  - [ ] Explicitly record Gmail/import preference, consent, tracking, export-ready, reset, clear, and account-deletion semantics.
-  - [ ] Mark accidental inconsistencies that will require a versioned or coordinated frontend change instead of silently normalizing them.
-- [ ] Define the target contract catalog and migration decision for each affected resource.
-  - [ ] Select the canonical error envelope and stable codes consumed by the app API client.
-  - [ ] Select canonical pagination, mutation-result, import-lifecycle, connection-health, and destructive-operation DTOs.
-  - [ ] Map current frontend consumers in `services/api`, `gmailApi`, `authApi`, dashboard services, query hooks, contexts, feature resolvers, and device caches.
-  - [ ] Record whether each change is additive-first or an atomic API/app release.
-  - [ ] Add a dated removal task for every compatibility adapter or deprecated field.
-- [ ] Add behavior-level characterization tests around high-risk existing flows.
-  - [ ] Account reset success, rollback, and lock release.
+- [x] Create an API contract inventory for every frontend-consumed endpoint before changing implementations.
+  - [x] Record method, path, authentication policy, request schema, success schema, error envelope, stable error codes, and relevant cache behavior.
+  - [x] Explicitly record Gmail/import preference, consent, tracking, export-ready, reset, clear, and account-deletion semantics.
+  - [x] Mark accidental inconsistencies that will require a versioned or coordinated frontend change instead of silently normalizing them.
+- [x] Define the target contract catalog and migration decision for each affected resource.
+  - [x] Select the canonical error envelope and stable codes consumed by the app API client.
+  - [x] Select canonical pagination, mutation-result, import-lifecycle, connection-health, and destructive-operation DTOs.
+  - [x] Map current frontend consumers in `services/api`, `gmailApi`, `authApi`, dashboard services, query hooks, contexts, feature resolvers, and device caches.
+  - [x] Record whether each change is additive-first or an atomic API/app release.
+  - [x] Add a dated removal task for every compatibility adapter or deprecated field.
+- [x] Add behavior-level characterization tests around high-risk existing flows.
+  - [x] Account reset success, rollback, and lock release.
   - [x] Account deletion success and rollback.
   - [x] Gmail and CSV import lifecycle transitions.
   - [x] Receipt list filters and matching pagination totals.
   - [x] User summary/dashboard response shape.
   - [x] Central error-envelope mapping.
-- [ ] Replace source-text assertions with route or use-case behavior assertions.
-- [ ] Add a lightweight dependency-cycle and forbidden-import check.
+- [x] Replace source-text assertions with route or use-case behavior assertions.
+- [x] Add a lightweight dependency-cycle and forbidden-import check.
   - [x] Prevent application/domain modules from importing Express middleware.
-  - [ ] Prevent routes from importing database pools or executing SQL.
+  - [x] Prevent routes from importing database pools or executing SQL.
   - [x] Prevent new global service instances outside the composition root.
-- [ ] Update CI to run the real verification commands.
+- [x] Update CI to run the real verification commands.
   - [x] Run `npm run build`.
   - [x] Run `npm test`.
-  - [ ] Add and enforce lint/format scripts once their initial configuration is committed.
+  - [x] Add and enforce lint/format scripts once their initial configuration is committed.
 
 **Phase gate:** Existing externally visible behavior is documented and protected well enough to refactor one slice at a time.
 
@@ -187,12 +207,12 @@ API and frontend changes are in scope. Existing contracts are evidence of curren
   - [x] Define stable `code`, operational/public message, optional details, and `cause` fields.
   - [x] Keep HTTP status selection in an HTTP error mapper, not in domain policies where it is avoidable.
   - [x] Preserve existing stable import codes and frontend-recognized messages during migration.
-- [ ] Define one versioned error-envelope schema and route all operational errors through the central mapper.
-- [ ] Update the frontend API client to parse the canonical error envelope once.
+- [x] Define one versioned error-envelope schema and route all operational errors through the central mapper.
+- [x] Update the frontend API client to parse the canonical error envelope once.
   - [x] Preserve stable error codes through service normalizers and typed domain errors.
-  - [ ] Centralize session-expired handling while keeping validation, conflict/busy, reconnect-required, and retryable provider failures distinct.
-  - [ ] Remove endpoint-specific message parsing after all callers use error codes.
-- [ ] Replace broad route catches with typed propagation; retain local catches only for recovery, cleanup, enrichment, or expected fallbacks.
+  - [x] Centralize session-expired handling while keeping validation, conflict/busy, reconnect-required, and retryable provider failures distinct.
+  - [x] Remove endpoint-specific message parsing after all callers use error codes.
+- [x] Replace broad route catches with typed propagation; retain local catches only for recovery, cleanup, enrichment, or expected fallbacks.
 - [x] Consolidate UUID and common request validation into one boundary-validation layer.
 
 #### Configuration and composition
@@ -204,18 +224,18 @@ API and frontend changes are in scope. Existing contracts are evidence of curren
   - [x] Construct exactly one PostgreSQL pool owner.
   - [x] Construct exactly one Redis/cache resource owner per intended connection strategy.
   - [x] Construct repositories, providers, and use cases once unless a documented request scope is required.
-  - [ ] Inject route dependencies through route factories or a typed router context.
-- [ ] Make bootstrap the sole owner of resource startup, readiness, signal handling, and shutdown.
+  - [x] Inject route dependencies through route factories or a typed router context.
+- [x] Make bootstrap the sole owner of resource startup, readiness, signal handling, and shutdown.
   - [x] Remove `process.exit` decisions from infrastructure adapters.
-  - [ ] Verify all pools, Redis connections, scheduled jobs, and monitoring resources close once.
+  - [x] Verify all pools, Redis connections, scheduled jobs, and monitoring resources close once.
 - [x] Remove direct service construction from routes and from application services.
 
 #### Logging and telemetry
 
-- [ ] Define a narrow structured logger port with typed context.
-- [ ] Standardize request ID, user ID, operation/import ID, provider, duration, outcome, and error-code fields.
+- [x] Define a narrow structured logger port with typed context.
+- [x] Standardize request ID, user ID, operation/import ID, provider, duration, outcome, and error-code fields.
 - [x] Centralize redaction for tokens, cookies, email bodies, receipt payloads, and provider credentials.
-- [ ] Replace console calls in request, import, database, auth, email, and worker paths.
+- [x] Replace console calls in request, import, database, auth, email, and worker paths.
 - [x] Make expected client failures lower severity than unexpected server failures.
 
 **Phase gate:** New feature work can use typed dependencies, one error contract, validated config, and structured telemetry without importing transport or infrastructure details.
@@ -232,39 +252,39 @@ Complete this phase before broad cleanup because later extractions must preserve
   - [x] Define lease duration, renewal/heartbeat behavior, bounded wait policy, and contention result.
   - [x] Add fencing or an equivalent stale-writer defense where a lease can expire during a database write.
   - [x] Make the single-process fallback explicit and impossible to mistake for cross-process safety.
-- [ ] Add deterministic concurrency tests.
+- [x] Add deterministic concurrency tests.
   - [x] An expired owner cannot release a newer lock.
   - [x] Same-user writers serialize or return the documented busy result.
   - [x] Different-user writers can proceed concurrently.
   - [x] Exceptions and lease-loss paths release only the caller's lock.
-  - [ ] Cancellation and bounded-wait timeout paths release only the caller's lock.
-- [ ] Inventory and route every receipt writer through the same user-scoped policy.
+  - [x] Cancellation and bounded-wait timeout paths release only the caller's lock.
+- [x] Inventory and route every receipt writer through the same user-scoped policy.
   - [x] Gmail import and ongoing tracking.
   - [x] CSV/export import.
   - [x] Receipt clear/reset.
   - [x] Account deletion and administrator deletion.
   - [x] Remove the unused legacy refresh/repopulate workflow and endpoint.
-  - [ ] Future manual receipt mutations.
+  - [x] Future manual receipt mutations.
 
 #### Account reset, clear, and deletion
 
-- [ ] Create one authoritative account-deletion use case.
-  - [ ] Maintain an explicit inventory of all user-owned tables, provider credentials, sync records, events, cached views, and external side effects.
+- [x] Create one authoritative account-deletion use case.
+  - [x] Maintain an explicit inventory of all user-owned tables, provider credentials, sync records, events, cached views, and external side effects.
   - [x] Acquire the user writer lock before destructive mutation.
   - [x] Execute relational deletion in one transaction in dependency-safe order.
   - [x] Roll back the entire relational operation on failure.
   - [x] Perform cache and connection-health invalidation only after commit.
-  - [ ] Define retry/idempotency behavior for external credential revocation or other non-transactional effects.
+  - [x] Define retry/idempotency behavior for external credential revocation or other non-transactional effects.
 - [x] Make every deletion entry point delegate to the authoritative use case.
   - [x] Replace `AuthService.deleteAccount` orchestration.
   - [x] Replace or remove the duplicate `/database/users/:id` deletion implementation.
   - [x] Ensure administrator authorization remains a transport/application policy, not repository logic.
-- [ ] Separate and name the contracts for receipt clear, onboarding reset, and account deletion.
+- [x] Separate and name the contracts for receipt clear, onboarding reset, and account deletion.
   - [x] Preserve account identity and intended preferences for reset/clear.
   - [x] Remove identity and all user-owned data for account deletion.
-  - [ ] Prevent previously cleared source data from silently reappearing unless the product contract permits it.
+  - [x] Prevent previously cleared source data from silently reappearing unless the product contract permits it.
 - [x] Update `AccountResetService` to use the new lock and post-commit effect policy.
-- [ ] Add table-by-table and source-by-source lifecycle regression tests.
+- [x] Add table-by-table and source-by-source lifecycle regression tests.
 
 **Phase gate:** Every destructive or additive receipt path has one concurrency policy, and reset/deletion is transactional, complete, and contract-tested.
 
@@ -272,15 +292,15 @@ Complete this phase before broad cleanup because later extractions must preserve
 
 #### Database lifecycle and migrations
 
-- [ ] Split `PostgresService` responsibilities.
-  - [ ] A pool/transaction adapter owns connection lifecycle and typed query execution.
-  - [ ] A health adapter owns database readiness/health details.
-  - [ ] Versioned migration files own schema changes, indexes, constraints, and backfills.
-  - [ ] A migration runner records applied versions and fails safely.
-- [ ] Move startup schema mutation and optimization queries into ordered, reviewable migrations.
-- [ ] Define deployment and rollback guidance for expand/backfill/contract migrations.
+- [x] Split `PostgresService` responsibilities.
+  - [x] A pool/transaction adapter owns connection lifecycle and typed query execution.
+  - [x] A health adapter owns database readiness/health details.
+  - [x] Versioned migration files own schema changes, indexes, constraints, and backfills.
+  - [x] A migration runner records applied versions and fails safely.
+- [x] Move startup schema mutation and optimization queries into ordered, reviewable migrations.
+- [x] Define deployment and rollback guidance for expand/backfill/contract migrations.
 - [x] Replace `Promise<any>` query results with typed row/result contracts.
-- [ ] Add migration tests for empty and representative existing schemas.
+- [x] Add migration tests for empty and representative existing schemas.
 
 #### Repository ownership
 
@@ -289,18 +309,18 @@ Complete this phase before broad cleanup because later extractions must preserve
   - [x] Keep row mapping in the adapter and business calculations in pure domain/application modules.
   - [x] Remove database reach-through from `GmailImportService`.
   - [x] Make list and count queries share one filter object and identical predicates.
-- [ ] Replace hidden raw-pool dependencies with narrow repository/query ports.
+- [x] Replace hidden raw-pool dependencies with narrow repository/query ports.
   - [x] Wrapped analytics.
-  - [ ] User summaries and dashboard reads.
-  - [ ] Import source coverage and status reads.
-  - [ ] Monitoring and administrator diagnostics.
-- [ ] Split `ImportPreferencesRepository` by cohesive persistence responsibility while preserving one lifecycle vocabulary.
-  - [ ] Preference/lifecycle state commands.
-  - [ ] Import-event/audit persistence.
-  - [ ] Sync-run persistence.
-  - [ ] Read projection/query adapter.
-- [ ] Validate database JSON and enum-like values at the adapter boundary.
-- [ ] Define transaction-aware repository interfaces so a use case can pass one transaction context without exposing the raw pool.
+  - [x] User summaries and dashboard reads.
+  - [x] Import source coverage and status reads.
+  - [x] Monitoring and administrator diagnostics.
+- [x] Split `ImportPreferencesRepository` by cohesive persistence responsibility while preserving one lifecycle vocabulary.
+  - [x] Preference/lifecycle state commands.
+  - [x] Import-event/audit persistence.
+  - [x] Sync-run persistence.
+  - [x] Read projection/query adapter.
+- [x] Validate database JSON and enum-like values at the adapter boundary.
+- [x] Define transaction-aware repository interfaces so a use case can pass one transaction context without exposing the raw pool.
 
 **Phase gate:** Application code depends on typed persistence capabilities, migrations are explicit, and routes/services no longer reach into pools or another service's private database field.
 
@@ -314,75 +334,75 @@ Migrate one vertical slice at a time. For each slice, add/retain contract tests,
 - [x] Extract user summary, monthly breakdown, top-restaurant, and dashboard assembly from `routes/users.ts`.
 - [x] Move timezone persistence decisions behind an explicit user-preference/application operation.
 - [x] Move dashboard cache read/write/invalidation into the application operation or a decorator around it.
-- [ ] Keep analytics calculations pure and independent of Express and PostgreSQL.
-- [ ] Migrate the corresponding frontend resource boundaries.
-  - [ ] Update `services/api/receiptApi.ts`, `services/analyticsApi.ts`, `services/dashboardInsightsApi.ts`, and their transport validators for the target DTOs.
-  - [ ] Make `useReceiptsQuery` and analytics/dashboard query hooks the authoritative caches with complete parameterized query keys.
-  - [ ] Remove obsolete context, local cache, focus-refetch, or compatibility paths after all consumers move.
-  - [ ] Update loading, empty, background-refresh, error, and retry UI states and their behavior tests.
+- [x] Keep analytics calculations pure and independent of Express and PostgreSQL.
+- [x] Migrate the corresponding frontend resource boundaries.
+  - [x] Update `services/api/receiptApi.ts`, `services/analyticsApi.ts`, `services/dashboardInsightsApi.ts`, and their transport validators for the target DTOs.
+  - [x] Make `useReceiptsQuery` and analytics/dashboard query hooks the authoritative caches with complete parameterized query keys.
+  - [x] Remove obsolete context, local cache, focus-refetch, or compatibility paths after all consumers move.
+  - [x] Update loading, empty, background-refresh, error, and retry UI states and their behavior tests.
 
 #### Gmail/import slice
 
-- [ ] Split Gmail HTTP concerns into focused route modules or handlers without changing endpoint contracts.
-- [ ] Extract cohesive use cases for:
-  - [ ] OAuth connect/callback/disconnect.
-  - [ ] Import-status and preference projection.
-  - [ ] Consent and tracking preference transitions.
-  - [ ] Historical Gmail import.
-  - [ ] Export-ready checking.
-  - [ ] Ongoing tracking batch execution.
-- [ ] Preserve one authoritative import state machine and stable frontend-recognized reason/error codes.
-- [ ] Make source coverage a typed query capability instead of route-owned SQL.
-- [ ] Split provider acquisition, message retrieval, parsing/extraction, deduplication, persistence, and lifecycle transition responsibilities.
+- [x] Split Gmail HTTP concerns into focused route modules or handlers without changing endpoint contracts.
+- [x] Extract cohesive use cases for:
+  - [x] OAuth connect/callback/disconnect.
+  - [x] Import-status and preference projection.
+  - [x] Consent and tracking preference transitions.
+  - [x] Historical Gmail import.
+  - [x] Export-ready checking.
+  - [x] Ongoing tracking batch execution.
+- [x] Preserve one authoritative import state machine and stable frontend-recognized reason/error codes.
+- [x] Make source coverage a typed query capability instead of route-owned SQL.
+- [x] Split provider acquisition, message retrieval, parsing/extraction, deduplication, persistence, and lifecycle transition responsibilities.
 - [x] Remove application-service construction from `GmailImportService`, `OngoingTrackingService`, and connection-health code.
 - [x] Make batch-level and per-user tracking outcomes observable; do not swallow failures.
-- [ ] Migrate the frontend import-flow boundary with the API changes.
-  - [ ] Replace transport types imported directly from `gmailApi` throughout feature/UI code with normalized domain contracts exposed by the import-flow module.
-  - [ ] Update `gmailApi`, `gmailNormalizers`, `useImportPreferences`, `useGmailImport`, and `useImportFlowController` together.
-  - [ ] Make the import-preferences/status query the single server-state authority for lifecycle, consent, source coverage, and reconnect requirements.
-  - [ ] Update pure import-flow resolvers for loading, unconnected, consent-required, importing, partial, complete, reconnect-required, busy, retryable failure, and terminal failure states.
-  - [ ] Remove legacy state aliases, local success overrides, duplicated polling, and one-way compatibility adapters after rollout.
-  - [ ] Update import journey tests for Gmail connection, historical import, tracking, export-ready detection, and source disagreement during rollout.
+- [x] Migrate the frontend import-flow boundary with the API changes.
+  - [x] Replace transport types imported directly from `gmailApi` throughout feature/UI code with normalized domain contracts exposed by the import-flow module.
+  - [x] Update `gmailApi`, `gmailNormalizers`, `useImportPreferences`, `useGmailImport`, and `useImportFlowController` together.
+  - [x] Make the import-preferences/status query the single server-state authority for lifecycle, consent, source coverage, and reconnect requirements.
+  - [x] Update pure import-flow resolvers for loading, unconnected, consent-required, importing, partial, complete, reconnect-required, busy, retryable failure, and terminal failure states.
+  - [x] Remove legacy state aliases, local success overrides, duplicated polling, and one-way compatibility adapters after rollout.
+  - [x] Update import journey tests for Gmail connection, historical import, tracking, export-ready detection, and source disagreement during rollout.
 
 #### CSV/export slice
 
 - [x] Create a CSV import use case that owns lock, lifecycle transition, transaction/write orchestration, and post-commit invalidation.
 - [x] Keep multipart parsing and temporary-file cleanup in transport/infrastructure adapters.
 - [x] Keep CSV parsing/normalization pure where possible.
-- [ ] Standardize import failure mapping with Gmail while retaining source-specific details.
-- [ ] Update `services/api/csvApi.ts` and the export-upload controller/components to consume the canonical operation result and error codes.
-- [ ] Define one frontend pending operation state, prevent duplicate submissions for UX, and rely on the API lock/idempotency policy for correctness.
-- [ ] Update receipt, analytics, dashboard, import-preference, export handoff, and notification caches only after committed success.
-- [ ] Preserve selected-file/retry state after recoverable upload failures and remove deprecated upload response handling after rollout.
+- [x] Standardize import failure mapping with Gmail while retaining source-specific details.
+- [x] Update `services/api/csvApi.ts` and the export-upload controller/components to consume the canonical operation result and error codes.
+- [x] Define one frontend pending operation state, prevent duplicate submissions for UX, and rely on the API lock/idempotency policy for correctness.
+- [x] Update receipt, analytics, dashboard, import-preference, export handoff, and notification caches only after committed success.
+- [x] Preserve selected-file/retry state after recoverable upload failures and remove deprecated upload response handling after rollout.
 
 #### Authentication and account slice
 
-- [ ] Split `AuthService` into cohesive credential, token/session, provider-auth, and account-lifecycle capabilities.
-- [ ] Extract verification and password-reset workflows from route-level multi-service orchestration.
+- [x] Split `AuthService` into cohesive credential, token/session, provider-auth, and account-lifecycle capabilities.
+- [x] Extract verification and password-reset workflows from route-level multi-service orchestration.
 - [x] Runtime-validate JWT payloads and distinguish absent, expired, malformed, and revoked credentials.
-- [ ] Express optional-auth behavior as an explicit policy and log unexpected verification failures safely.
-- [ ] Migrate `authApi`, its normalizers, and `UserContext` to the target session/auth DTOs and canonical errors.
-- [ ] Keep authentication identity/token lifecycle in `UserContext`; do not move ordinary server resources into it during the refactor.
-- [ ] Update password-reset and verification controllers to use explicit pending, invalid/expired code, retry, and success states.
-- [ ] Update reset/clear/account-deletion frontend mutations as separate contracts.
-  - [ ] Reset/clear preserves the authenticated session, removes affected TanStack Query entries and user-bound device caches after server success, then returns to the fresh authenticated journey.
-  - [ ] Account deletion clears credentials and all user-bound local state only after the server confirms deletion, then returns to signed-out state.
-  - [ ] A failed or busy destructive operation retains current data and presents a retry path; it must not show partial success.
-  - [ ] Remove any client sequence of partial deletion calls in favor of one authoritative server operation.
+- [x] Express optional-auth behavior as an explicit policy and log unexpected verification failures safely.
+- [x] Migrate `authApi`, its normalizers, and `UserContext` to the target session/auth DTOs and canonical errors.
+- [x] Keep authentication identity/token lifecycle in `UserContext`; do not move ordinary server resources into it during the refactor.
+- [x] Update password-reset and verification controllers to use explicit pending, invalid/expired code, retry, and success states.
+- [x] Update reset/clear/account-deletion frontend mutations as separate contracts.
+  - [x] Reset/clear preserves the authenticated session, removes affected TanStack Query entries and user-bound device caches after server success, then returns to the fresh authenticated journey.
+  - [x] Account deletion clears credentials and all user-bound local state only after the server confirms deletion, then returns to signed-out state.
+  - [x] A failed or busy destructive operation retains current data and presents a retry path; it must not show partial success.
+  - [x] Remove any client sequence of partial deletion calls in favor of one authoritative server operation.
 
 #### Administrator and monitoring slice
 
-- [ ] Move database and monitoring SQL into typed administrator/operations query adapters.
-- [ ] Replace per-user N+1 administrator statistics with aggregate queries.
-- [ ] Extract a typed query-plan parser from the monitoring route.
-- [ ] Apply explicit administrator authorization to every sensitive operational endpoint.
-- [ ] Keep destructive administrator commands behind the same application lifecycle services as user-facing commands.
+- [x] Move database and monitoring SQL into typed administrator/operations query adapters.
+- [x] Replace per-user N+1 administrator statistics with aggregate queries.
+- [x] Extract a typed query-plan parser from the monitoring route.
+- [x] Apply explicit administrator authorization to every sensitive operational endpoint.
+- [x] Keep destructive administrator commands behind the same application lifecycle services as user-facing commands.
 
 #### Analytics slice
 
-- [ ] Split `WrappedAnalyticsService` into a typed analytics query adapter and pure calculation/assembly services.
-- [ ] Reuse existing pure dashboard/shared analytics modules instead of duplicating formulas.
-- [ ] Add fixture-based formula tests at boundary dates, sparse data, mixed currencies/types, and timezone edges.
+- [x] Split `WrappedAnalyticsService` into a typed analytics query adapter and pure calculation/assembly services.
+- [x] Reuse existing pure dashboard/shared analytics modules instead of duplicating formulas.
+- [x] Add fixture-based formula tests at boundary dates, sparse data, mixed currencies/types, and timezone edges.
 
 **Phase gate:** Routes validate and delegate to one application operation; use cases own workflows; adapters own I/O; domain calculations remain pure.
 
@@ -393,22 +413,22 @@ Migrate one vertical slice at a time. For each slice, add/retain contract tests,
   - [x] Define the provider client interface in a provider-neutral module.
   - [x] Remove the unused provider factory; current provider adapters depend only on the neutral interface.
   - [x] Remove dynamic `require` and provider-name casts.
-- [ ] Redesign the receipt data model.
+- [x] Redesign the receipt data model.
   - [x] Make persisted identifiers explicit and immutable.
-  - [ ] Separate database row, domain record, write command, and API response DTO types.
-  - [ ] Move `toApiResponse` behavior to a transport mapper.
-- [ ] Add runtime schemas for all untrusted boundaries.
-  - [ ] Route body, path, and query parameters.
+  - [x] Separate database row, domain record, write command, and API response DTO types.
+  - [x] Move `toApiResponse` behavior to a transport mapper.
+- [x] Add runtime schemas for all untrusted boundaries.
+  - [x] Route body, path, and query parameters.
   - [x] JWT claims.
-  - [ ] Gmail/Outlook provider payloads.
-  - [ ] CSV rows and parsed receipt extraction results.
+  - [x] Provider payloads (Gmail is decoded now; a future Outlook adapter must implement the same mailbox/provider decoder contract).
+  - [x] CSV rows and parsed receipt extraction results.
   - [x] Cached JSON.
-  - [ ] Database JSON columns and state values.
-- [ ] Remove `any`, unsafe assertions, and private-field reach-through from production code.
-  - [ ] Track remaining exceptions in a short allowlist with an owner and removal reason.
-  - [ ] Prefer `unknown` followed by validation at boundaries.
-- [ ] Make shared utilities framework-independent; pass header/timezone values rather than an Express request to timezone helpers.
-- [ ] Replace magic strings and provider/state casing variants with canonical domain types.
+  - [x] Database JSON columns and state values.
+- [x] Remove `any`, unsafe assertions, and private-field reach-through from production code.
+  - [x] Track remaining exceptions in a short allowlist with an owner and removal reason.
+  - [x] Prefer `unknown` followed by validation at boundaries.
+- [x] Make shared utilities framework-independent; pass header/timezone values rather than an Express request to timezone helpers.
+- [x] Replace magic strings and provider/state casing variants with canonical domain types.
 - [x] Re-run the dependency-cycle audit and remove all known cycles; CI now enforces the check.
 
 **Phase gate:** No known static cycles remain, untrusted input is validated once at entry, and core application/domain code contains no unexplained `any` or framework/database types.
@@ -418,83 +438,83 @@ Migrate one vertical slice at a time. For each slice, add/retain contract tests,
 - [x] Define typed cache interfaces for each cached projection instead of a generic `any` cache API.
 - [x] Validate cached values before use and treat invalid entries as misses with safe telemetry.
 - [x] Replace Redis `KEYS` deletion with versioned keys, a tracked key set, or cursor-based `SCAN` as appropriate.
-- [ ] Co-locate cache invalidation policy with the use case that commits the mutation.
-- [ ] Ensure cache writes and invalidations occur at documented transaction boundaries.
+- [x] Co-locate cache invalidation policy with the use case that commits the mutation.
+- [x] Ensure cache writes and invalidations occur at documented transaction boundaries.
 - [x] Remove the global `cacheService` export after all consumers use the composition root.
-- [ ] Move debug email capture behind a disabled-by-default, redacting debug adapter.
-- [ ] Classify non-transactional side effects.
-  - [ ] Synchronous effects required before success.
-  - [ ] Post-commit best-effort effects with observable retry.
-  - [ ] Durable asynchronous effects requiring an outbox/job mechanism.
-- [ ] Document and test retry/idempotency rules for provider calls and background operations.
+- [x] Move debug email capture behind a disabled-by-default, redacting debug adapter.
+- [x] Classify non-transactional side effects.
+  - [x] Synchronous effects required before success.
+  - [x] Post-commit best-effort effects with observable retry.
+  - [x] Durable asynchronous effects requiring an outbox/job mechanism.
+- [x] Document and test retry/idempotency rules for provider calls and background operations.
 
 **Phase gate:** Cache and external side effects are deliberate parts of application workflows, not incidental route or repository behavior.
 
 ### Phase 7 — complete verification and tooling coverage
 
-- [ ] Organize tests by responsibility rather than by large end-to-end fixture files.
-  - [ ] Pure domain/calculation unit tests.
-  - [ ] Application use-case tests with fake ports.
-  - [ ] Route contract tests.
-  - [ ] Repository integration tests against PostgreSQL.
-  - [ ] Migration tests.
-  - [ ] Lock/concurrency tests.
-  - [ ] Account lifecycle and import state-machine regression tests.
-- [ ] Add contract fixtures shared by route tests and Swagger/OpenAPI generation where practical.
-- [ ] Add matching frontend transport fixtures for every changed API resource.
-  - [ ] Verify valid responses normalize to frontend domain models.
-  - [ ] Verify malformed or unknown responses fail safely at the service boundary.
-  - [ ] Verify canonical error codes produce the intended retry, reconnect, re-authenticate, or terminal UI state.
-- [ ] Add cross-stack journey coverage for every breaking or additive-first contract migration.
-- [ ] Verify authorization-denied, validation, not-found, conflict/busy, provider failure, and unexpected failure paths.
-- [ ] Add deterministic clock, ID, lock, provider, and cache fakes.
-- [ ] Enforce coverage for new/changed core modules without using a percentage target as a substitute for behavioral cases.
-- [ ] Add ESLint rules for unsafe `any`, floating promises, unhandled async work, dependency direction, and forbidden console use.
-- [ ] Add formatting enforcement and remove warning-only CI steps.
-- [ ] Make `npm run build`, `npm test`, lint, and format checks required CI gates.
+- [x] Organize tests by responsibility rather than by large end-to-end fixture files.
+  - [x] Pure domain/calculation unit tests.
+  - [x] Application use-case tests with fake ports.
+  - [x] Route contract tests.
+  - [x] Repository integration tests against PostgreSQL.
+  - [x] Migration tests.
+  - [x] Lock/concurrency tests.
+  - [x] Account lifecycle and import state-machine regression tests.
+- [x] Add contract fixtures shared by route tests and Swagger/OpenAPI generation where practical.
+- [x] Add matching frontend transport fixtures for every changed API resource.
+  - [x] Verify valid responses normalize to frontend domain models.
+  - [x] Verify malformed or unknown responses fail safely at the service boundary.
+  - [x] Verify canonical error codes produce the intended retry, reconnect, re-authenticate, or terminal UI state.
+- [x] Add cross-stack journey coverage for every breaking or additive-first contract migration.
+- [x] Verify authorization-denied, validation, not-found, conflict/busy, provider failure, and unexpected failure paths.
+- [x] Add deterministic clock, ID, lock, provider, and cache fakes.
+- [x] Enforce coverage for new/changed core modules without using a percentage target as a substitute for behavioral cases.
+- [x] Add ESLint rules for unsafe `any`, floating promises, unhandled async work, dependency direction, and forbidden console use.
+- [x] Add formatting enforcement and remove warning-only CI steps.
+- [x] Make `npm run build`, `npm test`, lint, and format checks required CI gates.
 
 **Phase gate:** Every boundary and high-risk workflow has automated regression coverage, and CI prevents architectural backsliding.
 
 ### Phase 8 — remove superseded code and document the resulting design
 
 - [x] Confirm callers, then remove the legacy `DatabaseService` refresh/repopulate path if it is unused; otherwise migrate it to the import use case and shared lock.
-- [ ] Remove duplicate repository/service methods and route-local SQL after their replacements ship.
-- [ ] Remove commented-out legacy implementations and obsolete compatibility casts.
-- [ ] Reduce `ServiceContainer` to the typed composition root, then remove the old service-locator API.
-- [ ] Update Swagger/OpenAPI schemas to match the protected request, response, and error contracts.
-- [ ] Remove deprecated API fields/endpoints and frontend compatibility normalizers only after the selected rollout gate is satisfied.
-- [ ] Add concise architecture decision records for:
-  - [ ] Dependency direction and composition.
-  - [ ] Transaction and repository context.
-  - [ ] User-scoped receipt writer locking.
-  - [ ] Account reset/clear/deletion semantics.
-  - [ ] Import lifecycle ownership.
-  - [ ] Cache and post-commit side-effect policy.
-- [ ] Update API contributor guidance with a feature/change checklist and representative vertical slice.
-- [ ] Run a final architecture audit against the backend skill and record any intentional exceptions.
+- [x] Remove duplicate repository/service methods and route-local SQL after their replacements ship.
+- [x] Remove commented-out legacy implementations and obsolete compatibility casts.
+- [x] Reduce `ServiceContainer` to the typed composition root, then remove the old service-locator API.
+- [x] Update Swagger/OpenAPI schemas to match the protected request, response, and error contracts.
+- [x] Remove deprecated API fields/endpoints and frontend compatibility normalizers whose rollout gates are satisfied; retain only the named released-client CSV gate.
+- [x] Add concise architecture decision records for:
+  - [x] Dependency direction and composition.
+  - [x] Transaction and repository context.
+  - [x] User-scoped receipt writer locking.
+  - [x] Account reset/clear/deletion semantics.
+  - [x] Import lifecycle ownership.
+  - [x] Cache and post-commit side-effect policy.
+- [x] Update API contributor guidance with a feature/change checklist and representative vertical slice.
+- [x] Run a final architecture audit against the backend skill and record any intentional exceptions.
 
 ## Per-slice definition of done
 
 Use this checklist for each migrated endpoint or workflow.
 
-- [ ] The route only authenticates/authorizes, validates, calls one application operation, and maps the result.
-- [ ] Business rules and workflow ordering are outside Express handlers.
-- [ ] Dependency direction is transport → application → domain/ports → adapters.
-- [ ] No application/domain import points to Express, middleware, PostgreSQL, Redis, or a provider SDK.
-- [ ] Database changes are transactional at the use-case boundary where atomicity is required.
-- [ ] Receipt writes use the shared user-scoped concurrency policy.
-- [ ] External input, database JSON, provider data, and cached data are runtime-validated.
-- [ ] Errors have stable codes and are mapped through the central HTTP envelope.
-- [ ] Logs are structured, correlated, and redacted.
-- [ ] Cache invalidation and external side effects occur at the documented commit boundary.
-- [ ] Public request/response behavior is preserved or changed through an explicit coordinated migration.
-- [ ] If the contract changed, the API DTO/OpenAPI schema and frontend service normalizer were updated together.
-- [ ] The frontend resource has one authoritative state owner and all affected query/device cache behavior is defined.
-- [ ] The frontend intentionally handles loading, empty, success, background refresh, failure, reconnect, busy, and retry states that apply to the slice.
-- [ ] Any temporary compatibility adapter has a named removal task and rollout gate.
-- [ ] Focused tests cover success, expected failure, unexpected failure, rollback/cleanup, and relevant concurrency behavior.
-- [ ] Build, tests, lint, and format checks pass.
-- [ ] Superseded code is removed in the same slice or tracked by a specific follow-up checkbox.
+- [x] The route only authenticates/authorizes, validates, calls one application operation, and maps the result.
+- [x] Business rules and workflow ordering are outside Express handlers.
+- [x] Dependency direction is transport → application → domain/ports → adapters.
+- [x] No application/domain import points to Express, middleware, PostgreSQL, Redis, or a provider SDK.
+- [x] Database changes are transactional at the use-case boundary where atomicity is required.
+- [x] Receipt writes use the shared user-scoped concurrency policy.
+- [x] External input, database JSON, provider data, and cached data are runtime-validated.
+- [x] Errors have stable codes and are mapped through the central HTTP envelope.
+- [x] Logs are structured, correlated, and redacted.
+- [x] Cache invalidation and external side effects occur at the documented commit boundary.
+- [x] Public request/response behavior is preserved or changed through an explicit coordinated migration.
+- [x] If the contract changed, the API DTO/OpenAPI schema and frontend service normalizer were updated together.
+- [x] The frontend resource has one authoritative state owner and all affected query/device cache behavior is defined.
+- [x] The frontend intentionally handles loading, empty, success, background refresh, failure, reconnect, busy, and retry states that apply to the slice.
+- [x] Any temporary compatibility adapter has a named removal task and rollout gate.
+- [x] Focused tests cover success, expected failure, unexpected failure, rollback/cleanup, and relevant concurrency behavior.
+- [x] Build, tests, lint, and format checks pass.
+- [x] Superseded code is removed in the same slice or tracked by a specific follow-up checkbox.
 
 ## Suggested milestone sequence
 

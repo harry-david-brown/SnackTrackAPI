@@ -1,10 +1,11 @@
 /**
  * Pagination Middleware and Utilities
- * 
+ *
  * Provides standardized pagination for all endpoints
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { parseQueryInteger } from '../http/validation/requestValues';
 
 export interface PaginationParams {
   page: number;
@@ -27,8 +28,12 @@ export interface PaginationMeta {
  * Max limit: 1000
  */
 export function parsePagination(req: Request): PaginationParams {
-  const page = Math.max(1, parseInt(req.query.page as string) || 1);
-  const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 50));
+  const page = parseQueryInteger(req.query.page, 'page', { defaultValue: 1, minimum: 1 })!;
+  const limit = parseQueryInteger(req.query.limit, 'limit', {
+    defaultValue: 50,
+    minimum: 1,
+    maximum: 1000,
+  })!;
   const offset = (page - 1) * limit;
 
   return { page, limit, offset };
@@ -37,20 +42,16 @@ export function parsePagination(req: Request): PaginationParams {
 /**
  * Create pagination metadata for response
  */
-export function createPaginationMeta(
-  total: number,
-  page: number,
-  limit: number
-): PaginationMeta {
+export function createPaginationMeta(total: number, page: number, limit: number): PaginationMeta {
   const totalPages = Math.ceil(total / limit);
-  
+
   return {
     page,
     limit,
     total,
     totalPages,
     hasMore: page < totalPages,
-    hasPrevious: page > 1
+    hasPrevious: page > 1,
   };
 }
 
@@ -69,11 +70,11 @@ export function createPaginatedResponse<T>(
   data: T[],
   total: number,
   page: number,
-  limit: number
+  limit: number,
 ): PaginatedResponse<T> {
   return {
     data,
-    pagination: createPaginationMeta(total, page, limit)
+    pagination: createPaginationMeta(total, page, limit),
   };
 }
 
@@ -93,4 +94,3 @@ declare global {
     }
   }
 }
-

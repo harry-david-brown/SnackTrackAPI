@@ -1,6 +1,6 @@
 /**
  * Redis Configuration
- * 
+ *
  * Manages Redis connection for caching
  * Optional in development, recommended for production
  */
@@ -62,11 +62,11 @@ class RedisConfigManager {
               return new Error('Redis connection failed');
             }
             return Math.min(retries * 100, 3000); // Exponential backoff, max 3s
-          }
-        }
+          },
+        },
       });
 
-      this.client.on('error', (err) => {
+      this.client.on('error', (err: unknown) => {
         logger.error('Redis client error', { error: err });
       });
 
@@ -79,14 +79,16 @@ class RedisConfigManager {
       });
 
       await this.client.connect();
-      
+
       // Test connection
       await this.client.ping();
-      
+
       logger.info('Redis cache initialized', { defaultTtlSeconds: this.config.defaultTTL });
-      
     } catch (error) {
       logger.error('Failed to connect to Redis; caching unavailable', { error });
+      if (this.client?.isOpen) {
+        await this.client.disconnect();
+      }
       this.client = null;
     } finally {
       this.connecting = false;
@@ -176,7 +178,7 @@ class RedisConfigManager {
       // SET key value NX EX ttl - sets only if key doesn't exist, with expiry
       const result = await this.client!.set(key, value, {
         NX: true,
-        EX: ttlSeconds
+        EX: ttlSeconds,
       });
       return result === 'OK';
     } catch (error) {
@@ -195,7 +197,7 @@ class RedisConfigManager {
            return redis.call('del', KEYS[1])
          end
          return 0`,
-        { keys: [key], arguments: [expectedValue] }
+        { keys: [key], arguments: [expectedValue] },
       );
       return Number(result) === 1;
     } catch (error) {
@@ -208,7 +210,7 @@ class RedisConfigManager {
   async expireIfValueMatches(
     key: string,
     expectedValue: string,
-    ttlSeconds: number
+    ttlSeconds: number,
   ): Promise<boolean> {
     if (!this.isAvailable()) return false;
 
@@ -218,7 +220,7 @@ class RedisConfigManager {
            return redis.call('expire', KEYS[1], ARGV[2])
          end
          return 0`,
-        { keys: [key], arguments: [expectedValue, String(ttlSeconds)] }
+        { keys: [key], arguments: [expectedValue, String(ttlSeconds)] },
       );
       return Number(result) === 1;
     } catch (error) {
@@ -278,7 +280,7 @@ class RedisConfigManager {
       const keys = await this.client!.dbSize();
       return {
         keys,
-        memory: this.parseMemoryUsage(info)
+        memory: this.parseMemoryUsage(info),
       };
     } catch (error) {
       logger.error('Redis stats read failed', { error });

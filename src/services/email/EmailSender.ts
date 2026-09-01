@@ -1,14 +1,11 @@
 /**
  * Email Sender Service
- * 
+ *
  * Sends transactional emails (verification codes, password resets)
  * Separate from the email reading clients (GmailClient, OutlookClient)
  */
 
-export interface EmailSender {
-  sendVerificationEmail(email: string, code: string): Promise<void>;
-  sendPasswordResetEmail(email: string, code: string): Promise<void>;
-}
+import type { TransactionalEmailPort } from '../ports/AuthPorts';
 
 /**
  * Email sender using SendGrid REST API (preferred) or SMTP (nodemailer) as fallback
@@ -24,7 +21,7 @@ interface SendGridTransporter {
   sgMail: typeof sgMail;
 }
 
-export class EmailSenderService implements EmailSender {
+export class EmailSenderService implements TransactionalEmailPort {
   private transporter: Transporter | SendGridTransporter | null = null;
   private enabled: boolean = false;
 
@@ -69,7 +66,7 @@ export class EmailSenderService implements EmailSender {
     const subject = 'Verify your Snack Track email';
     const html = this.getVerificationEmailTemplate(code);
     const text = `Your Snack Track verification code is: ${code}`;
-    
+
     await this.sendEmail(email, subject, html, text);
   }
 
@@ -77,16 +74,11 @@ export class EmailSenderService implements EmailSender {
     const subject = 'Reset your Snack Track password';
     const html = this.getPasswordResetEmailTemplate(code);
     const text = `Your password reset code is: ${code}`;
-    
+
     await this.sendEmail(email, subject, html, text);
   }
 
-  private async sendEmail(
-    to: string, 
-    subject: string, 
-    html: string, 
-    text: string
-  ): Promise<void> {
+  private async sendEmail(to: string, subject: string, html: string, text: string): Promise<void> {
     if (!this.enabled || !this.transporter) {
       // In development, log the email instead of sending
       if (config.isDevelopment()) {
@@ -96,7 +88,9 @@ export class EmailSenderService implements EmailSender {
         });
         return;
       }
-      throw new Error('Email service not configured. Set SENDGRID_API_KEY or SMTP environment variables.');
+      throw new Error(
+        'Email service not configured. Set SENDGRID_API_KEY or SMTP environment variables.',
+      );
     }
 
     try {
@@ -116,8 +110,8 @@ export class EmailSenderService implements EmailSender {
           headers: {
             'X-Entity-Ref-ID': 'snacktrack-transactional',
             'List-Unsubscribe': '<mailto:noreply@getsnacktrack.com>',
-            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
-          }
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          },
         });
         logger.info('Transactional email sent', { provider: 'sendgrid' });
       } else {

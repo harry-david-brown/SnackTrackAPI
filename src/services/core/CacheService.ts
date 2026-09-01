@@ -1,6 +1,6 @@
 /**
  * Cache Service
- * 
+ *
  * High-level caching operations for user data
  * Wraps Redis with domain-specific logic
  */
@@ -26,7 +26,7 @@ export class CacheService {
   private readonly USER_SUMMARY_PREFIX = 'user_summary:';
   private readonly ANALYTICS_PREFIX = 'analytics:';
   private readonly DASHBOARD_INSIGHTS_PREFIX = 'dashboard_insights:';
-  
+
   // TTL constants (in seconds)
   private readonly USER_SUMMARY_TTL = 300; // 5 minutes
   private readonly ANALYTICS_TTL = 300; // 5 minutes (for Wrapped analytics)
@@ -56,9 +56,9 @@ export class CacheService {
   async cacheUserSummary(userId: string, summary: UserSummaryProjection): Promise<void> {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
     const value = userSummaryCacheCodec.encode(summary);
-    
+
     const cached = await redisConfig.set(key, value, this.USER_SUMMARY_TTL);
-    
+
     if (cached) logger.debug('User summary cached', { ttlSeconds: this.USER_SUMMARY_TTL });
   }
 
@@ -76,7 +76,7 @@ export class CacheService {
   async invalidateUserSummary(userId: string): Promise<void> {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
     const deleted = await redisConfig.del(key);
-    
+
     if (deleted) logger.debug('User summary cache invalidated');
   }
 
@@ -121,7 +121,10 @@ export class CacheService {
     return redisConfig.isAvailable();
   }
 
-  private async readProjection<Value>(key: string, codec: CacheCodec<Value>): Promise<Value | null> {
+  private async readProjection<Value>(
+    key: string,
+    codec: CacheCodec<Value>,
+  ): Promise<Value | null> {
     const cached = await redisConfig.get(key);
     if (!cached) return null;
 

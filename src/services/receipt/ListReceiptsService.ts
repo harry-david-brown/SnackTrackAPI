@@ -1,8 +1,5 @@
 import { Receipt } from '../../models/Receipt';
-import {
-  ReceiptListFilters,
-  ReceiptRepository,
-} from '../data/ReceiptRepository';
+import type { ReceiptListFilters, ReceiptReadPort } from '../ports/ReceiptPorts';
 
 export interface ListReceiptsInput {
   filters: ReceiptListFilters;
@@ -17,7 +14,7 @@ export interface ListReceiptsResult {
 
 /** Application operation for one authenticated user's receipt history page. */
 export class ListReceiptsService {
-  constructor(private readonly receipts: ReceiptRepository) {}
+  constructor(private readonly receipts: Pick<ReceiptReadPort, 'findPage'>) {}
 
   execute(input: ListReceiptsInput): Promise<ListReceiptsResult> {
     return this.receipts.findPage(input.filters, input.limit, input.offset);

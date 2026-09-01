@@ -1,10 +1,24 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import slowDown from 'express-slow-down';
 import helmet from 'helmet';
 import cors from 'cors';
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/AppConfig';
 import { logger } from '../config/logger';
+import { buildErrorEnvelopeV1 } from '../http/errors/errorEnvelope';
+
+const sendRateLimitError = (
+  req: Request,
+  res: Response,
+  message: string,
+  retryAfter: number,
+  details?: Readonly<Record<string, unknown>>,
+) =>
+  res.status(429).json(
+    buildErrorEnvelopeV1(req, 429, 'RATE_LIMIT_EXCEEDED', message, {
+      details: { retryAfter, ...details },
+    }),
+  );
 
 // Rate limiting configurations
 const createRateLimit = (windowMs: number, max: number, message?: string) => {
@@ -15,23 +29,19 @@ const createRateLimit = (windowMs: number, max: number, message?: string) => {
       error: {
         message: message || 'Too many requests, please try again later',
         statusCode: 429,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     },
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
     handler: (req: Request, res: Response) => {
-      res.status(429).json({
-        error: {
-          message: message || 'Too many requests, please try again later',
-          statusCode: 429,
-          timestamp: new Date().toISOString(),
-          path: req.originalUrl,
-          method: req.method,
-          retryAfter: Math.round(windowMs / 1000)
-        }
-      });
-    }
+      sendRateLimitError(
+        req,
+        res,
+        message || 'Too many requests, please try again later',
+        Math.round(windowMs / 1000),
+      );
+    },
   });
 };
 
@@ -43,7 +53,7 @@ const createSlowDown = (windowMs: number, delayAfter: number, delayMs: number) =
     delayMs: () => delayMs, // express-slow-down v3 requires a function
     maxDelayMs: 5000, // Maximum delay of 5 seconds
     skipSuccessfulRequests: true, // Don't slow down successful requests
-    skipFailedRequests: false // Do slow down failed requests
+    skipFailedRequests: false, // Do slow down failed requests
   });
 };
 
@@ -52,7 +62,7 @@ const createSlowDown = (windowMs: number, delayAfter: number, delayMs: number) =
 export const apiRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
   10000, // 10,000 requests per 5 minutes (production-ready)
-  'API rate limit exceeded. Please slow down your requests.'
+  'API rate limit exceeded. Please slow down your requests.',
 );
 
 // Rate limiting for user creation (viral app friendly)
@@ -60,7 +70,7 @@ export const apiRateLimit = createRateLimit(
 export const userCreationRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
   1000, // 1000 user creations per 5 minutes (production-ready)
-  'Too many user creation attempts. Please wait before creating another user.'
+  'Too many user creation attempts. Please wait before creating another user.',
 );
 
 // Rate limiting for CSV/ZIP imports (viral-friendly with retry support)
@@ -73,8 +83,8 @@ export const csvImportRateLimit = rateLimit({
     error: {
       message: 'Too many upload attempts. Please wait a few minutes before trying again.',
       statusCode: 429,
-      timestamp: new Date().toISOString()
-    }
+      timestamp: new Date().toISOString(),
+    },
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -85,25 +95,23 @@ export const csvImportRateLimit = rateLimit({
       return `upload_${req.user.userId}`;
     }
     // Use the default IP-based key generator (handles IPv6 properly)
-    return undefined as any; // Let express-rate-limit use default
+    return ipKeyGenerator(req.ip ?? '127.0.0.1');
   },
   handler: (req: Request, res: Response) => {
-    res.status(429).json({
-      error: {
-        message: 'Too many upload attempts. Please wait a few minutes and try again.',
-        statusCode: 429,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        method: req.method,
-        retryAfter: 900, // 15 minutes in seconds
-        hint: 'You can retry in 15 minutes. Make sure you\'re uploading a valid Uber data file.'
-      }
-    });
+    sendRateLimitError(
+      req,
+      res,
+      'Too many upload attempts. Please wait a few minutes and try again.',
+      900,
+      {
+        hint: 'You can retry in 15 minutes. Make sure you are uploading a valid provider data file.',
+      },
+    );
   },
   skip: (req: Request) => {
     // Skip rate limiting for health checks
     return req.path === '/' || req.path === '/health';
-  }
+  },
 });
 
 // Rate limiting for email operations (external API calls - most restrictive)
@@ -111,7 +119,7 @@ export const csvImportRateLimit = rateLimit({
 export const emailOperationRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
   500, // 500 email operations per 5 minutes (production-ready)
-  'Too many email operations. Please wait before trying again.'
+  'Too many email operations. Please wait before trying again.',
 );
 
 // Rate limiting for password reset requests
@@ -121,23 +129,31 @@ export const passwordResetRequestRateLimit = rateLimit({
   max: 3, // 3 requests per window
   keyGenerator: (req: Request) => {
     // Rate limit by email if provided, otherwise by IP
-    return req.body?.email ? `pwreset:${req.body.email.toLowerCase().trim()}` : undefined as any;
+    const body: unknown = req.body;
+    const email =
+      typeof body === 'object' && body !== null && 'email' in body ? body.email : undefined;
+    return typeof email === 'string' && email.length > 0
+      ? `pwreset:${email.toLowerCase().trim()}`
+      : ipKeyGenerator(req.ip ?? '127.0.0.1');
   },
   message: {
     error: {
       message: 'Too many password reset requests. Please try again later.',
-      statusCode: 429
-    }
+      statusCode: 429,
+    },
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    sendRateLimitError(req, res, 'Too many password reset requests. Please try again later.', 3600);
+  },
 });
 
 // IP-based rate limit for password reset (10 per hour per IP)
 export const passwordResetIPRateLimit = createRateLimit(
   60 * 60 * 1000, // 1 hour
   10, // 10 requests per hour per IP
-  'Too many password reset requests from your IP. Please try again later.'
+  'Too many password reset requests from your IP. Please try again later.',
 );
 
 // Rate limiting for email verification send
@@ -146,16 +162,24 @@ export const emailVerificationSendRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3, // 3 requests per window
   keyGenerator: (req: Request) => {
-    return req.body?.email ? `emailverify:${req.body.email.toLowerCase().trim()}` : undefined as any;
+    const body: unknown = req.body;
+    const email =
+      typeof body === 'object' && body !== null && 'email' in body ? body.email : undefined;
+    return typeof email === 'string' && email.length > 0
+      ? `emailverify:${email.toLowerCase().trim()}`
+      : ipKeyGenerator(req.ip ?? '127.0.0.1');
   },
   message: {
     error: {
       message: 'Too many verification requests. Please try again later.',
-      statusCode: 429
-    }
+      statusCode: 429,
+    },
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    sendRateLimitError(req, res, 'Too many verification requests. Please try again later.', 3600);
+  },
 });
 
 // Rate limiting for OTP verification attempts (max 5 per code)
@@ -163,14 +187,14 @@ export const emailVerificationSendRateLimit = rateLimit({
 export const otpVerificationRateLimit = createRateLimit(
   15 * 60 * 1000, // 15 minutes
   10, // 10 verification attempts per 15 minutes per IP
-  'Too many verification attempts. Please try again later.'
+  'Too many verification attempts. Please try again later.',
 );
 
 // Progressive slow down for repeated failed requests
 export const progressiveSlowDown = createSlowDown(
   15 * 60 * 1000, // 15 minutes
   5, // After 5 failed requests
-  500 // Add 500ms delay per additional request
+  500, // Add 500ms delay per additional request
 );
 
 // Security headers configuration
@@ -180,7 +204,7 @@ export const securityHeaders = helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
+      imgSrc: ["'self'", 'data:', 'https:'],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
       objectSrc: ["'none'"],
@@ -192,44 +216,37 @@ export const securityHeaders = helmet({
   hsts: {
     maxAge: 31536000, // 1 year
     includeSubDomains: true,
-    preload: true
+    preload: true,
   },
   noSniff: true,
   xssFilter: true,
-  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   frameguard: { action: 'deny' },
-  hidePoweredBy: true
+  hidePoweredBy: true,
 });
 
 // CORS configuration
 export const corsConfig = cors({
-  origin: config.isProduction() 
-    ? [...config.getSecurityConfig().corsOrigins]
-    : true, // Allow all origins in development
+  origin: config.isProduction() ? [...config.getSecurityConfig().corsOrigins] : true, // Allow all origins in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 });
 
 // Request size limiting middleware
 export const requestSizeLimit = (req: Request, res: Response, next: NextFunction) => {
   const contentLength = parseInt(req.get('Content-Length') || '0');
   const maxSize = config.isProduction() ? 10 * 1024 * 1024 : 50 * 1024 * 1024; // 10MB in prod, 50MB in dev
-  
+
   if (contentLength > maxSize) {
-    return res.status(413).json({
-      error: {
-        message: 'Request entity too large',
-        statusCode: 413,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        method: req.method,
-        maxSize: `${maxSize / (1024 * 1024)}MB`
-      }
-    });
+    return res.status(413).json(
+      buildErrorEnvelopeV1(req, 413, 'PAYLOAD_TOO_LARGE', 'Request entity too large', {
+        details: { maxSizeMb: maxSize / (1024 * 1024) },
+      }),
+    );
   }
-  
+
   next();
 };
 
@@ -237,19 +254,20 @@ export const requestSizeLimit = (req: Request, res: Response, next: NextFunction
 export const ipWhitelist = (allowedIPs: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
-    
+
     if (!allowedIPs.includes(clientIP || '')) {
-      return res.status(403).json({
-        error: {
-          message: 'Access denied: IP not whitelisted',
-          statusCode: 403,
-          timestamp: new Date().toISOString(),
-          path: req.originalUrl,
-          method: req.method
-        }
-      });
+      return res
+        .status(403)
+        .json(
+          buildErrorEnvelopeV1(
+            req,
+            403,
+            'AUTHORIZATION_DENIED',
+            'Access denied: IP not whitelisted',
+          ),
+        );
     }
-    
+
     next();
   };
 };
@@ -258,32 +276,33 @@ export const ipWhitelist = (allowedIPs: string[]) => {
 export const validateApiKey = (req: Request, res: Response, next: NextFunction) => {
   const apiKey = req.get('X-API-Key') || req.query.apiKey;
   const validApiKey = config.getSecurityConfig().apiKey;
-  
+
   if (!validApiKey) {
-    console.error('❌ API_KEY environment variable is not configured for protected admin endpoint access');
-    return res.status(500).json({
-      error: {
-        message: 'Server misconfiguration: API key protection is not configured',
-        statusCode: 500,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        method: req.method
-      }
+    logger.error('Protected administrator endpoint is unavailable', {
+      operation: 'validate_api_key',
+      outcome: 'configuration_error',
+      errorCode: 'CONFIGURATION_ERROR',
     });
+    return res
+      .status(500)
+      .json(
+        buildErrorEnvelopeV1(
+          req,
+          500,
+          'CONFIGURATION_ERROR',
+          'Administrator access is not configured',
+        ),
+      );
   }
-  
+
   if (!apiKey || apiKey !== validApiKey) {
-    return res.status(401).json({
-      error: {
-        message: 'Invalid or missing API key',
-        statusCode: 401,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        method: req.method
-      }
-    });
+    return res
+      .status(401)
+      .json(
+        buildErrorEnvelopeV1(req, 401, 'AUTHENTICATION_REQUIRED', 'Invalid or missing API key'),
+      );
   }
-  
+
   next();
 };
 
@@ -292,46 +311,49 @@ export const securityLogger = (req: Request, res: Response, next: NextFunction) 
   const start = Date.now();
   const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
   const userAgent = req.get('User-Agent') || 'Unknown';
-  
+
   // Log suspicious activity
   const suspiciousPatterns = [
     /\.\./, // Path traversal
     /<script/i, // XSS attempts
     /union.*select/i, // SQL injection
     /eval\(/i, // Code injection
-    /javascript:/i // JavaScript injection
+    /javascript:/i, // JavaScript injection
   ];
-  
+
   const requestString = `${req.method} ${req.originalUrl} ${JSON.stringify(req.body)}`;
-  const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(requestString));
-  
+  const isSuspicious = suspiciousPatterns.some((pattern) => pattern.test(requestString));
+
   if (isSuspicious) {
     logger.warn('Suspicious request detected', {
+      requestId: req.requestId,
       ip: clientIP,
       method: req.method,
       url: req.originalUrl || req.url,
       userAgent,
-      body: req.body,
-      pattern: suspiciousPatterns.find(p => p.test(requestString))?.toString()
+      bodyPresent: req.body !== undefined,
+      pattern: suspiciousPatterns.find((p) => p.test(requestString))?.toString(),
     });
   }
-  
+
   // Log response time for slow or failed requests (consolidated with main request logger)
   res.on('finish', () => {
     const duration = Date.now() - start;
     const statusCode = res.statusCode;
-    
+
     // Only log if it's a security concern (very slow or error)
     if (statusCode >= 500 || duration > 5000) {
       logger.warn('Security event', {
+        requestId: req.requestId,
         method: req.method,
         url: req.originalUrl || req.url,
         statusCode,
-        responseTime: duration,
-        ip: clientIP
+        durationMs: duration,
+        outcome: statusCode >= 500 ? 'failure' : 'slow',
+        ip: clientIP,
       });
     }
   });
-  
+
   next();
 };

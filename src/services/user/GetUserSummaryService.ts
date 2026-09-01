@@ -1,10 +1,17 @@
 import logger from '../../config/logger';
 import { NotFoundError } from '../../core/errors';
 import { getDefaultTimezone, getLocalDateKey } from '../../utils/timezone';
-import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
-import { CacheService, UserSummaryProjection } from '../core/CacheService';
-import { ReceiptRepository } from '../data/ReceiptRepository';
-import { UserRepository } from '../data/UserRepository';
+import type { UserSummaryProjection } from '../core/cacheProjections';
+import type {
+  UserProfilePort,
+  UserSummaryCachePort,
+  WrappedAnalyticsPort,
+} from '../ports/ProjectionPorts';
+import type { ReceiptReadPort } from '../ports/ReceiptPorts';
+
+type UserSummaryUserPort = UserProfilePort;
+type UserSummaryReceiptPort = Pick<ReceiptReadPort, 'findByUserId'>;
+type UserSummaryAnalyticsPort = WrappedAnalyticsPort;
 
 export interface GetUserSummaryInput {
   userId: string;
@@ -12,17 +19,15 @@ export interface GetUserSummaryInput {
   requestTimezone?: string;
 }
 
-const roundMoney = (amount: number): number => (
-  Math.round((amount + Number.EPSILON) * 100) / 100
-);
+const roundMoney = (amount: number): number => Math.round((amount + Number.EPSILON) * 100) / 100;
 
 /** Owns user-summary reads, timezone repair, projection assembly, and cache policy. */
 export class GetUserSummaryService {
   constructor(
-    private readonly users: UserRepository,
-    private readonly receipts: ReceiptRepository,
-    private readonly wrappedAnalytics: WrappedAnalyticsService,
-    private readonly cache: CacheService,
+    private readonly users: UserSummaryUserPort,
+    private readonly receipts: UserSummaryReceiptPort,
+    private readonly wrappedAnalytics: UserSummaryAnalyticsPort,
+    private readonly cache: UserSummaryCachePort,
   ) {}
 
   async execute(input: GetUserSummaryInput): Promise<UserSummaryProjection> {
@@ -90,9 +95,10 @@ export class GetUserSummaryService {
           .slice(0, 10),
       },
       validation: {
-        issues: zeroAmountReceipts.length > 0
-          ? [`${zeroAmountReceipts.length} receipts have zero amount (likely refunded orders)`]
-          : [],
+        issues:
+          zeroAmountReceipts.length > 0
+            ? [`${zeroAmountReceipts.length} receipts have zero amount (likely refunded orders)`]
+            : [],
         zeroAmountReceipts: zeroAmountReceipts.length,
         refundedReceipts: zeroAmountReceipts.length,
       },
@@ -110,7 +116,9 @@ export class GetUserSummaryService {
 
     if (input.includeWrapped) {
       try {
-        summary.wrappedAnalytics = await this.wrappedAnalytics.calculateWrappedAnalytics(input.userId);
+        summary.wrappedAnalytics = await this.wrappedAnalytics.calculateWrappedAnalytics(
+          input.userId,
+        );
       } catch (error) {
         logger.warn('Wrapped analytics unavailable for user summary', { error });
         summary.wrappedAnalytics = null;

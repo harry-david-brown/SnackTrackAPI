@@ -1,6 +1,6 @@
 /**
  * HTML Text Extractor
- * 
+ *
  * Converts HTML email bodies to clean text for processing
  */
 
@@ -81,13 +81,16 @@ export class HtmlTextExtractor {
     text = text.replace(/[$€£¥CA]/g, ' ');
 
     // Split into lines and filter
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    
+    const lines = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
     // Filter out footer noise
     const coreLines: string[] = [];
     for (const line of lines) {
       const lower = line.toLowerCase();
-      const isFooter = this.config.footerWords.some(word => lower.includes(word));
+      const isFooter = this.config.footerWords.some((word) => lower.includes(word));
       if (!isFooter) {
         coreLines.push(line);
       }
@@ -95,7 +98,7 @@ export class HtmlTextExtractor {
 
     // Take first N lines and collapse
     const core = coreLines.slice(0, this.config.maxCoreLines).join(' ').toLowerCase();
-    
+
     // Final whitespace normalization
     return core.replace(/\s+/g, ' ').trim();
   }
@@ -117,7 +120,7 @@ export class HtmlTextExtractor {
   extractNearLabel(text: string, label: string, windowSize: number = 80): string | null {
     const lowerText = text.toLowerCase();
     const lowerLabel = label.toLowerCase();
-    
+
     const index = lowerText.indexOf(lowerLabel);
     if (index === -1) return null;
 
@@ -142,4 +145,3 @@ export class HtmlTextExtractor {
     return text.slice(searchStart, endIndex).trim() || null;
   }
 }
-

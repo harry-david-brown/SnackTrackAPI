@@ -1,9 +1,9 @@
 /**
  * Alerting Service
- * 
+ *
  * Monitors error rates, performance metrics, and system health
  * Sends alerts when thresholds are exceeded
- * 
+ *
  * Features:
  * - Error rate monitoring
  * - Performance degradation alerts
@@ -13,7 +13,11 @@
 
 import { logger } from '../../config/logger';
 import { sentryConfig } from '../../config/sentry';
-import { PostgresService } from '../data/PostgresService';
+import { DatabaseReadiness } from '../data/DatabaseHealthService';
+
+interface DatabaseHealthProbe {
+  check(): Promise<DatabaseReadiness>;
+}
 
 interface AlertThresholds {
   errorRate: number; // Errors per minute
@@ -42,36 +46,52 @@ class AlertingService {
     errorRate: 10, // 10 errors per minute
     responseTime: 2000, // 2 seconds p95
     databaseLatency: 1000, // 1 second
-    errorCount: 50 // 50 errors in 5-minute window
+    errorCount: 50, // 50 errors in 5-minute window
   };
+  private resetTimer: NodeJS.Timeout | null = null;
+  private alertTimer: NodeJS.Timeout | null = null;
 
-  constructor(private postgresService: PostgresService) {
-    // Reset counters every minute
-    setInterval(() => this.resetCounters(), 60000);
-    
-    // Check alerts every 30 seconds
-    setInterval(() => this.checkAlerts(), 30000);
+  constructor(private readonly databaseHealth: DatabaseHealthProbe) {}
+
+  start(): void {
+    if (this.resetTimer || this.alertTimer) return;
+    this.resetTimer = setInterval(() => this.resetCounters(), 60000);
+    this.alertTimer = setInterval(() => void this.checkAlerts(), 30000);
+    this.resetTimer.unref();
+    this.alertTimer.unref();
+  }
+
+  close(): void {
+    if (this.resetTimer) clearInterval(this.resetTimer);
+    if (this.alertTimer) clearInterval(this.alertTimer);
+    this.resetTimer = null;
+    this.alertTimer = null;
   }
 
   /**
    * Record an error for monitoring
    */
-  recordError(error: Error, context?: Record<string, any>): void {
+  recordError(error: Error, context?: Record<string, unknown>): void {
     this.errorCount++;
-    
+
     // Send to Sentry with alert context
     if (sentryConfig.isEnabled()) {
-      sentryConfig.addBreadcrumb('Error recorded', 'alerting', {
-        errorMessage: error.message,
-        errorCount: this.errorCount,
-        ...context
-      }, 'error');
+      sentryConfig.addBreadcrumb(
+        'Error recorded',
+        'alerting',
+        {
+          errorMessage: error.message,
+          errorCount: this.errorCount,
+          ...context,
+        },
+        'error',
+      );
     }
 
     logger.warn('Error recorded for alerting', {
       error: error.message,
       errorCount: this.errorCount,
-      ...context
+      ...context,
     });
   }
 
@@ -81,7 +101,7 @@ class AlertingService {
   recordRequest(responseTime: number): void {
     this.requestCount++;
     this.responseTimes.push(responseTime);
-    
+
     // Keep only last 1000 response times for performance
     if (this.responseTimes.length > 1000) {
       this.responseTimes.shift();
@@ -95,14 +115,19 @@ class AlertingService {
     if (latency > this.thresholds.databaseLatency) {
       logger.warn('Database latency threshold exceeded', {
         latency,
-        threshold: this.thresholds.databaseLatency
+        threshold: this.thresholds.databaseLatency,
       });
-      
+
       if (sentryConfig.isEnabled()) {
-        sentryConfig.addBreadcrumb('Database latency alert', 'performance', {
-          latency,
-          threshold: this.thresholds.databaseLatency
-        }, 'warning');
+        sentryConfig.addBreadcrumb(
+          'Database latency alert',
+          'performance',
+          {
+            latency,
+            threshold: this.thresholds.databaseLatency,
+          },
+          'warning',
+        );
       }
     }
   }
@@ -112,14 +137,14 @@ class AlertingService {
    */
   private async checkAlerts(): Promise<void> {
     const metrics = this.getMetrics();
-    
+
     // Check error rate
     if (metrics.errorRate > this.thresholds.errorRate) {
       await this.triggerAlert('error_rate', {
         errorRate: metrics.errorRate,
         threshold: this.thresholds.errorRate,
         errorCount: metrics.errorCount,
-        requestCount: metrics.requestCount
+        requestCount: metrics.requestCount,
       });
     }
 
@@ -128,7 +153,7 @@ class AlertingService {
       await this.triggerAlert('performance', {
         p95ResponseTime: metrics.p95ResponseTime,
         threshold: this.thresholds.responseTime,
-        avgResponseTime: metrics.avgResponseTime
+        avgResponseTime: metrics.avgResponseTime,
       });
     }
 
@@ -137,25 +162,20 @@ class AlertingService {
       await this.triggerAlert('error_count', {
         errorCount: metrics.errorCount,
         threshold: this.thresholds.errorCount,
-        windowMinutes: this.windowMinutes
+        windowMinutes: this.windowMinutes,
       });
     }
 
     // Check database health
-    try {
-      const startTime = Date.now();
-      await this.postgresService.query('SELECT 1');
-      const latency = Date.now() - startTime;
-      
-      if (latency > this.thresholds.databaseLatency) {
-        await this.triggerAlert('database_latency', {
-          latency,
-          threshold: this.thresholds.databaseLatency
-        });
-      }
-    } catch (error) {
+    const readiness = await this.databaseHealth.check();
+    if (readiness.status === 'down') {
       await this.triggerAlert('database_health', {
-        error: error instanceof Error ? error.message : String(error)
+        errorCode: readiness.errorCode,
+      });
+    } else if (readiness.latencyMs > this.thresholds.databaseLatency) {
+      await this.triggerAlert('database_latency', {
+        latency: readiness.latencyMs,
+        threshold: this.thresholds.databaseLatency,
       });
     }
   }
@@ -163,20 +183,20 @@ class AlertingService {
   /**
    * Trigger an alert
    */
-  private async triggerAlert(type: string, data: Record<string, any>): Promise<void> {
+  private async triggerAlert(type: string, data: Record<string, unknown>): Promise<void> {
     const alertMessage = `Alert: ${type}`;
-    
+
     logger.error(alertMessage, {
       type,
       ...data,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     // Send to Sentry as a warning/error
     if (sentryConfig.isEnabled()) {
       sentryConfig.captureError(new Error(alertMessage), {
         alertType: type,
-        ...data
+        ...data,
       });
     }
 
@@ -199,9 +219,8 @@ class AlertingService {
     const sortedTimes = [...this.responseTimes].sort((a, b) => a - b);
     const p95Index = Math.floor(sortedTimes.length * 0.95);
     const p95ResponseTime = sortedTimes.length > 0 ? sortedTimes[p95Index] : 0;
-    const avgResponseTime = sortedTimes.length > 0 
-      ? sortedTimes.reduce((a, b) => a + b, 0) / sortedTimes.length 
-      : 0;
+    const avgResponseTime =
+      sortedTimes.length > 0 ? sortedTimes.reduce((a, b) => a + b, 0) / sortedTimes.length : 0;
 
     return {
       errorCount: this.errorCount,
@@ -210,7 +229,7 @@ class AlertingService {
       avgResponseTime,
       p95ResponseTime,
       databaseLatency: 0, // Will be checked separately
-      timestamp: now
+      timestamp: now,
     };
   }
 
@@ -220,15 +239,15 @@ class AlertingService {
   private resetCounters(): void {
     // Keep some history for sliding window
     const minutesSinceReset = (Date.now() - this.lastReset.getTime()) / 60000;
-    
+
     if (minutesSinceReset >= this.windowMinutes) {
       this.errorCount = 0;
       this.requestCount = 0;
       this.responseTimes = [];
       this.lastReset = new Date();
-      
+
       logger.debug('Alerting counters reset', {
-        windowMinutes: this.windowMinutes
+        windowMinutes: this.windowMinutes,
       });
     }
   }
@@ -249,20 +268,17 @@ class AlertingService {
       metrics.errorCount > this.thresholds.errorCount
     ) {
       status = 'unhealthy';
-    } else if (
-      metrics.p95ResponseTime > this.thresholds.responseTime * 0.8
-    ) {
+    } else if (metrics.p95ResponseTime > this.thresholds.responseTime * 0.8) {
       status = 'degraded';
     }
 
     return {
       status,
       metrics,
-      thresholds: this.thresholds
+      thresholds: this.thresholds,
     };
   }
 }
 
 // Export singleton instance (will be initialized in ServiceContainer)
 export { AlertingService };
-

@@ -1,25 +1,25 @@
 // Reference Node.js types for process and environment
 /// <reference types="node" />
 import 'dotenv/config';
-// @ts-ignore
-import express, { Request, Response, NextFunction } from 'express';
-import authRouter from './routes/auth';
-import authPasswordResetRouter from './routes/authPasswordReset';
-import authEmailVerificationRouter from './routes/authEmailVerification';
-import usersRouter from './routes/users';
-import receiptsRouter from './routes/receipts';
-import csvRouter from './routes/csv';
-import databaseRouter from './routes/database';
-import monitoringRouter from './routes/monitoring';
-import gmailRouter from './routes/gmail';
+import express, { Request, Response } from 'express';
+import { createAuthRouter } from './routes/auth';
+import { createPasswordResetRouter } from './routes/authPasswordReset';
+import { createEmailVerificationRouter } from './routes/authEmailVerification';
+import { createUsersRouter } from './routes/users';
+import { createReceiptsRouter } from './routes/receipts';
+import { createCsvRouter } from './routes/csv';
+import { createDatabaseRouter } from './routes/database';
+import { createMonitoringRouter } from './routes/monitoring';
+import { createGmailRouter } from './routes/gmail';
 import { config } from './config/AppConfig';
-import { errorHandler } from './middleware/errorHandler';
+import { asyncHandler, errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
 import { sentryConfig } from './config/sentry';
 import { redisConfig } from './config/redis';
-import { getLogLevel, logger, logRequest } from './config/logger';
+import { getLogLevel, getRecentLogs, logger, logRequest, setLogLevel } from './config/logger';
 import * as Sentry from '@sentry/node';
 import { container } from './services/core/ServiceContainer';
+import { ShutdownCoordinator } from './services/core/ShutdownCoordinator';
 
 import {
   securityHeaders,
@@ -27,14 +27,35 @@ import {
   requestSizeLimit,
   securityLogger,
   apiRateLimit,
-  progressiveSlowDown
+  progressiveSlowDown,
+  userCreationRateLimit,
+  validateApiKey,
+  csvImportRateLimit,
+  passwordResetIPRateLimit,
+  passwordResetRequestRateLimit,
+  emailVerificationSendRateLimit,
+  otpVerificationRateLimit,
 } from './middleware/security';
-import { requestLogger } from './middleware/requestLogger';
+import { createRequestLogger } from './middleware/requestLogger';
+import { requestContext } from './middleware/requestContext';
+import { createAuthenticateToken, validateOwnership } from './middleware/auth';
+import { paginationMiddleware } from './middleware/pagination';
+import { validateUUIDParam } from './middleware/validation';
+import { concurrencyLimiter } from './middleware/concurrencyLimiter';
 
 const app = express();
 
+const authenticateToken = createAuthenticateToken({
+  tokens: container.tokenService,
+  observability: sentryConfig,
+  logger,
+});
+
 // Initialize Sentry (must be first, before any middleware)
 sentryConfig.initialize(app);
+
+// Correlate every response and log, including failures in early security middleware.
+app.use(requestContext);
 
 // Trust proxy for accurate IP addresses (important for rate limiting)
 app.set('trust proxy', 1);
@@ -50,7 +71,18 @@ app.use(apiRateLimit);
 app.use(progressiveSlowDown);
 
 // Request logging (after security, before routes)
-app.use(requestLogger);
+app.use(
+  createRequestLogger({
+    alerting: container.alertingService,
+    observability: {
+      isSentryEnabled: () => sentryConfig.isEnabled(),
+      addBreadcrumb: (...args) => sentryConfig.addBreadcrumb(...args),
+      logRequest,
+      debug: (message, metadata) => logger.debug(message, metadata),
+      warn: (message, metadata) => logger.warn(message, metadata),
+    },
+  }),
+);
 
 // Body parsing (with size limits)
 app.use(express.json({ limit: config.isProduction() ? '10mb' : '50mb' }));
@@ -96,15 +128,14 @@ app.get('/', (req: Request, res: Response) => {
  */
 // Detailed health check (includes basic database connectivity)
 // For comprehensive metrics, use /monitoring/health
-app.get('/health', async (req: Request, res: Response) => {
-  const startTime = Date.now();
-
-  try {
-    await postgresService.query('SELECT 1');
-    const dbLatency = Date.now() - startTime;
+app.get(
+  '/health',
+  asyncHandler(async (req: Request, res: Response) => {
+    const startTime = Date.now();
+    const readiness = await container.databaseHealthService.check();
     const responseTime = Date.now() - startTime;
 
-    if (dbLatency < 1000) {
+    if (readiness.status === 'connected') {
       logRequest(req, res, responseTime);
       return res.status(200).json({
         status: 'ok',
@@ -112,29 +143,28 @@ app.get('/health', async (req: Request, res: Response) => {
         uptime: process.uptime(),
         database: {
           status: 'connected',
-          latency: dbLatency // milliseconds
-        }
+          latency: readiness.latencyMs,
+        },
       });
-    } else {
-      logger.warn('Database responding slowly', { latency: dbLatency });
+    }
+    if (readiness.status === 'slow') {
+      logger.warn('Database responding slowly', { latency: readiness.latencyMs });
       logRequest(req, res, responseTime);
       return res.status(503).json({
         status: 'degraded',
         timestamp: new Date().toISOString(),
-        message: 'Database responding slowly'
+        message: 'Database responding slowly',
       });
     }
-  } catch (error) {
-    const responseTime = Date.now() - startTime;
-    logger.error('Health check failed', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('Health check failed', { errorCode: readiness.errorCode });
     logRequest(req, res, responseTime);
     return res.status(503).json({
       status: 'down',
       timestamp: new Date().toISOString(),
-      message: 'Database connection failed'
+      message: 'Database connection failed',
     });
-  }
-});
+  }),
+);
 
 import { encode } from 'html-entities';
 
@@ -161,15 +191,99 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 setupSwagger(app);
 
 // Mount API routes
-app.use('/auth', authRouter);
-app.use('/auth/password/reset', authPasswordResetRouter);
-app.use('/auth/email/verify', authEmailVerificationRouter);
-app.use('/users', usersRouter);
-app.use('/receipts', receiptsRouter);
-app.use('/csv', csvRouter);
-app.use('/database', databaseRouter);
-app.use('/monitoring', monitoringRouter);
-app.use('/gmail', gmailRouter);
+app.use(
+  '/auth',
+  createAuthRouter({
+    credentials: container.credentialAuthService,
+    providers: container.providerAuthService,
+    sessions: container.sessionService,
+    accountDeletion: container.accountDeletionService,
+    authenticate: authenticateToken,
+    rateLimitRegistration: userCreationRateLimit,
+  }),
+);
+app.use(
+  '/auth/password/reset',
+  createPasswordResetRouter({
+    passwords: container.passwordResetService,
+    rateLimitRequestByIp: passwordResetIPRateLimit,
+    rateLimitRequestByEmail: passwordResetRequestRateLimit,
+    rateLimitVerification: otpVerificationRateLimit,
+  }),
+);
+app.use(
+  '/auth/email/verify',
+  createEmailVerificationRouter({
+    verification: container.emailVerificationService,
+    rateLimitSend: emailVerificationSendRateLimit,
+    rateLimitConfirmation: otpVerificationRateLimit,
+  }),
+);
+app.use(
+  '/users',
+  createUsersRouter({
+    authenticate: authenticateToken,
+    authorizeOwnership: validateOwnership,
+    validateUserId: validateUUIDParam('id'),
+    production: config.isProduction(),
+    accountReset: container.accountResetService,
+    dashboardInsights: container.getDashboardInsightsService,
+    summaries: container.getUserSummaryService,
+  }),
+);
+app.use(
+  '/receipts',
+  createReceiptsRouter({
+    authenticate: authenticateToken,
+    paginate: paginationMiddleware,
+    listReceipts: container.listReceiptsService,
+    clearReceipts: container.receiptClearService,
+  }),
+);
+app.use(
+  '/csv',
+  createCsvRouter({
+    authenticate: authenticateToken,
+    rateLimit: csvImportRateLimit,
+    limitConcurrency: concurrencyLimiter,
+    authorizeOwnership: validateOwnership,
+    zip: container.zipExtractor,
+    importCsv: container.csvImportUseCase,
+    logger,
+  }),
+);
+app.use(
+  '/database',
+  createDatabaseRouter({
+    authorizeAdministrator: validateApiKey,
+    administrator: container.administratorService,
+    accountDeletion: container.accountDeletionService,
+  }),
+);
+app.use(
+  '/monitoring',
+  createMonitoringRouter({
+    authorizeSensitive: validateApiKey,
+    alerting: container.alertingService,
+    cache: container.cacheService,
+    monitoring: container.monitoringService,
+    logs: { getLevel: getLogLevel, setLevel: setLogLevel, getRecent: getRecentLogs },
+  }),
+);
+app.use(
+  '/gmail',
+  createGmailRouter({
+    authenticate: authenticateToken,
+    validateScheduler: validateApiKey,
+    connections: container.gmailConnectionService,
+    preferences: container.importPreferencesService,
+    manualCheck: container.manualTrackingCheckService,
+    scheduledTracking: container.ongoingTrackingService,
+    status: container.importStatusService,
+    historicalImport: container.historicalGmailImportService,
+    logger,
+  }),
+);
 
 // Error handling middleware (must be last)
 // Our custom error handler (logs to Winston and handles response formatting)
@@ -181,17 +295,21 @@ const PORT = config.getServerPort();
 // Initialize database and start server
 async function startServer() {
   try {
-    // Initialize database tables
-    await postgresService.initializeTables();
+    const migrationResult = await container.migrationRunner.run();
+    logger.info('Database migrations ready', {
+      appliedVersions: migrationResult.applied,
+      existingVersions: migrationResult.alreadyApplied,
+    });
 
     // Initialize Redis cache (optional, won't fail if unavailable)
     await redisConfig.initialize();
+    container.alertingService.start();
 
     // Start the server
     const server = app.listen(PORT, () => {
       logger.info('Server started', {
         port: PORT,
-        environment: config.isProduction() ? 'production' : 'development'
+        environment: config.isProduction() ? 'production' : 'development',
       });
       logger.info('Database connected');
       if (getLogLevel() === 'debug') {
@@ -203,52 +321,78 @@ async function startServer() {
     // TRACKING_SYNC_INTERVAL_MINUTES=0 when an external scheduler calls the
     // protected batch endpoint instead.
     const trackingIntervalMinutes = config.getTrackingIntervalMinutes();
-    const trackingTimer = trackingIntervalMinutes > 0
-      ? setInterval(() => {
-          void container.ongoingTrackingService.runEligibleBatch(100)
-            .then(result => logger.info('Ongoing Gmail tracking batch completed', result))
-            .catch(error => logger.error('Ongoing Gmail tracking batch failed', { error: error instanceof Error ? error.message : String(error) }));
-        }, trackingIntervalMinutes * 60 * 1000)
-      : null;
+    const trackingTimer =
+      trackingIntervalMinutes > 0
+        ? setInterval(
+            () => {
+              void container.ongoingTrackingService
+                .runEligibleBatch(100)
+                .then((result) => logger.info('Ongoing Gmail tracking batch completed', result))
+                .catch((error) =>
+                  logger.error('Ongoing Gmail tracking batch failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                  }),
+                );
+            },
+            trackingIntervalMinutes * 60 * 1000,
+          )
+        : null;
     trackingTimer?.unref();
 
-    // Graceful shutdown handling
+    const shutdown = new ShutdownCoordinator([
+      {
+        name: 'tracking timer',
+        close: () => {
+          if (trackingTimer) clearInterval(trackingTimer);
+        },
+      },
+      { name: 'alert monitoring', close: () => container.alertingService.close() },
+      {
+        name: 'HTTP server',
+        close: () =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+          }),
+      },
+      { name: 'Redis connection', close: () => redisConfig.close() },
+      { name: 'PostgreSQL connection', close: () => postgresService.close() },
+      { name: 'Sentry transport', close: () => Sentry.close(2000).then(() => undefined) },
+    ]);
+    let forcedShutdownTimer: NodeJS.Timeout | null = null;
+
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received, starting graceful shutdown...`);
-      if (trackingTimer) clearInterval(trackingTimer);
-
-      server.close(async () => {
-        logger.info('HTTP server closed');
-
-        // Close database connections
-        await postgresService.close();
-        logger.info('Database connections closed');
-
-        // Close Redis connection
-        await redisConfig.close();
-        logger.info('Redis connection closed');
-
+      if (!forcedShutdownTimer) {
+        forcedShutdownTimer = setTimeout(() => {
+          logger.error('Forced shutdown after timeout');
+          process.exit(1);
+        }, 10000);
+        forcedShutdownTimer.unref();
+      }
+      try {
+        await shutdown.close();
+        if (forcedShutdownTimer) clearTimeout(forcedShutdownTimer);
         logger.info('Graceful shutdown complete');
         process.exit(0);
-      });
-
-      // Force shutdown after 10 seconds
-      setTimeout(() => {
-        logger.error('Forced shutdown after timeout');
+      } catch (error) {
+        logger.error('Graceful shutdown failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
         process.exit(1);
-      }, 10000);
+      }
     };
 
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
+    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
   } catch (error) {
     logger.error('Failed to start server', {
       error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? error.stack : undefined,
     });
-    process.exit(1);
+    container.alertingService.close();
+    await Promise.allSettled([redisConfig.close(), postgresService.close(), Sentry.close(2000)]);
+    process.exitCode = 1;
   }
 }
 
-startServer(); 
+void startServer();

@@ -28,7 +28,8 @@ test('user summary operation owns timezone repair, aggregation, and cache write'
   const cache = {
     invalidateAllUserCaches: async () => events.push('invalidate'),
     getUserSummary: async () => null,
-    cacheUserSummary: async (_key, summary) => events.push(`cache:${summary.statistics.totalReceipts}`),
+    cacheUserSummary: async (_key, summary) =>
+      events.push(`cache:${summary.statistics.totalReceipts}`),
   };
   const wrapped = { calculateWrappedAnalytics: async () => ({}) };
 
@@ -52,7 +53,11 @@ test('user summary operation returns a valid cached projection without querying 
   const users = {
     findById: async () => ({ id: 'user-id', email: 'user@example.com', timezone: 'UTC' }),
   };
-  const receipts = { findByUserId: async () => { throw new Error('should not query'); } };
+  const receipts = {
+    findByUserId: async () => {
+      throw new Error('should not query');
+    },
+  };
   const cache = { getUserSummary: async () => cached };
 
   const result = await new GetUserSummaryService(users, receipts, {}, cache).execute({

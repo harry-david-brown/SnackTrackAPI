@@ -47,11 +47,7 @@ export class ImportLockService {
     const lockKey = this.lockKey(userId);
 
     if (redisConfig.isAvailable()) {
-      const acquired = await redisConfig.setNX(
-        lockKey,
-        ownerToken,
-        this.LOCK_TTL_SECONDS
-      );
+      const acquired = await redisConfig.setNX(lockKey, ownerToken, this.LOCK_TTL_SECONDS);
       if (!acquired) return null;
 
       logger.info('User receipt writer lock acquired', { userId, backend: 'redis' });
@@ -89,15 +85,17 @@ export class ImportLockService {
   static async acquireLockWithWait(
     userId: string,
     timeoutMs = 300000,
-    pollIntervalMs = 250
+    pollIntervalMs = 250,
+    signal?: AbortSignal,
   ): Promise<ImportLockHandle | null> {
     const deadline = Date.now() + Math.max(0, timeoutMs);
 
     do {
+      if (signal?.aborted) return null;
       const handle = await this.acquireLock(userId);
       if (handle) return handle;
       if (Date.now() >= deadline) return null;
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      if (!(await this.waitForRetry(pollIntervalMs, signal))) return null;
     } while (Date.now() < deadline);
 
     return null;
@@ -108,7 +106,7 @@ export class ImportLockService {
       return redisConfig.expireIfValueMatches(
         this.lockKey(handle.userId),
         handle.ownerToken,
-        this.LOCK_TTL_SECONDS
+        this.LOCK_TTL_SECONDS,
       );
     }
 
@@ -120,7 +118,7 @@ export class ImportLockService {
 
   static async assertLockOwned(handle: ImportLockHandle): Promise<void> {
     const state = this.renewalStates.get(handle.ownerToken);
-    if (!state || state.lostOwnership || !await this.renewLock(handle)) {
+    if (!state || state.lostOwnership || !(await this.renewLock(handle))) {
       if (state) state.lostOwnership = true;
       throw new ImportLockOwnershipLostError();
     }
@@ -132,7 +130,7 @@ export class ImportLockService {
     if (handle.backend === 'redis') {
       released = await redisConfig.deleteIfValueMatches(
         this.lockKey(handle.userId),
-        handle.ownerToken
+        handle.ownerToken,
       );
     } else {
       const current = this.inMemoryLocks.get(handle.userId);
@@ -180,6 +178,23 @@ export class ImportLockService {
     for (const [userId, lock] of this.inMemoryLocks.entries()) {
       if (lock.expiresAt <= now) this.inMemoryLocks.delete(userId);
     }
+  }
+
+  private static waitForRetry(delayMs: number, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (shouldRetry: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        resolve(shouldRetry);
+      };
+      const abort = (): void => finish(false);
+      const timer = setTimeout(() => finish(true), Math.max(0, delayMs));
+      signal?.addEventListener('abort', abort, { once: true });
+    });
   }
 
   private static startRenewal(handle: ImportLockHandle): void {

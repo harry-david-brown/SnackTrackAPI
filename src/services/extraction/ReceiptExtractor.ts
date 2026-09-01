@@ -1,6 +1,6 @@
 /**
  * Receipt Extractor
- * 
+ *
  * Main orchestrator for receipt extraction from emails
  * Combines classification and data extraction into a unified interface
  */
@@ -12,7 +12,7 @@ import {
   EmailClassification,
   ExtractorConfig,
   DEFAULT_EXTRACTOR_CONFIG,
-  ServiceType
+  ServiceType,
 } from './types';
 import { HtmlTextExtractor } from './HtmlTextExtractor';
 import { ReceiptClassifier } from './ReceiptClassifier';
@@ -42,19 +42,22 @@ export class ReceiptExtractor {
     const coreText = this.textExtractor.extractCoreText(body);
 
     // Classify the email
-    const classification = this.classifier.classify(body, subject);
+    const classification = this.classifier.classify(body, subject, from);
 
     // Extract data if it's a receipt
     let data: ExtractedReceiptData | null = null;
     if (classification.isReceipt) {
-      data = this.dataExtractor.extract(body, subject, from);
+      data = this.dataExtractor.extract(body, subject, from, {
+        providerMessageId: email.providerMessageId,
+        receivedAt: email.receivedAt,
+      });
     }
 
     return {
       classification,
       data,
       rawText,
-      coreText
+      coreText,
     };
   }
 
@@ -62,35 +65,35 @@ export class ReceiptExtractor {
    * Process multiple emails in batch
    */
   extractBatch(emails: RawEmail[]): ExtractionResult[] {
-    return emails.map(email => this.extract(email));
+    return emails.map((email) => this.extract(email));
   }
 
   /**
    * Filter emails to only receipts and extract their data
    */
   extractReceipts(emails: RawEmail[]): ExtractionResult[] {
-    return this.extractBatch(emails).filter(result => result.classification.isReceipt);
+    return this.extractBatch(emails).filter((result) => result.classification.isReceipt);
   }
 
   /**
    * Quick check if an email is a receipt
    */
   isReceipt(email: RawEmail): boolean {
-    return this.classifier.isReceipt(email.body, email.subject);
+    return this.classifier.isReceipt(email.body, email.subject, email.from);
   }
 
   /**
    * Get just the classification without full extraction
    */
   classify(email: RawEmail): EmailClassification {
-    return this.classifier.classify(email.body, email.subject);
+    return this.classifier.classify(email.body, email.subject, email.from);
   }
 
   /**
    * Get summary statistics from a batch of receipts
    */
   getSummary(results: ExtractionResult[]): ReceiptSummary {
-    const receipts = results.filter(r => r.classification.isReceipt && r.data);
+    const receipts = results.filter((r) => r.classification.isReceipt && r.data);
 
     const byOrder = new Map<string, ExtractedReceiptData>();
 
@@ -111,7 +114,7 @@ export class ReceiptExtractor {
       } else {
         // CONFLICT RESOLUTION: "Tip Update" Strategy
         // When multiple receipts share the same Order ID (UUID), we want the most "final" version.
-        // For Uber Eats, the total only increases (adding a tip). 
+        // For Uber Eats, the total only increases (adding a tip).
         // Therefore, always prefer the receipt with the HIGHER total amount.
 
         let shouldReplace = false;
@@ -153,7 +156,6 @@ export class ReceiptExtractor {
 
     // Use unique receipts for stats
     for (const data of uniqueReceipts) {
-
       if (data.total !== null) totalAmount += data.total;
       if (data.tax !== null) totalTax += data.tax;
       if (data.tip !== null) totalTip += data.tip;
@@ -189,11 +191,10 @@ export class ReceiptExtractor {
       totalDeliveryFees: Math.round(totalDeliveryFee * 100) / 100,
       totalServiceFees: Math.round(totalServiceFee * 100) / 100,
       totalSavings: Math.round(totalSavings * 100) / 100,
-      averageOrderAmount: receipts.length > 0
-        ? Math.round((totalAmount / receipts.length) * 100) / 100
-        : 0,
+      averageOrderAmount:
+        receipts.length > 0 ? Math.round((totalAmount / receipts.length) * 100) / 100 : 0,
       topMerchants,
-      dateRange
+      dateRange,
     };
   }
 }
@@ -219,4 +220,3 @@ export interface ReceiptSummary {
 
 // Export singleton instance for convenience
 export const receiptExtractor = new ReceiptExtractor();
-

@@ -1,16 +1,22 @@
 /**
  * OTP Service
- * 
+ *
  * Handles OTP generation, storage, and verification
  * Uses bcrypt to hash OTPs before storing them in the database
  */
 
 import bcrypt from 'bcryptjs';
-import { PostgresService } from './data/PostgresService';
+import { randomInt } from 'crypto';
+import { DatabaseConnection, DatabaseQueryExecutor } from './ports/DatabasePort';
 import { authConfig } from '../config/auth';
 import { AuthenticationError } from '../core/errors';
-
-export type CodeType = 'password_reset' | 'email_verification';
+import { CodeType, ConsumeCodeResult } from './ports/AuthPorts';
+import {
+  databaseNonNegativeInteger,
+  databaseRow,
+  databaseString,
+  databaseUuid,
+} from './data/DatabaseRowDecoder';
 
 interface VerificationCode {
   id: string;
@@ -28,7 +34,11 @@ export class OtpService {
   private readonly CODE_EXPIRY_MINUTES = 15;
   private readonly MAX_ATTEMPTS = 5;
 
-  constructor(private postgres: PostgresService) {}
+  constructor(
+    private readonly postgres: DatabaseConnection,
+    private readonly generateNumber: (minimum: number, maximum: number) => number = randomInt,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   /**
    * Generate a 6-digit numeric OTP
@@ -36,7 +46,9 @@ export class OtpService {
   generateOTP(): string {
     const min = 100000;
     const max = 999999;
-    return Math.floor(Math.random() * (max - min + 1) + min).toString().padStart(6, '0');
+    return this.generateNumber(min, max + 1)
+      .toString()
+      .padStart(6, '0');
   }
 
   /**
@@ -47,23 +59,23 @@ export class OtpService {
   async storeOTP(email: string, codeType: CodeType): Promise<string> {
     const code = this.generateOTP();
     const codeHash = await bcrypt.hash(code, authConfig.getSaltRounds());
-    
-    const expiresAt = new Date();
+
+    const expiresAt = this.now();
     expiresAt.setMinutes(expiresAt.getMinutes() + this.CODE_EXPIRY_MINUTES);
-    
+
     // Invalidate any existing codes for this email/type
     await this.postgres.query(
       'DELETE FROM verification_codes WHERE email = $1 AND code_type = $2',
-      [email.toLowerCase().trim(), codeType]
+      [email.toLowerCase().trim(), codeType],
     );
-    
+
     // Store new code
     await this.postgres.query(
       `INSERT INTO verification_codes (email, code_hash, code_type, expires_at, max_attempts)
        VALUES ($1, $2, $3, $4, $5)`,
-      [email.toLowerCase().trim(), codeHash, codeType, expiresAt, this.MAX_ATTEMPTS]
+      [email.toLowerCase().trim(), codeHash, codeType, expiresAt, this.MAX_ATTEMPTS],
     );
-    
+
     return code; // Return plain code to send via email
   }
 
@@ -73,7 +85,12 @@ export class OtpService {
    * Increments attempt counter on failure
    * Optionally marks code as used on success (set markAsUsed=true)
    */
-  async verifyOTP(email: string, code: string, codeType: CodeType, markAsUsed: boolean = true): Promise<boolean> {
+  async verifyOTP(
+    email: string,
+    code: string,
+    codeType: CodeType,
+    markAsUsed: boolean = true,
+  ): Promise<boolean> {
     // Find valid, unused code
     const result = await this.postgres.query(
       `SELECT * FROM verification_codes 
@@ -83,42 +100,44 @@ export class OtpService {
          AND used_at IS NULL
        ORDER BY created_at DESC 
        LIMIT 1`,
-      [email.toLowerCase().trim(), codeType]
+      [email.toLowerCase().trim(), codeType],
     );
-    
+
     if (result.rows.length === 0) {
       return false; // No valid code found
     }
-    
-    const record = result.rows[0];
-    
+
+    const rawRecord: unknown = result.rows[0];
+    const record = databaseRow(rawRecord, 'verification_codes');
+    const recordId = databaseUuid(record, 'id');
+    const attempts = databaseNonNegativeInteger(record, 'attempts');
+    const maxAttempts = databaseNonNegativeInteger(record, 'max_attempts');
+
     // Check attempt limit
-    if (record.attempts >= record.max_attempts) {
+    if (attempts >= maxAttempts) {
       // Mark as used to prevent further attempts
-      await this.postgres.query(
-        'UPDATE verification_codes SET used_at = NOW() WHERE id = $1',
-        [record.id]
-      );
+      await this.postgres.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [
+        recordId,
+      ]);
       return false;
     }
-    
+
     // Verify code hash
-    const isValid = await bcrypt.compare(code, record.code_hash);
-    
+    const isValid = await bcrypt.compare(code, databaseString(record, 'code_hash'));
+
     if (isValid) {
       // Mark as used only if requested
       if (markAsUsed) {
-        await this.postgres.query(
-          'UPDATE verification_codes SET used_at = NOW() WHERE id = $1',
-          [record.id]
-        );
+        await this.postgres.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [
+          recordId,
+        ]);
       }
       return true;
     } else {
       // Increment attempt counter
       await this.postgres.query(
         'UPDATE verification_codes SET attempts = attempts + 1 WHERE id = $1',
-        [record.id]
+        [recordId],
       );
       return false;
     }
@@ -135,10 +154,56 @@ export class OtpService {
          AND expires_at > NOW() 
          AND used_at IS NULL
        LIMIT 1`,
-      [email.toLowerCase().trim(), codeType]
+      [email.toLowerCase().trim(), codeType],
     );
-    
+
     return result.rows.length > 0;
+  }
+
+  /**
+   * Consumes a valid code and applies its protected mutation in one transaction.
+   * Failed protected mutations roll back code consumption.
+   */
+  async consumeOTP(
+    email: string,
+    code: string,
+    codeType: CodeType,
+    onVerified: (transaction: DatabaseQueryExecutor) => Promise<void>,
+  ): Promise<ConsumeCodeResult> {
+    return this.postgres.withTransaction(async (transaction) => {
+      const result = await transaction.query(
+        `SELECT id, code_hash, attempts, max_attempts
+         FROM verification_codes
+         WHERE email = $1 AND code_type = $2 AND expires_at > NOW() AND used_at IS NULL
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [email.toLowerCase().trim(), codeType],
+      );
+      if (!result.rows[0]) return 'not_pending';
+
+      const row = databaseRow(result.rows[0], 'verification code');
+      const id = databaseUuid(row, 'id');
+      const attempts = databaseNonNegativeInteger(row, 'attempts');
+      const maximumAttempts = databaseNonNegativeInteger(row, 'max_attempts');
+      if (attempts >= maximumAttempts) {
+        await transaction.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [
+          id,
+        ]);
+        return 'invalid';
+      }
+      if (!(await bcrypt.compare(code, databaseString(row, 'code_hash')))) {
+        await transaction.query(
+          'UPDATE verification_codes SET attempts = attempts + 1 WHERE id = $1',
+          [id],
+        );
+        return 'invalid';
+      }
+
+      await onVerified(transaction);
+      await transaction.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [id]);
+      return 'consumed';
+    });
   }
 
   /**
@@ -147,9 +212,9 @@ export class OtpService {
   async cleanupExpiredCodes(): Promise<number> {
     const result = await this.postgres.query(
       `DELETE FROM verification_codes 
-       WHERE expires_at < NOW() - INTERVAL '1 day'`
+       WHERE expires_at < NOW() - INTERVAL '1 day'`,
     );
-    
+
     return result.rowCount || 0;
   }
 }

@@ -1,14 +1,37 @@
 export type ApplicationErrorCode =
   | 'VALIDATION_ERROR'
   | 'AUTHENTICATION_REQUIRED'
+  | 'INVALID_CREDENTIALS'
+  | 'ACCESS_TOKEN_EXPIRED'
+  | 'ACCESS_TOKEN_INVALID'
+  | 'REFRESH_TOKEN_EXPIRED'
+  | 'REFRESH_TOKEN_INVALID'
+  | 'REFRESH_TOKEN_REVOKED'
+  | 'PROVIDER_AUTH_FAILED'
+  | 'ACCOUNT_ALREADY_EXISTS'
+  | 'EMAIL_ALREADY_VERIFIED'
+  | 'VERIFICATION_CODE_INVALID'
+  | 'VERIFICATION_CODE_NOT_PENDING'
   | 'AUTHORIZATION_DENIED'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'PAYLOAD_TOO_LARGE'
+  | 'CONFIGURATION_ERROR'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'IMPORT_IN_PROGRESS'
+  | 'HISTORICAL_BASELINE_REQUIRED'
+  | 'GMAIL_RECONNECT_REQUIRED'
+  | 'GMAIL_VALIDATION_UNAVAILABLE'
+  | 'TRACKING_NOT_AVAILABLE'
+  | 'EXPORT_ALREADY_PROCESSING'
+  | 'GMAIL_IMPORT_FAILED'
+  | 'EXPORT_IMPORT_FAILED'
   | 'INVALID_CSV_FORMAT'
   | 'UNKNOWN_EXPORT_PROVIDER'
   | 'NO_VALID_EXPORT_ORDERS'
   | 'DATABASE_ERROR'
+  | 'DATABASE_UNAVAILABLE'
+  | 'INVALID_JSON'
   | 'INTERNAL_ERROR';
 
 export interface AppErrorOptions {
@@ -75,8 +98,20 @@ export class DatabaseError extends AppError {
 }
 
 export class AuthenticationError extends AppError {
-  constructor(message = 'Authentication required') {
-    super({ code: 'AUTHENTICATION_REQUIRED', message, publicMessage: message });
+  constructor(
+    message = 'Authentication required',
+    code:
+      | 'AUTHENTICATION_REQUIRED'
+      | 'INVALID_CREDENTIALS'
+      | 'ACCESS_TOKEN_EXPIRED'
+      | 'ACCESS_TOKEN_INVALID'
+      | 'REFRESH_TOKEN_EXPIRED'
+      | 'REFRESH_TOKEN_INVALID'
+      | 'REFRESH_TOKEN_REVOKED'
+      | 'PROVIDER_AUTH_FAILED'
+      | 'VERIFICATION_CODE_INVALID' = 'AUTHENTICATION_REQUIRED',
+  ) {
+    super({ code, message, publicMessage: message });
   }
 }
 
@@ -89,5 +124,13 @@ export class AuthorizationError extends AppError {
 export class ConflictError extends AppError {
   constructor(code: 'CONFLICT' | 'IMPORT_IN_PROGRESS' | (string & {}), message: string) {
     super({ code, message, publicMessage: message });
+  }
+}
+
+/** Persistence-neutral signal for a unique account-email race. */
+export class DuplicateUserEmailError extends Error {
+  constructor() {
+    super('A user with this email already exists');
+    this.name = 'DuplicateUserEmailError';
   }
 }

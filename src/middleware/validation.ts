@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ValidationError } from '../core/errors';
+import { isUuid, parseQueryInteger, requireObject } from '../http/validation/requestValues';
 
 // Email validation
 export const validateEmail = (email: string): boolean => {
@@ -9,34 +10,14 @@ export const validateEmail = (email: string): boolean => {
 
 // UUID validation
 export const validateUUID = (uuid: string): boolean => {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(uuid);
-};
-
-// User creation validation
-export const validateUserCreation = (req: Request, res: Response, next: NextFunction) => {
-  const { email } = req.body;
-
-  if (!email) {
-    throw new ValidationError('Email is required', 'email');
-  }
-
-  if (typeof email !== 'string') {
-    throw new ValidationError('Email must be a string', 'email');
-  }
-
-  if (!validateEmail(email)) {
-    throw new ValidationError('Invalid email format', 'email');
-  }
-
-  next();
+  return isUuid(uuid);
 };
 
 // UUID parameter validation
 export const validateUUIDParam = (paramName: string) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const uuid = req.params[paramName];
-    
+
     if (!uuid) {
       throw new ValidationError(`${paramName} parameter is required`, paramName);
     }
@@ -54,17 +35,11 @@ export const validatePagination = (req: Request, res: Response, next: NextFuncti
   const { limit, offset } = req.query;
 
   if (limit !== undefined) {
-    const limitNum = parseInt(limit as string);
-    if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
-      throw new ValidationError('Limit must be a number between 1 and 1000', 'limit');
-    }
+    parseQueryInteger(limit, 'limit', { minimum: 1, maximum: 1000 });
   }
 
   if (offset !== undefined) {
-    const offsetNum = parseInt(offset as string);
-    if (isNaN(offsetNum) || offsetNum < 0) {
-      throw new ValidationError('Offset must be a non-negative number', 'offset');
-    }
+    parseQueryInteger(offset, 'offset', { minimum: 0 });
   }
 
   next();
@@ -72,13 +47,13 @@ export const validatePagination = (req: Request, res: Response, next: NextFuncti
 
 // CSV import validation
 export const validateCSVImport = (req: Request, res: Response, next: NextFunction) => {
-  const { userId } = req.body;
+  const { userId } = requireObject(req.body as unknown);
 
   if (!userId) {
     throw new ValidationError('userId is required for CSV import', 'userId');
   }
 
-  if (!validateUUID(userId)) {
+  if (typeof userId !== 'string' || !validateUUID(userId)) {
     throw new ValidationError('Invalid userId format', 'userId');
   }
 
@@ -102,13 +77,13 @@ export const validateCSVImport = (req: Request, res: Response, next: NextFunctio
 
 // Receipt creation validation
 export const validateReceiptCreation = (req: Request, res: Response, next: NextFunction) => {
-  const { userId, restaurantName, amountSpent, orderDate } = req.body;
+  const { userId, restaurantName, amountSpent, orderDate } = requireObject(req.body as unknown);
 
   if (!userId) {
     throw new ValidationError('userId is required', 'userId');
   }
 
-  if (!validateUUID(userId)) {
+  if (typeof userId !== 'string' || !validateUUID(userId)) {
     throw new ValidationError('Invalid userId format', 'userId');
   }
 
@@ -120,12 +95,20 @@ export const validateReceiptCreation = (req: Request, res: Response, next: NextF
     throw new ValidationError('amountSpent is required', 'amountSpent');
   }
 
-  const amountNum = parseFloat(amountSpent);
+  const amountNum =
+    typeof amountSpent === 'number'
+      ? amountSpent
+      : typeof amountSpent === 'string'
+        ? Number(amountSpent)
+        : Number.NaN;
   if (isNaN(amountNum) || amountNum < 0) {
     throw new ValidationError('amountSpent must be a non-negative number', 'amountSpent');
   }
 
   if (orderDate) {
+    if (typeof orderDate !== 'string' && typeof orderDate !== 'number') {
+      throw new ValidationError('orderDate must be a valid date', 'orderDate');
+    }
     const date = new Date(orderDate);
     if (isNaN(date.getTime())) {
       throw new ValidationError('orderDate must be a valid date', 'orderDate');

@@ -1,6 +1,6 @@
 /**
  * Receipt Extraction Types
- * 
+ *
  * Type definitions for the receipt extraction system
  */
 
@@ -14,7 +14,7 @@ export enum ServiceType {
   DOORDASH = 'DOORDASH',
   GRUBHUB = 'GRUBHUB',
   SKIP_THE_DISHES = 'SKIP_THE_DISHES',
-  OTHER = 'OTHER'
+  OTHER = 'OTHER',
 }
 
 /**
@@ -25,7 +25,7 @@ export enum Currency {
   USD = 'USD',
   EUR = 'EUR',
   GBP = 'GBP',
-  UNKNOWN = 'UNKNOWN'
+  UNKNOWN = 'UNKNOWN',
 }
 
 /**
@@ -48,6 +48,10 @@ export interface RawEmail {
   to: string;
   body: string; // HTML body
   subject?: string;
+  /** Stable ID supplied by the email provider, when available. */
+  providerMessageId?: string;
+  /** Provider-normalized message timestamp, used when a receipt omits its order date. */
+  receivedAt?: Date;
 }
 
 /**
@@ -64,7 +68,7 @@ export interface MonetaryAmount {
  */
 export interface ExtractedReceiptData {
   // Core identifiers
-  orderId: string | null;  // Added orderId
+  orderId: string | null; // Added orderId
   service: ServiceType;
   merchant: string | null;
 
@@ -130,15 +134,21 @@ export const DEFAULT_EXTRACTOR_CONFIG: ExtractorConfig = {
     'thanks for your order',
     'order confirmation',
     'order completed',
-    'delivery receipt'
+    'delivery receipt',
   ],
   tableWords: ['subtotal', 'tax', 'total', 'tip', 'delivery fee', 'service fee'],
   footerWords: [
-    'unsubscribe', 'privacy', 'terms',
-    'follow us', 'facebook', 'twitter', 'instagram',
-    'contact support', 'my orders', 'forgot password'
+    'unsubscribe',
+    'privacy',
+    'terms',
+    'follow us',
+    'facebook',
+    'twitter',
+    'instagram',
+    'contact support',
+    'my orders',
+    'forgot password',
   ],
   maxCoreLines: 20,
-  minTableWordHits: 2
+  minTableWordHits: 2,
 };
-

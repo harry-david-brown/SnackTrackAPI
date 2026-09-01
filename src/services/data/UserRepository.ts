@@ -1,46 +1,72 @@
 import { User } from '../../models/User';
-import { PostgresService } from './PostgresService';
+import { DuplicateUserEmailError } from '../../core/errors';
+import { DatabaseQueryExecutor } from '../ports/DatabasePort';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  databaseBoolean,
+  databaseNullableString,
+  databaseRow,
+  databaseString,
+  databaseStringArray,
+  databaseTimestamp,
+  databaseUuid,
+} from './DatabaseRowDecoder';
+import {
+  GmailConnectionMode,
+  isGmailConnectionMode,
+} from '../import/GmailConnectionContracts';
 
-/**
- * Repository for user data access operations
- * Separated from DatabaseService to follow single responsibility principle
- */
+type UnknownRecord = Record<string, unknown>;
+
+const postgresErrorCode = (error: unknown): string | undefined => {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as UnknownRecord).code;
+  return typeof code === 'string' ? code : undefined;
+};
+
+const requiredTimestamp = (row: UnknownRecord, field: string): string => {
+  const value = databaseTimestamp(row, field);
+  if (!value) throw new Error(`Invalid user row: ${field}`);
+  return value;
+};
+
+const mapUser = (value: unknown, includePassword = false): User => {
+  const row = databaseRow(value, 'user');
+  return {
+    id: databaseUuid(row, 'id'),
+    email: databaseString(row, 'email'),
+    ...(includePassword
+      ? { password: databaseNullableString(row, 'password') ?? undefined }
+      : {}),
+    emailVerified: databaseBoolean(row, 'email_verified'),
+    timezone: databaseString(row, 'timezone'),
+    createdAt: requiredTimestamp(row, 'created_at'),
+  };
+};
+
+const gmailConnectionMode = (value: unknown): User['gmailConnectionMode'] => {
+  if (isGmailConnectionMode(value)) return value;
+  throw new Error('Invalid user row: gmail_connection_mode');
+};
+
+/** Typed persistence adapter for account identity and Gmail credential records. */
 export class UserRepository {
-  constructor(private postgres: PostgresService) {}
+  constructor(private readonly postgres: DatabaseQueryExecutor) {}
 
-  private normalizeGmailConnectionMode(mode?: string | null): User['gmailConnectionMode'] {
-    if (mode === 'temporary' || mode === 'offline') {
-      return mode;
-    }
-    return 'none';
-  }
-
-  async createUser(email: string, timezone?: string): Promise<string> {
-    // First check if user already exists
+  async createUser(email: string, timezone = 'America/New_York'): Promise<string> {
     const existingUser = await this.findByEmail(email);
-    if (existingUser) {
-      return existingUser.id;
-    }
-
-    // Use provided timezone or default
-    const userTimezone = timezone || 'America/New_York';
-
-    // Create new user if doesn't exist
+    if (existingUser) return existingUser.id;
     const userId = uuidv4();
     try {
       const result = await this.postgres.query(
         'INSERT INTO users (id, email, timezone) VALUES ($1, $2, $3) RETURNING id',
-        [userId, email, userTimezone]
+        [userId, email, timezone],
       );
-      return result.rows[0].id;
-    } catch (error: any) {
-      // If unique constraint violation, try to find the user again
-      if (error.code === '23505') { // PostgreSQL unique violation error code
-        const existingUser = await this.findByEmail(email);
-        if (existingUser) {
-          return existingUser.id;
-        }
+      return databaseUuid(databaseRow(result.rows[0], 'created user'), 'id');
+    } catch (error) {
+      if (postgresErrorCode(error) === '23505') {
+        const racedUser = await this.findByEmail(email);
+        if (racedUser) return racedUser.id;
       }
       throw error;
     }
@@ -48,252 +74,165 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, email_verified, timezone, created_at FROM users WHERE id = $1',
-      [id]
+      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+              created_at FROM users WHERE id = $1`,
+      [id],
     );
-    if (result.rows.length === 0) return undefined;
-    
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified || false,
-      timezone: row.timezone || 'America/New_York', // Default timezone
-      createdAt: row.created_at
-    };
-  }
-
-  async findAll(): Promise<User[]> {
-    const result = await this.postgres.query('SELECT id, email, email_verified, timezone, created_at FROM users');
-    return result.rows.map((row: any) => ({
-      id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified || false,
-      timezone: row.timezone || 'America/New_York', // Default timezone
-      createdAt: row.created_at
-    }));
+    return result.rows[0] ? mapUser(result.rows[0]) : undefined;
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, email_verified, timezone, created_at FROM users WHERE email = $1',
-      [email]
+      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+              created_at FROM users WHERE email = $1`,
+      [email],
     );
-    if (result.rows.length === 0) return undefined;
-    
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified || false,
-      timezone: row.timezone || 'America/New_York', // Default timezone
-      createdAt: row.created_at
-    };
+    return result.rows[0] ? mapUser(result.rows[0]) : undefined;
   }
 
   async findByEmailWithPassword(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      'SELECT id, email, password, email_verified, timezone, created_at FROM users WHERE email = $1',
-      [email]
+      `SELECT id, email, password, email_verified,
+              COALESCE(timezone, 'America/New_York') AS timezone, created_at
+       FROM users WHERE email = $1`,
+      [email],
     );
-    if (result.rows.length === 0) return undefined;
-    
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      email: row.email,
-      password: row.password,
-      emailVerified: row.email_verified || false,
-      timezone: row.timezone || 'America/New_York', // Default timezone
-      createdAt: row.created_at
-    };
+    return result.rows[0] ? mapUser(result.rows[0], true) : undefined;
   }
 
-  async createUserWithPassword(email: string, hashedPassword: string, timezone?: string): Promise<string> {
-    // First check if user already exists
-    const existingUser = await this.findByEmail(email);
-    if (existingUser) {
-      throw new Error('User with this email already exists');
-    }
-
-    // Use provided timezone or default
-    const userTimezone = timezone || 'America/New_York';
-
-    // Create new user with password (email_verified defaults to false)
+  async createUserWithPassword(
+    email: string,
+    hashedPassword: string,
+    timezone = 'America/New_York',
+  ): Promise<string> {
+    if (await this.findByEmail(email)) throw new DuplicateUserEmailError();
     const userId = uuidv4();
     try {
       const result = await this.postgres.query(
-        'INSERT INTO users (id, email, password, email_verified, timezone, created_at) VALUES ($1, $2, $3, FALSE, $4, NOW()) RETURNING id',
-        [userId, email, hashedPassword, userTimezone]
+        `INSERT INTO users (id, email, password, email_verified, timezone, created_at)
+         VALUES ($1, $2, $3, FALSE, $4, NOW()) RETURNING id`,
+        [userId, email, hashedPassword, timezone],
       );
-      return result.rows[0].id;
-    } catch (error: any) {
-      // If unique constraint violation, throw error
-      if (error.code === '23505') {
-        throw new Error('User with this email already exists');
+      return databaseUuid(databaseRow(result.rows[0], 'created user'), 'id');
+    } catch (error) {
+      if (postgresErrorCode(error) === '23505') {
+        throw new DuplicateUserEmailError();
       }
       throw error;
     }
   }
 
-  async updateEmailVerified(email: string, verified: boolean): Promise<void> {
-    await this.postgres.query(
+  async updateEmailVerified(
+    email: string,
+    verified: boolean,
+    executor: DatabaseQueryExecutor = this.postgres,
+  ): Promise<boolean> {
+    const result = await executor.query(
       'UPDATE users SET email_verified = $1, updated_at = NOW() WHERE email = $2',
-      [verified, email]
+      [verified, email],
     );
+    return Boolean(result.rowCount);
   }
 
-  async updatePassword(email: string, hashedPassword: string): Promise<void> {
-    await this.postgres.query(
+  async updatePassword(
+    email: string,
+    hashedPassword: string,
+    executor: DatabaseQueryExecutor = this.postgres,
+  ): Promise<boolean> {
+    const result = await executor.query(
       'UPDATE users SET password = $1, updated_at = NOW() WHERE email = $2',
-      [hashedPassword, email]
+      [hashedPassword, email],
     );
+    return Boolean(result.rowCount);
   }
 
   async updateTimezone(userId: string, timezone: string): Promise<void> {
-    // Validate timezone format (basic check - should be IANA timezone)
-    // Common IANA timezones: America/New_York, Europe/London, Asia/Tokyo, etc.
-    if (!timezone || typeof timezone !== 'string' || timezone.length > 50) {
-      throw new Error('Invalid timezone format');
-    }
-
-    await this.postgres.query(
-      'UPDATE users SET timezone = $1, updated_at = NOW() WHERE id = $2',
-      [timezone, userId]
-    );
+    if (!timezone || timezone.length > 50) throw new Error('Invalid timezone format');
+    await this.postgres.query('UPDATE users SET timezone = $1, updated_at = NOW() WHERE id = $2', [
+      timezone,
+      userId,
+    ]);
   }
 
-  /**
-   * Update Gmail OAuth tokens for a user
-   */
   async updateGmailTokens(
     userId: string,
-    {
-      refreshToken,
-      accessToken,
-      expiryDate,
-      gmailEmail,
-      scopes,
-      connectionMode,
-    }: {
+    input: {
       refreshToken?: string | null;
       accessToken: string;
       expiryDate: Date;
       gmailEmail?: string;
       scopes: string[];
-      connectionMode: 'temporary' | 'offline';
-    }
+      connectionMode: Exclude<GmailConnectionMode, 'none'>;
+    },
   ): Promise<void> {
     await this.postgres.query(
-      `UPDATE users SET 
-        gmail_refresh_token = $1, 
-        gmail_access_token = $2, 
-        gmail_token_expiry = $3,
-        gmail_connected = TRUE,
-        gmail_email = $4,
-        gmail_scopes = $5,
-        gmail_connection_mode = $6,
-        updated_at = NOW() 
-      WHERE id = $7`,
+      `UPDATE users SET
+         gmail_refresh_token = $1, gmail_access_token = $2, gmail_token_expiry = $3,
+         gmail_connected = TRUE, gmail_email = $4, gmail_scopes = $5,
+         gmail_connection_mode = $6, updated_at = NOW()
+       WHERE id = $7`,
       [
-        refreshToken || null,
-        accessToken,
-        expiryDate,
-        gmailEmail || null,
-        scopes,
-        connectionMode,
-        userId
-      ]
+        input.refreshToken ?? null,
+        input.accessToken,
+        input.expiryDate,
+        input.gmailEmail ?? null,
+        input.scopes,
+        input.connectionMode,
+        userId,
+      ],
     );
   }
 
-  /**
-   * Get user with Gmail tokens
-   */
   async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, email_verified, gmail_refresh_token, gmail_access_token, 
-              gmail_token_expiry, gmail_connected, gmail_email, gmail_scopes,
-              gmail_connection_mode, created_at 
+      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+              gmail_refresh_token, gmail_access_token, gmail_token_expiry, gmail_connected,
+              gmail_email, gmail_scopes, gmail_connection_mode, created_at
        FROM users WHERE id = $1`,
-      [userId]
+      [userId],
     );
-
-    if (result.rows.length === 0) return undefined;
-
-    const row = result.rows[0];
+    if (!result.rows[0]) return undefined;
+    const row = databaseRow(result.rows[0], 'Gmail user');
     return {
-      id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified || false,
-      gmailRefreshToken: row.gmail_refresh_token,
-      gmailAccessToken: row.gmail_access_token,
-      gmailTokenExpiry: row.gmail_token_expiry,
-      gmailConnected: row.gmail_connected || false,
-      gmailEmail: row.gmail_email,
-      gmailScopes: row.gmail_scopes || [],
-      gmailConnectionMode: this.normalizeGmailConnectionMode(row.gmail_connection_mode),
-      createdAt: row.created_at
+      ...mapUser(row),
+      gmailRefreshToken: databaseNullableString(row, 'gmail_refresh_token') ?? undefined,
+      gmailAccessToken: databaseNullableString(row, 'gmail_access_token') ?? undefined,
+      gmailTokenExpiry: databaseTimestamp(row, 'gmail_token_expiry') ?? undefined,
+      gmailConnected: databaseBoolean(row, 'gmail_connected'),
+      gmailEmail: databaseNullableString(row, 'gmail_email') ?? undefined,
+      gmailScopes: databaseStringArray(row, 'gmail_scopes'),
+      gmailConnectionMode: gmailConnectionMode(row.gmail_connection_mode),
     };
   }
 
-  /**
-   * Disconnect Gmail account for a user
-   */
   async disconnectGmail(userId: string): Promise<void> {
     await this.postgres.query(
-      `UPDATE users SET 
-        gmail_refresh_token = NULL, 
-        gmail_access_token = NULL, 
-        gmail_token_expiry = NULL,
-        gmail_connected = FALSE,
-        gmail_email = NULL,
-        gmail_scopes = ARRAY[]::TEXT[],
-        gmail_connection_mode = 'none',
-        updated_at = NOW() 
-      WHERE id = $1`,
-      [userId]
+      `UPDATE users SET
+         gmail_refresh_token = NULL, gmail_access_token = NULL, gmail_token_expiry = NULL,
+         gmail_connected = FALSE, gmail_email = NULL, gmail_scopes = ARRAY[]::TEXT[],
+         gmail_connection_mode = 'none', updated_at = NOW()
+       WHERE id = $1`,
+      [userId],
     );
   }
 
-  /** Preserve the connected account identity while invalidating rejected OAuth credentials. */
   async markGmailReconnectRequired(userId: string): Promise<void> {
     await this.postgres.query(
       `UPDATE users SET
-        gmail_refresh_token = NULL,
-        gmail_access_token = NULL,
-        gmail_token_expiry = NULL,
-        gmail_connected = TRUE,
-        gmail_connection_mode = 'temporary',
-        updated_at = NOW()
+         gmail_refresh_token = NULL, gmail_access_token = NULL, gmail_token_expiry = NULL,
+         gmail_connected = TRUE, gmail_connection_mode = 'temporary', updated_at = NOW()
        WHERE id = $1`,
-      [userId]
+      [userId],
     );
   }
 
-  /**
-   * Check if user has Gmail connected
-   */
   async hasGmailConnected(userId: string): Promise<boolean> {
     const result = await this.postgres.query(
       'SELECT gmail_connected FROM users WHERE id = $1',
-      [userId]
+      [userId],
     );
-
-    if (result.rows.length === 0) return false;
-    return result.rows[0].gmail_connected || false;
+    return result.rows[0]
+      ? databaseBoolean(databaseRow(result.rows[0], 'Gmail connection'), 'gmail_connected')
+      : false;
   }
-
-  /**
-   * Delete a user by ID
-   * Note: This should only be called after deleting all related data (receipts, OAuth accounts, etc.)
-   */
-  async deleteUser(userId: string): Promise<boolean> {
-    const result = await this.postgres.query(
-      'DELETE FROM users WHERE id = $1',
-      [userId]
-    );
-    return (result.rowCount ?? 0) > 0;
-  }
-
 }

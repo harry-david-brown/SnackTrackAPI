@@ -1,6 +1,6 @@
 import { User } from '../../models/User';
 import { UserRepository } from '../data/UserRepository';
-import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import type { ImportLifecycleRepository } from '../data/ImportLifecycleRepository';
 import { isGmailReconnectError } from '../import/GmailImportService';
 import { GmailClient } from './GmailClient';
 
@@ -20,7 +20,7 @@ export class GmailConnectionHealthService {
   constructor(
     private readonly gmail: Pick<GmailClient, 'validateConnection'>,
     private readonly users: Pick<UserRepository, 'markGmailReconnectRequired'>,
-    private readonly preferences: Pick<ImportPreferencesRepository, 'markTrackingReconnectRequired'>,
+    private readonly preferences: Pick<ImportLifecycleRepository, 'markTrackingReconnectRequired'>,
   ) {}
 
   invalidate(userId: string): void {

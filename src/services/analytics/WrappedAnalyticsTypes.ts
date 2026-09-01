@@ -115,10 +115,10 @@ export interface MissedInvestment {
 }
 
 export interface CostPerMeal {
-  totalDeliveryFees: number;        // Sum of all delivery fees
-  averageDeliveryFee: number;       // Average fee per order
+  totalDeliveryFees: number; // Sum of all delivery fees
+  averageDeliveryFee: number; // Average fee per order
   averageDeliveryFeePerMeal: number; // Average fee per meal (if applicable)
-  totalOrders: number;              // Number of orders used in calculation
+  totalOrders: number; // Number of orders used in calculation
   message: string;
 }
 
@@ -142,9 +142,9 @@ export interface WeekendWarrior {
 }
 
 export interface DeliveryWaits {
-  totalMinutes: number;        // Total time spent waiting across all orders
-  averageMinutes: number;       // Average wait time per order
-  totalOrders: number;         // Number of orders with valid wait times
+  totalMinutes: number; // Total time spent waiting across all orders
+  averageMinutes: number; // Average wait time per order
+  totalOrders: number; // Number of orders with valid wait times
   longestWait?: {
     minutes: number;
     restaurant: string;
@@ -233,5 +233,7 @@ export interface ReceiptForAnalytics {
   }>;
   receiptType: string;
   dataSource: string;
+  /** Optional until receipt currency is persisted for every historical source. */
+  currency?: 'CAD' | 'USD' | 'EUR' | 'GBP' | 'UNKNOWN';
   deliveryTime?: Date | null; // Delivery time (for DoorDash wait time analytics)
 }

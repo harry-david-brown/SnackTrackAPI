@@ -29,12 +29,12 @@ customization records while incorrectly merging legitimate identical items.
 
 One completed Starbucks order in a real Uber export contains these four rows:
 
-| Item | Quantity | Item price | Customization cost | Customizations |
-| --- | ---: | ---: | ---: | --- |
-| Chocolate Chunk Cookie | 1 | $4.25 | $0.00 | Not Warmed, Warmed |
-| Mocha Frappuccino Blended Beverage | 1 | $7.35 | $0.80 | Venti Mocha Frappuccino |
-| Mocha Frappuccino Blended Beverage | 1 | $7.35 | $0.00 | Whole Milk, Whipped Cream, Included Frappuccino Roast, Included Mocha Sauce |
-| Mocha Frappuccino Blended Beverage | 1 | $7.35 | $3.30 | Shots |
+| Item                               | Quantity | Item price | Customization cost | Customizations                                                              |
+| ---------------------------------- | -------: | ---------: | -----------------: | --------------------------------------------------------------------------- |
+| Chocolate Chunk Cookie             |        1 |      $4.25 |              $0.00 | Not Warmed, Warmed                                                          |
+| Mocha Frappuccino Blended Beverage |        1 |      $7.35 |              $0.80 | Venti Mocha Frappuccino                                                     |
+| Mocha Frappuccino Blended Beverage |        1 |      $7.35 |              $0.00 | Whole Milk, Whipped Cream, Included Frappuccino Roast, Included Mocha Sauce |
+| Mocha Frappuccino Blended Beverage |        1 |      $7.35 |              $3.30 | Shots                                                                       |
 
 All rows have the same request time, delivery time, restaurant, and final order
 total of $19.68.
@@ -115,10 +115,10 @@ items.
 
 A manually reviewed McDonald's example produced the following card inputs:
 
-| Order date | Normalized item | Matching CSV rows | Exported item price per row | Current calculated observation |
-| --- | --- | ---: | ---: | ---: |
-| Sep 14, 2020 | Big Mac Extra Value Meal 710 | 1 | $9.89 | $9.89 |
-| Aug 16, 2024 | Big Mac Extra Value Meal 710 | 2 | $14.79 | $29.58 |
+| Order date   | Normalized item              | Matching CSV rows | Exported item price per row | Current calculated observation |
+| ------------ | ---------------------------- | ----------------: | --------------------------: | -----------------------------: |
+| Sep 14, 2020 | Big Mac Extra Value Meal 710 |                 1 |                       $9.89 |                          $9.89 |
+| Aug 16, 2024 | Big Mac Extra Value Meal 710 |                 2 |                      $14.79 |                         $29.58 |
 
 The two 2024 rows both have quantity `1` and price `$14.79`, but carry
 different customization fragments. One contains the burger and drink choices;

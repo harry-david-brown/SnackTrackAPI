@@ -1,413 +1,124 @@
-/**
- * Authentication Routes
- * 
- * Handles user registration, login, token refresh, and logout
- */
-
-import { Router, Request, Response } from 'express';
-import { container } from '../services/core/ServiceContainer';
-import { asyncHandler, ValidationError } from '../middleware/errorHandler';
-import { userCreationRateLimit } from '../middleware/security';
+import { RequestHandler, Router } from 'express';
+import { ValidationError } from '../core/errors';
+import { authenticatedUserId } from '../http/authenticatedUser';
+import { requestTimezone } from '../http/requestTimezone';
+import { requireObject, requireStringField } from '../http/validation/requestValues';
+import { asyncHandler } from '../middleware/errorHandler';
 import { validateEmail } from '../middleware/validation';
-import { authenticateToken } from '../middleware/auth';
-import { LoginRequest, RegisterRequest, RefreshTokenRequest } from '../models/Token';
-import { detectTimezoneFromRequest, getDefaultTimezone } from '../utils/timezone';
+import { AccountDeletionResult } from '../services/account/AccountDeletionService';
+import { CredentialAuthService } from '../services/auth/CredentialAuthService';
+import { AppleFirstSignInData, ProviderAuthService } from '../services/auth/ProviderAuthService';
+import { SessionService } from '../services/auth/SessionService';
+import { getDefaultTimezone } from '../utils/timezone';
 
-const router = Router();
+export interface AuthAccountDeletionOperation {
+  deleteAccount(userId: string, refreshToken?: string): Promise<AccountDeletionResult>;
+}
 
-/**
- * @swagger
- * /auth/register:
- *   post:
- *     summary: Register a new user
- *     description: Create a new user account with email and password
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 description: User email address
- *                 example: user@example.com
- *               password:
- *                 type: string
- *                 format: password
- *                 description: User password (min 8 characters, 1 uppercase, 1 number)
- *                 example: MyPassword123
- *     responses:
- *       201:
- *         description: User registered successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 userId:
- *                   type: string
- *                   format: uuid
- *                 email:
- *                   type: string
- *                 accessToken:
- *                   type: string
- *                 refreshToken:
- *                   type: string
- *                 user:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: string
- *                     email:
- *                       type: string
- *                     createdAt:
- *                       type: string
- *                       format: date-time
- *       400:
- *         $ref: '#/components/responses/ValidationError'
- *       429:
- *         $ref: '#/components/responses/RateLimitExceeded'
- */
-router.post('/register', userCreationRateLimit, asyncHandler(async (req: Request, res: Response) => {
-  const { email, password }: RegisterRequest = req.body;
+export interface AuthRouterDependencies {
+  readonly credentials: Pick<CredentialAuthService, 'register' | 'login'>;
+  readonly providers: Pick<ProviderAuthService, 'loginWithGoogle' | 'loginWithApple'>;
+  readonly sessions: Pick<SessionService, 'refresh' | 'revoke'>;
+  readonly accountDeletion: AuthAccountDeletionOperation;
+  readonly authenticate: RequestHandler;
+  readonly rateLimitRegistration: RequestHandler;
+}
 
-  // Validate required fields
-  if (!email || !password) {
-    throw new ValidationError('Email and password are required');
-  }
+const emailField = (body: unknown): string => {
+  const email = requireStringField(body, 'email');
+  if (!validateEmail(email)) throw new ValidationError('Invalid email format', 'email');
+  return email;
+};
 
-  // Validate email format
-  if (!validateEmail(email)) {
-    throw new ValidationError('Invalid email format', 'email');
-  }
+const optionalRefreshToken = (body: unknown): string | undefined => {
+  if (body === undefined) return undefined;
+  const record = requireObject(body);
+  if (record.refreshToken === undefined) return undefined;
+  return requireStringField(body, 'refreshToken');
+};
 
-  // Detect timezone from request (header or body)
-  const timezone = detectTimezoneFromRequest(req) || getDefaultTimezone();
+const appleUserData = (body: unknown): AppleFirstSignInData | undefined => {
+  const value = requireObject(body).user;
+  if (value === undefined) return undefined;
+  const user = requireObject(value, 'user');
+  const email = user.email === undefined ? undefined : requireStringField(user, 'email');
+  const rawName = user.name;
+  if (rawName === undefined) return email ? { email } : {};
+  const name = requireObject(rawName, 'user.name');
+  const firstName =
+    name.firstName === undefined ? undefined : requireStringField(name, 'firstName');
+  const lastName = name.lastName === undefined ? undefined : requireStringField(name, 'lastName');
+  return { ...(email ? { email } : {}), name: { firstName, lastName } };
+};
 
-  const authService = container.authService;
-  const result = await authService.register(email, password, timezone);
+/** Composition-only authentication transport. */
+export const createAuthRouter = (dependencies: AuthRouterDependencies): Router => {
+  const router = Router();
 
-  res.status(201).json(result);
-}));
+  router.post(
+    '/register',
+    dependencies.rateLimitRegistration,
+    asyncHandler(async (req, res) => {
+      const email = emailField(req.body);
+      const password = requireStringField(req.body, 'password', { trim: false });
+      const timezone = requestTimezone(req) || getDefaultTimezone();
+      res.status(201).json(await dependencies.credentials.register(email, password, timezone));
+    }),
+  );
 
-/**
- * @swagger
- * /auth/login:
- *   post:
- *     summary: Login user
- *     description: Authenticate user with email and password
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *                 example: user@example.com
- *               password:
- *                 type: string
- *                 format: password
- *                 example: MyPassword123
- *     responses:
- *       200:
- *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 userId:
- *                   type: string
- *                 email:
- *                   type: string
- *                 accessToken:
- *                   type: string
- *                 refreshToken:
- *                   type: string
- *                 user:
- *                   type: object
- *       401:
- *         description: Invalid credentials
- */
-router.post('/login', asyncHandler(async (req: Request, res: Response) => {
-  const { email, password }: LoginRequest = req.body;
+  router.post(
+    '/login',
+    asyncHandler(async (req, res) => {
+      const email = emailField(req.body);
+      const password = requireStringField(req.body, 'password', { trim: false });
+      res.status(200).json(await dependencies.credentials.login(email, password));
+    }),
+  );
 
-  // Validate required fields
-  if (!email || !password) {
-    throw new ValidationError('Email and password are required');
-  }
+  router.post(
+    '/google',
+    asyncHandler(async (req, res) => {
+      const idToken = requireStringField(req.body, 'idToken');
+      res.status(200).json(await dependencies.providers.loginWithGoogle(idToken));
+    }),
+  );
 
-  const authService = container.authService;
-  const result = await authService.login(email, password);
+  router.post(
+    '/apple',
+    asyncHandler(async (req, res) => {
+      const identityToken = requireStringField(req.body, 'identityToken');
+      res
+        .status(200)
+        .json(await dependencies.providers.loginWithApple(identityToken, appleUserData(req.body)));
+    }),
+  );
 
-  res.status(200).json(result);
-}));
+  router.post(
+    '/refresh',
+    asyncHandler(async (req, res) => {
+      const refreshToken = requireStringField(req.body, 'refreshToken');
+      res.status(200).json(await dependencies.sessions.refresh(refreshToken));
+    }),
+  );
 
-/**
- * @swagger
- * /auth/google:
- *   post:
- *     summary: Login with Google
- *     description: Authenticate user with Google ID token
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - idToken
- *             properties:
- *               idToken:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful
- * */
-router.post('/google', asyncHandler(async (req: Request, res: Response) => {
-  const { idToken } = req.body;
+  router.post(
+    '/logout',
+    asyncHandler(async (req, res) => {
+      const refreshToken = optionalRefreshToken(req.body);
+      if (refreshToken) await dependencies.sessions.revoke(refreshToken);
+      res.status(200).json({ success: true, message: 'Logged out successfully.' });
+    }),
+  );
 
-  if (!idToken) {
-    throw new ValidationError('ID token is required');
-  }
+  router.delete(
+    '/delete-account',
+    dependencies.authenticate,
+    asyncHandler(async (req, res) => {
+      const userId = authenticatedUserId(req);
+      await dependencies.accountDeletion.deleteAccount(userId, optionalRefreshToken(req.body));
+      res.status(200).json({ success: true, message: 'Account deleted successfully' });
+    }),
+  );
 
-  const authService = container.authService;
-  const result = await authService.loginWithGoogle(idToken);
-
-  res.status(200).json(result);
-}));
-
-/**
- * @swagger
- * /auth/apple:
- *   post:
- *     summary: Login with Apple
- *     description: Authenticate user with Apple ID token
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - identityToken
- *             properties:
- *               identityToken:
- *                 type: string
- *                 description: Apple identity token
- *               user:
- *                 type: object
- *                 description: User data (only provided on first sign-in)
- *                 properties:
- *                   email:
- *                     type: string
- *                   name:
- *                     type: object
- *                     properties:
- *                       firstName:
- *                         type: string
- *                       lastName:
- *                         type: string
- *     responses:
- *       200:
- *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 userId:
- *                   type: string
- *                 email:
- *                   type: string
- *                 accessToken:
- *                   type: string
- *                 refreshToken:
- *                   type: string
- *                 user:
- *                   type: object
- *       401:
- *         description: Invalid Apple token
- */
-router.post('/apple', asyncHandler(async (req: Request, res: Response) => {
-  const { identityToken, user } = req.body;
-
-  if (!identityToken) {
-    throw new ValidationError('Identity token is required');
-  }
-
-  const authService = container.authService;
-  const result = await authService.loginWithApple(identityToken, user);
-
-  res.status(200).json(result);
-}));
-
-/**
- * @swagger
- * /auth/refresh:
- *   post:
- *     summary: Refresh access token
- *     description: Get a new access token using a valid refresh token
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - refreshToken
- *             properties:
- *               refreshToken:
- *                 type: string
- *                 description: Valid refresh token
- *     responses:
- *       200:
- *         description: Token refreshed successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 accessToken:
- *                   type: string
- *                 refreshToken:
- *                   type: string
- *       401:
- *         description: Invalid or expired refresh token
- */
-router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
-  const { refreshToken }: RefreshTokenRequest = req.body;
-
-  if (!refreshToken) {
-    throw new ValidationError('Refresh token is required', 'refreshToken');
-  }
-
-  const authService = container.authService;
-  const tokens = await authService.refreshAccessToken(refreshToken);
-
-  res.status(200).json(tokens);
-}));
-
-/**
- * @swagger
- * /auth/logout:
- *   post:
- *     summary: Logout user
- *     description: Invalidate refresh token (client should also discard tokens)
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - refreshToken
- *             properties:
- *               refreshToken:
- *                 type: string
- *     responses:
- *       200:
- *         description: Logout successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Logged out successfully
- */
-router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
-  const { refreshToken }: RefreshTokenRequest = req.body;
-
-  // For MVP, we're using stateless JWT tokens
-  // In production, you might want to maintain a blacklist of invalidated tokens
-  // For now, client should simply discard the tokens
-
-  // Implement token blacklist/revocation
-  if (refreshToken) {
-    const authService = container.authService;
-    await authService.revokeRefreshToken(refreshToken);
-  }
-
-  res.status(200).json({
-    success: true,
-    message: 'Logged out successfully.'
-  });
-}));
-
-/**
- * @swagger
- * /auth/delete-account:
- *   delete:
- *     summary: Delete user account
- *     description: Permanently delete the authenticated user's account and all associated data (receipts, OAuth accounts, etc.)
- *     tags: [Authentication]
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               refreshToken:
- *                 type: string
- *                 description: Optional refresh token to revoke before deletion
- *     responses:
- *       200:
- *         description: Account deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Account deleted successfully
- *       401:
- *         description: Unauthorized - Invalid or missing token
- *       404:
- *         description: User not found
- */
-router.delete('/delete-account', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user?.userId;
-  const { refreshToken } = req.body;
-
-  if (!userId) {
-    throw new ValidationError('User ID not found in token');
-  }
-
-  await container.accountDeletionService.deleteAccount(userId, refreshToken);
-
-  res.status(200).json({
-    success: true,
-    message: 'Account deleted successfully'
-  });
-}));
-
-export default router;
+  return router;
+};

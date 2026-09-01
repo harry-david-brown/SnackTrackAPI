@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop, 'feature/**' ]
+    branches: [main, develop, 'feature/**']
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 jobs:
   build-and-test:
@@ -32,7 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -44,8 +44,19 @@ jobs:
       - name: Enforce architecture boundaries
         run: npm run check:architecture
 
+      - name: Enforce core behavioral coverage
+        run: npm run check:core-coverage
+
+      - name: Enforce lint rules
+        run: npm run lint
+
+      - name: Enforce formatting
+        run: npm run format:check
+
       - name: Run automated tests
         run: npm test
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgresql://snacktrack:password@localhost:5432/snacktrack_test
 
   docker-build:
     runs-on: ubuntu-latest
@@ -71,11 +82,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Run security audit
         run: npm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Check for outdated dependencies
-        run: npm outdated || true

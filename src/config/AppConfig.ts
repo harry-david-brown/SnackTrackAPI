@@ -48,7 +48,12 @@ const optional = (value: string | undefined): string | undefined => {
   return normalized || undefined;
 };
 
-const integer = (name: string, value: string | undefined, fallback: number, minimum = 0): number => {
+const integer = (
+  name: string,
+  value: string | undefined,
+  fallback: number,
+  minimum = 0,
+): number => {
   if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum) {
@@ -65,11 +70,7 @@ const boolean = (name: string, value: string | undefined, fallback: boolean): bo
   throw new Error(`${name} must be true or false`);
 };
 
-const url = (
-  name: string,
-  value: string,
-  allowedProtocols: readonly string[],
-): string => {
+const url = (name: string, value: string, allowedProtocols: readonly string[]): string => {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -100,7 +101,12 @@ const environment = (value: string | undefined): Environment => {
 
 const logLevel = (value: string | undefined): LogLevel => {
   const normalized = optional(value)?.toLowerCase() ?? 'info';
-  if (normalized === 'error' || normalized === 'warn' || normalized === 'info' || normalized === 'debug') {
+  if (
+    normalized === 'error' ||
+    normalized === 'warn' ||
+    normalized === 'info' ||
+    normalized === 'debug'
+  ) {
     return normalized;
   }
   throw new Error('LOG_LEVEL must be error, warn, info, or debug');
@@ -119,35 +125,35 @@ class ConfigManager {
     const isDevelopment = currentEnvironment === 'development';
     const useMockData = boolean('USE_MOCK_DATA', process.env.USE_MOCK_DATA, false);
     const appleClientId = optional(process.env.APPLE_CLIENT_ID);
-    const appleClientIds = optional(process.env.APPLE_CLIENT_IDS)
-      ?.split(',').map((id) => id.trim()).filter(Boolean)
-      ?? (appleClientId
-        ? [appleClientId, 'host.exp.Exponent']
-        : []);
+    const appleClientIds =
+      optional(process.env.APPLE_CLIENT_IDS)
+        ?.split(',')
+        .map((id) => id.trim())
+        .filter(Boolean) ?? (appleClientId ? [appleClientId, 'host.exp.Exponent'] : []);
     const corsOrigins = optional(process.env.CORS_ORIGIN)
-      ?.split(',').map((origin) => origin.trim()).filter(Boolean)
-      ?? ['https://snacktrack.app'];
+      ?.split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean) ?? ['https://snacktrack.app'];
     const databaseConnectionString = url(
       'DATABASE_URL',
-      optional(process.env.DATABASE_URL)
-        ?? 'postgresql://snacktrack:password@localhost:5432/snacktrack_dev',
+      optional(process.env.DATABASE_URL) ??
+        'postgresql://snacktrack:password@localhost:5432/snacktrack_dev',
       ['postgres:', 'postgresql:'],
     );
-    const redisUrl = url(
-      'REDIS_URL',
-      optional(process.env.REDIS_URL) ?? 'redis://localhost:6379',
-      ['redis:', 'rediss:'],
-    );
+    const redisUrl = url('REDIS_URL', optional(process.env.REDIS_URL) ?? 'redis://localhost:6379', [
+      'redis:',
+      'rediss:',
+    ]);
     const gmailRedirectUri = optional(process.env.GMAIL_REDIRECT_URI);
     if (gmailRedirectUri) url('GMAIL_REDIRECT_URI', gmailRedirectUri, ['http:', 'https:']);
     corsOrigins.forEach((origin) => url('CORS_ORIGIN', origin, ['http:', 'https:']));
 
     const jwtSecret = isProduction
       ? requiredSecret('JWT_SECRET', process.env.JWT_SECRET, 32)
-      : optional(process.env.JWT_SECRET) ?? '';
+      : (optional(process.env.JWT_SECRET) ?? '');
     const jwtRefreshSecret = isProduction
       ? requiredSecret('JWT_REFRESH_SECRET', process.env.JWT_REFRESH_SECRET, 32)
-      : optional(process.env.JWT_REFRESH_SECRET) ?? '';
+      : (optional(process.env.JWT_REFRESH_SECRET) ?? '');
 
     return {
       environment: currentEnvironment,
@@ -161,7 +167,7 @@ class ConfigManager {
         trackingIntervalMinutes: integer(
           'TRACKING_SYNC_INTERVAL_MINUTES',
           process.env.TRACKING_SYNC_INTERVAL_MINUTES,
-          isProduction ? 60 : 0
+          isProduction ? 60 : 0,
         ),
       },
       gmail: {
@@ -193,9 +199,10 @@ class ConfigManager {
         smtpSecure: boolean('SMTP_SECURE', process.env.SMTP_SECURE, false),
         smtpUser: optional(process.env.SMTP_USER),
         smtpPassword: optional(process.env.SMTP_PASS),
-        from: optional(process.env.SMTP_FROM)
-          ?? optional(process.env.SENDGRID_FROM)
-          ?? '"Snack Track" <noreply@getsnacktrack.com>',
+        from:
+          optional(process.env.SMTP_FROM) ??
+          optional(process.env.SENDGRID_FROM) ??
+          '"Snack Track" <noreply@getsnacktrack.com>',
       },
       security: {
         apiKey: optional(process.env.API_KEY),
@@ -212,13 +219,18 @@ class ConfigManager {
       debug: {
         enableDetailedLogging: isDevelopment,
         showEmailContent: isDevelopment,
-        saveDebugEmails: isDevelopment && boolean('SAVE_DEBUG_EMAILS', process.env.SAVE_DEBUG_EMAILS, false),
+        saveDebugEmails:
+          isDevelopment && boolean('SAVE_DEBUG_EMAILS', process.env.SAVE_DEBUG_EMAILS, false),
       },
     };
   }
 
-  get(): Readonly<AppConfig> { return this.current; }
-  reload(): void { this.current = this.load(); }
+  get(): Readonly<AppConfig> {
+    return this.current;
+  }
+  reload(): void {
+    this.current = this.load();
+  }
 }
 
 export const appConfig = new ConfigManager();
@@ -227,7 +239,8 @@ export const config = {
   isDevelopment: () => appConfig.get().environment === 'development',
   isProduction: () => appConfig.get().environment === 'production',
   getEnvironment: () => appConfig.get().environment,
-  getGmailSearchQuery: () => 'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com',
+  getGmailSearchQuery: () =>
+    'from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com OR from:doordash.com',
   shouldUseMockData: () => appConfig.get().gmail.useMockData,
   shouldUseRealGmailApi: () => appConfig.get().gmail.useRealApi,
   shouldUseDatabaseSSL: () => appConfig.get().database.useSSL,

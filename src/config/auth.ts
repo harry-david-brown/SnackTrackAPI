@@ -1,6 +1,6 @@
 /**
  * Authentication Configuration
- * 
+ *
  * Manages JWT token settings and authentication-related configuration
  */
 import { config as appConfig } from './AppConfig';
@@ -38,17 +38,17 @@ class AuthConfigManager {
         secret: auth.jwtSecret,
         refreshSecret: auth.jwtRefreshSecret,
         accessTokenExpiry: auth.accessTokenExpiry,
-        refreshTokenExpiry: auth.refreshTokenExpiry
+        refreshTokenExpiry: auth.refreshTokenExpiry,
       },
       bcrypt: {
-        saltRounds: 12 // High security, good balance of speed and security
+        saltRounds: 12, // High security, good balance of speed and security
       },
       password: {
         minLength: 8,
         requireUppercase: true,
         requireNumber: true,
-        requireSpecialChar: false // Optional for MVP
-      }
+        requireSpecialChar: false, // Optional for MVP
+      },
     };
   }
 
@@ -56,14 +56,10 @@ class AuthConfigManager {
     const { jwt } = this.config;
 
     if (!jwt.secret || jwt.secret.length < 32) {
-      throw new Error(
-        'JWT_SECRET must be set and at least 32 characters long'
-      );
+      throw new Error('JWT_SECRET must be set and at least 32 characters long');
     }
     if (!jwt.refreshSecret || jwt.refreshSecret.length < 32) {
-      throw new Error(
-        'JWT_REFRESH_SECRET must be set and at least 32 characters long'
-      );
+      throw new Error('JWT_REFRESH_SECRET must be set and at least 32 characters long');
     }
   }
 
@@ -113,7 +109,7 @@ class AuthConfigManager {
 
     return {
       valid: errors.length === 0,
-      errors
+      errors,
     };
   }
 }

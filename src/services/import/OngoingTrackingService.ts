@@ -1,7 +1,10 @@
-import { UserRepository } from '../data/UserRepository';
-import { ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import type {
+  ImportLifecyclePort,
+  ImportPreferencesQueryPort,
+  MailboxUserPort,
+  ReceiptWriterLockPort,
+} from '../ports/ImportPorts';
 import { GmailImportService, GmailImportResult } from './GmailImportService';
-import { ImportLockService } from './ImportLockService';
 import logger from '../../config/logger';
 
 export interface TrackingBatchResult {
@@ -18,39 +21,39 @@ export class OngoingTrackingService {
   private batchRunning = false;
 
   constructor(
-    private readonly users: UserRepository,
-    private readonly preferences: ImportPreferencesRepository,
+    private readonly users: Pick<MailboxUserPort, 'findByIdWithGmailTokens'>,
+    private readonly queries: Pick<
+      ImportPreferencesQueryPort,
+      'get' | 'getTrackingBaseline' | 'getEligibleTrackingUserIds'
+    >,
+    private readonly lifecycle: Pick<ImportLifecyclePort, 'markTrackingReconnectRequired'>,
     private readonly gmailImport: GmailImportService,
+    private readonly locks: Pick<ReceiptWriterLockPort, 'acquireLock' | 'releaseLock'>,
   ) {}
 
   async checkUser(userId: string): Promise<GmailImportResult | null> {
     const [user, preferences] = await Promise.all([
       this.users.findByIdWithGmailTokens(userId),
-      this.preferences.get(userId),
+      this.queries.get(userId),
     ]);
-    if (
-      !user
-      || preferences.ongoingTrackingConsentState !== 'granted'
-    ) return null;
-    const baseline = await this.preferences.getTrackingBaseline(userId);
+    if (!user || preferences.ongoingTrackingConsentState !== 'granted') return null;
+    const baseline = await this.queries.getTrackingBaseline(userId);
     if (!baseline.eligible) return null;
 
     const durableConnection = Boolean(
-      user.gmailConnected
-      && user.gmailConnectionMode === 'offline'
-      && user.gmailRefreshToken
+      user.gmailConnected && user.gmailConnectionMode === 'offline' && user.gmailRefreshToken,
     );
     if (!durableConnection) {
-      await this.preferences.markTrackingReconnectRequired(userId);
+      await this.lifecycle.markTrackingReconnectRequired(userId);
       return null;
     }
 
-    const lockHandle = await ImportLockService.acquireLock(userId);
+    const lockHandle = await this.locks.acquireLock(userId);
     if (!lockHandle) return null;
     try {
       return await this.gmailImport.importFromGmail(user, lockHandle, 'background');
     } finally {
-      await ImportLockService.releaseLock(lockHandle);
+      await this.locks.releaseLock(lockHandle);
     }
   }
 
@@ -60,7 +63,9 @@ export class OngoingTrackingService {
     }
     this.batchRunning = true;
     try {
-      const userIds = await this.preferences.getEligibleTrackingUserIds(Math.max(1, Math.min(limit, 500)));
+      const userIds = await this.queries.getEligibleTrackingUserIds(
+        Math.max(1, Math.min(limit, 500)),
+      );
       const summary: TrackingBatchResult = {
         eligible: userIds.length,
         checked: 0,

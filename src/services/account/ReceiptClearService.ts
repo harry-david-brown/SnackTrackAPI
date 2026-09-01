@@ -1,5 +1,5 @@
 import { ConflictError } from '../../core/errors';
-import { PostgresService } from '../data/PostgresService';
+import { DatabaseTransactionRunner } from '../ports/DatabasePort';
 import { ImportLockHandle, ImportLockService } from '../import/ImportLockService';
 
 interface ReceiptClearLock {
@@ -19,9 +19,9 @@ export interface ReceiptClearResult {
 /** Clears receipt-derived history while preserving the user's account. */
 export class ReceiptClearService {
   constructor(
-    private readonly postgres: PostgresService,
+    private readonly postgres: DatabaseTransactionRunner,
     private readonly cache: UserCacheInvalidator,
-    private readonly receiptLock: ReceiptClearLock = ImportLockService
+    private readonly receiptLock: ReceiptClearLock = ImportLockService,
   ) {}
 
   async clearReceipts(userId: string): Promise<ReceiptClearResult> {
@@ -29,30 +29,24 @@ export class ReceiptClearService {
     if (!lockHandle) {
       throw new ConflictError(
         'IMPORT_IN_PROGRESS',
-        'An import is still finishing. Please try clearing receipts again.'
+        'An import is still finishing. Please try clearing receipts again.',
       );
     }
 
     let deletedReceipts = 0;
     try {
-      const client = await this.postgres.getClient();
-      try {
-        await client.query('BEGIN');
-        const receiptResult = await client.query(
-          'DELETE FROM receipts WHERE user_id = $1',
-          [userId]
-        );
+      await this.postgres.withTransaction(async (transaction) => {
+        const receiptResult = await transaction.query('DELETE FROM receipts WHERE user_id = $1', [
+          userId,
+        ]);
         deletedReceipts = receiptResult.rowCount ?? 0;
-        await client.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
+        await transaction.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
 
         // Clearing receipt history resets source coverage while deliberately
         // preserving provider connection and consent decisions.
-        await client.query(
+        await transaction.query(
           `UPDATE user_import_preferences
-           SET export_status = 'not_started',
-               export_requested_at = NULL,
-               export_updated_at = NOW(),
-               gmail_import_status = 'never_started',
+           SET gmail_import_status = 'never_started',
                gmail_import_updated_at = NOW(),
                gmail_imported_count = 0,
                gmail_import_error_code = NULL,
@@ -66,23 +60,17 @@ export class ReceiptClearService {
                tracking_status = 'inactive',
                updated_at = NOW()
            WHERE user_id = $1`,
-          [userId]
+          [userId],
         );
-        await client.query(
+        await transaction.query(
           `UPDATE user_export_provider_preferences
            SET status = 'not_started', error_code = NULL, updated_at = NOW()
            WHERE user_id = $1`,
-          [userId]
+          [userId],
         );
 
         await this.receiptLock.assertLockOwned(lockHandle);
-        await client.query('COMMIT');
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      } finally {
-        client.release();
-      }
+      });
     } finally {
       await this.receiptLock.releaseLock(lockHandle);
     }

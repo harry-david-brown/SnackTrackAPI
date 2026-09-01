@@ -5,40 +5,54 @@ import { stableHash } from './hash';
 const CATEGORIES: DashboardInsightCategory[] = ['progress', 'favorites', 'habits', 'extremes'];
 
 function eligibleRealCandidates(candidates: InsightCandidate[]) {
-  return candidates.filter(candidate => !candidate.locked && candidate.score >= 50);
+  return candidates.filter((candidate) => !candidate.locked && candidate.score >= 50);
 }
 
 function ranked(candidates: InsightCandidate[], seed: string) {
   return [...candidates].sort((a, b) => {
     // A bounded daily lift lets similarly strong observations rotate without
     // allowing a weak novelty to outrank a genuinely useful fact.
-    const aDailyScore = a.score + stableHash(`${seed}:rank:${a.insight.id}`) % 15;
-    const bDailyScore = b.score + stableHash(`${seed}:rank:${b.insight.id}`) % 15;
+    const aDailyScore = a.score + (stableHash(`${seed}:rank:${a.insight.id}`) % 15);
+    const bDailyScore = b.score + (stableHash(`${seed}:rank:${b.insight.id}`) % 15);
     const scoreDifference = bDailyScore - aDailyScore;
     if (scoreDifference) return scoreDifference;
-    const jitterDifference = stableHash(`${seed}:${a.insight.id}`) - stableHash(`${seed}:${b.insight.id}`);
+    const jitterDifference =
+      stableHash(`${seed}:${a.insight.id}`) - stableHash(`${seed}:${b.insight.id}`);
     return jitterDifference || a.insight.id.localeCompare(b.insight.id);
   });
 }
 
 function related(candidate: InsightCandidate, selected: InsightCandidate[]) {
-  return selected.some(existing =>
-    Boolean(candidate.subjectGroup && existing.subjectGroup === candidate.subjectGroup)
-    || existing.family === candidate.family
-    || existing.relatedFamilies?.includes(candidate.family)
-    || candidate.relatedFamilies?.includes(existing.family)
-    || Boolean(existing.relatedFamilies?.some(family => candidate.relatedFamilies?.includes(family)))
+  return selected.some(
+    (existing) =>
+      Boolean(candidate.subjectGroup && existing.subjectGroup === candidate.subjectGroup) ||
+      existing.family === candidate.family ||
+      existing.relatedFamilies?.includes(candidate.family) ||
+      candidate.relatedFamilies?.includes(existing.family) ||
+      Boolean(
+        existing.relatedFamilies?.some((family) => candidate.relatedFamilies?.includes(family)),
+      ),
   );
 }
 
-function selectForSeed(candidates: InsightCandidate[], seed: string, maxCards: number): InsightCandidate[] {
+function selectForSeed(
+  candidates: InsightCandidate[],
+  seed: string,
+  maxCards: number,
+): InsightCandidate[] {
   const real = ranked(eligibleRealCandidates(candidates), seed);
-  const locked = ranked(candidates.filter(candidate => candidate.locked), `${seed}:locked`)[0];
+  const locked = ranked(
+    candidates.filter((candidate) => candidate.locked),
+    `${seed}:locked`,
+  )[0];
   const realLimit = locked ? Math.max(0, maxCards - 1) : maxCards;
   const selected: InsightCandidate[] = [];
 
   for (const category of CATEGORIES) {
-    const candidate = real.find(item => item.insight.category === category && !selected.includes(item) && !related(item, selected));
+    const candidate = real.find(
+      (item) =>
+        item.insight.category === category && !selected.includes(item) && !related(item, selected),
+    );
     if (candidate && selected.length < realLimit) selected.push(candidate);
   }
   for (const candidate of real) {
@@ -47,8 +61,12 @@ function selectForSeed(candidates: InsightCandidate[], seed: string, maxCards: n
   }
   for (const candidate of real) {
     if (selected.length >= realLimit) break;
-    if (!selected.includes(candidate)
-      && !selected.some(existing => candidate.subjectGroup && existing.subjectGroup === candidate.subjectGroup)) {
+    if (
+      !selected.includes(candidate) &&
+      !selected.some(
+        (existing) => candidate.subjectGroup && existing.subjectGroup === candidate.subjectGroup,
+      )
+    ) {
       selected.push(candidate);
     }
   }
@@ -56,11 +74,15 @@ function selectForSeed(candidates: InsightCandidate[], seed: string, maxCards: n
   // Ordering is daily, deterministic, and weighted: timely/high-signal cards
   // stay near the front while the hash changes which peer wins a tie.
   selected.sort((a, b) => {
-    const aPriority = a.score + (a.timely ? 6 : 0) + stableHash(`${seed}:front:${a.insight.id}`) % 11;
-    const bPriority = b.score + (b.timely ? 6 : 0) + stableHash(`${seed}:front:${b.insight.id}`) % 11;
-    return bPriority - aPriority
-      || stableHash(`${seed}:order:${a.insight.id}`) - stableHash(`${seed}:order:${b.insight.id}`)
-      || a.insight.id.localeCompare(b.insight.id);
+    const aPriority =
+      a.score + (a.timely ? 6 : 0) + (stableHash(`${seed}:front:${a.insight.id}`) % 11);
+    const bPriority =
+      b.score + (b.timely ? 6 : 0) + (stableHash(`${seed}:front:${b.insight.id}`) % 11);
+    return (
+      bPriority - aPriority ||
+      stableHash(`${seed}:order:${a.insight.id}`) - stableHash(`${seed}:order:${b.insight.id}`) ||
+      a.insight.id.localeCompare(b.insight.id)
+    );
   });
 
   if (locked && selected.length < maxCards) selected.push(locked);
@@ -94,10 +116,13 @@ function buildCooldownPool(
   const categoryCounts = groups.map(() => new Map<DashboardInsightCategory, number>());
   for (const category of CATEGORIES) {
     const categoryCandidates = real
-      .filter(candidate => candidate.insight.category === category)
-      .sort((a, b) => stableHash(`${userId}:${metricVersion}:cooldown-order:${a.insight.id}`)
-        - stableHash(`${userId}:${metricVersion}:cooldown-order:${b.insight.id}`)
-        || a.insight.id.localeCompare(b.insight.id));
+      .filter((candidate) => candidate.insight.category === category)
+      .sort(
+        (a, b) =>
+          stableHash(`${userId}:${metricVersion}:cooldown-order:${a.insight.id}`) -
+            stableHash(`${userId}:${metricVersion}:cooldown-order:${b.insight.id}`) ||
+          a.insight.id.localeCompare(b.insight.id),
+      );
     for (const candidate of categoryCandidates) {
       const target = groups
         .map((group, index) => ({
@@ -105,15 +130,20 @@ function buildCooldownPool(
           index,
           categoryCount: categoryCounts[index].get(category) ?? 0,
           siblingCount: candidate.subjectGroup
-            ? group.filter(existing => existing.subjectGroup === candidate.subjectGroup).length
+            ? group.filter((existing) => existing.subjectGroup === candidate.subjectGroup).length
             : 0,
-          tieBreaker: stableHash(`${userId}:${metricVersion}:cooldown-group:${candidate.insight.id}:${index}`),
+          tieBreaker: stableHash(
+            `${userId}:${metricVersion}:cooldown-group:${candidate.insight.id}:${index}`,
+          ),
         }))
-        .sort((a, b) => a.siblingCount - b.siblingCount
-          || a.categoryCount - b.categoryCount
-          || a.group.length - b.group.length
-          || a.tieBreaker - b.tieBreaker
-          || a.index - b.index)[0];
+        .sort(
+          (a, b) =>
+            a.siblingCount - b.siblingCount ||
+            a.categoryCount - b.categoryCount ||
+            a.group.length - b.group.length ||
+            a.tieBreaker - b.tieBreaker ||
+            a.index - b.index,
+        )[0];
       target.group.push(candidate);
       categoryCounts[target.index].set(category, target.categoryCount + 1);
     }
@@ -124,7 +154,10 @@ function buildCooldownPool(
   const activeGroup = groups[(dayOrdinal + userOffset) % cycleLength];
   // Locked previews are a durable Gmail-only product requirement rather than
   // rotating real insights, so keep them outside the cooldown partition.
-  return { candidates: [...activeGroup, ...candidates.filter(candidate => candidate.locked)], cycleLength };
+  return {
+    candidates: [...activeGroup, ...candidates.filter((candidate) => candidate.locked)],
+    cycleLength,
+  };
 }
 
 export function selectDailyInsights(
@@ -138,31 +171,40 @@ export function selectDailyInsights(
   const cooldown = buildCooldownPool(candidates, userId, localDate, metricVersion, maxCards);
   const selected = selectForSeed(cooldown.candidates, seed, maxCards);
   if (cooldown.cycleLength > 1) {
-    return selected.slice(0, maxCards).map(candidate => applyDailyCopyVariant(candidate, seed));
+    return selected.slice(0, maxCards).map((candidate) => applyDailyCopyVariant(candidate, seed));
   }
   const openerPool = [...candidates]
     // Use durable lifetime facts for the opener cycle. Recency candidates can
     // enter or leave eligibility overnight, which would make a modulo-based
     // cycle repeat despite having alternatives.
-    .filter(candidate => !candidate.locked && !candidate.timely && candidate.score >= 72)
+    .filter((candidate) => !candidate.locked && !candidate.timely && candidate.score >= 72)
     .sort((a, b) => b.score - a.score || a.insight.id.localeCompare(b.insight.id))
     .slice(0, 7);
   if (openerPool.length > 1 && selected.length) {
     const dayOrdinal = Math.floor(Date.parse(`${localDate}T00:00:00.000Z`) / 86_400_000);
     const userOffset = stableHash(`${userId}:${metricVersion}:opener`) % openerPool.length;
     const desiredOpener = openerPool[(dayOrdinal + userOffset) % openerPool.length];
-    let openerIndex = selected.findIndex(candidate => candidate.insight.id === desiredOpener.insight.id);
+    let openerIndex = selected.findIndex(
+      (candidate) => candidate.insight.id === desiredOpener.insight.id,
+    );
     if (openerIndex < 0) {
-      const relatedIndex = selected.findIndex(candidate => !candidate.locked && related(desiredOpener, [candidate]));
-      const replaceIndex = relatedIndex >= 0 ? relatedIndex : selected.map((candidate, index) => ({ candidate, index }))
-        .filter(({ candidate }) => !candidate.locked)
-        .sort((a, b) => a.candidate.score - b.candidate.score || b.index - a.index)[0]?.index;
+      const relatedIndex = selected.findIndex(
+        (candidate) => !candidate.locked && related(desiredOpener, [candidate]),
+      );
+      const replaceIndex =
+        relatedIndex >= 0
+          ? relatedIndex
+          : selected
+              .map((candidate, index) => ({ candidate, index }))
+              .filter(({ candidate }) => !candidate.locked)
+              .sort((a, b) => a.candidate.score - b.candidate.score || b.index - a.index)[0]?.index;
       if (replaceIndex !== undefined) {
         selected[replaceIndex] = desiredOpener;
         openerIndex = replaceIndex;
       }
     }
-    if (openerIndex > 0) [selected[0], selected[openerIndex]] = [selected[openerIndex], selected[0]];
+    if (openerIndex > 0)
+      [selected[0], selected[openerIndex]] = [selected[openerIndex], selected[0]];
   }
-  return selected.slice(0, maxCards).map(candidate => applyDailyCopyVariant(candidate, seed));
+  return selected.slice(0, maxCards).map((candidate) => applyDailyCopyVariant(candidate, seed));
 }

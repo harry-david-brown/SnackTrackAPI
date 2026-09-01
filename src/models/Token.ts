@@ -49,4 +49,3 @@ export interface RegisterRequest {
 export interface RefreshTokenRequest {
   refreshToken: string;
 }
-

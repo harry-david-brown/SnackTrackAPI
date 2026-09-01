@@ -33,72 +33,85 @@ export interface CacheCodec<Value> {
   decode(serialized: string): Value | null;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const isNumberRecord = (value: unknown): value is Record<string, number> => (
-  isRecord(value) && Object.values(value).every((entry) => typeof entry === 'number')
-);
+const isNumberRecord = (value: unknown): value is Record<string, number> =>
+  isRecord(value) && Object.values(value).every((entry) => typeof entry === 'number');
 
 const isUserSummaryProjection = (value: unknown): value is UserSummaryProjection => {
-  if (!isRecord(value) || !isRecord(value.user) || !isRecord(value.statistics)
-    || !isRecord(value.validation) || !Array.isArray(value.recentReceipts)) {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.user) ||
+    !isRecord(value.statistics) ||
+    !isRecord(value.validation) ||
+    !Array.isArray(value.recentReceipts)
+  ) {
     return false;
   }
 
   const { user, statistics, validation, recentReceipts } = value;
-  return typeof user.id === 'string'
-    && typeof user.email === 'string'
-    && typeof user.dataSource === 'string'
-    && typeof statistics.totalSpent === 'number'
-    && typeof statistics.averageSpent === 'number'
-    && typeof statistics.totalReceipts === 'number'
-    && isNumberRecord(statistics.dataSourceBreakdown)
-    && isRecord(statistics.monthlyBreakdown)
-    && Object.values(statistics.monthlyBreakdown).every((entry) => (
-      isRecord(entry) && typeof entry.count === 'number' && typeof entry.total === 'number'
-    ))
-    && Array.isArray(statistics.topRestaurants)
-    && statistics.topRestaurants.every((entry) => (
-      isRecord(entry) && typeof entry.name === 'string'
-      && typeof entry.count === 'number' && typeof entry.total === 'number'
-    ))
-    && Array.isArray(validation.issues)
-    && validation.issues.every((issue) => typeof issue === 'string')
-    && typeof validation.zeroAmountReceipts === 'number'
-    && typeof validation.refundedReceipts === 'number'
-    && recentReceipts.every((entry) => (
-      isRecord(entry)
-      && (entry.restaurantName === undefined || typeof entry.restaurantName === 'string')
-      && typeof entry.amountSpent === 'number'
-      && (entry.orderDate === undefined || typeof entry.orderDate === 'string')
-      && typeof entry.dataSource === 'string'
-    ));
+  return (
+    typeof user.id === 'string' &&
+    typeof user.email === 'string' &&
+    typeof user.dataSource === 'string' &&
+    typeof statistics.totalSpent === 'number' &&
+    typeof statistics.averageSpent === 'number' &&
+    typeof statistics.totalReceipts === 'number' &&
+    isNumberRecord(statistics.dataSourceBreakdown) &&
+    isRecord(statistics.monthlyBreakdown) &&
+    Object.values(statistics.monthlyBreakdown).every(
+      (entry) =>
+        isRecord(entry) && typeof entry.count === 'number' && typeof entry.total === 'number',
+    ) &&
+    Array.isArray(statistics.topRestaurants) &&
+    statistics.topRestaurants.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.name === 'string' &&
+        typeof entry.count === 'number' &&
+        typeof entry.total === 'number',
+    ) &&
+    Array.isArray(validation.issues) &&
+    validation.issues.every((issue) => typeof issue === 'string') &&
+    typeof validation.zeroAmountReceipts === 'number' &&
+    typeof validation.refundedReceipts === 'number' &&
+    recentReceipts.every(
+      (entry) =>
+        isRecord(entry) &&
+        (entry.restaurantName === undefined || typeof entry.restaurantName === 'string') &&
+        typeof entry.amountSpent === 'number' &&
+        (entry.orderDate === undefined || typeof entry.orderDate === 'string') &&
+        typeof entry.dataSource === 'string',
+    )
+  );
 };
 
 const isDashboardInsightEdition = (value: unknown): value is DashboardInsightEdition => {
   if (!isRecord(value)) return false;
 
-  return typeof value.localDate === 'string'
-    && typeof value.timezone === 'string'
-    && typeof value.generatedAt === 'string'
-    && typeof value.nextRefreshAt === 'string'
-    && typeof value.metricVersion === 'string'
-    && typeof value.availableCandidateCount === 'number'
-    && (value.partialExportProvider === undefined
-      || value.partialExportProvider === 'uber_eats'
-      || value.partialExportProvider === 'doordash')
-    && Array.isArray(value.insights)
-    && value.insights.every((insight) => (
-      isRecord(insight)
-      && typeof insight.id === 'string'
-      && typeof insight.category === 'string'
-      && typeof insight.presentation === 'string'
-      && typeof insight.icon === 'string'
-      && typeof insight.eyebrow === 'string'
-      && typeof insight.title === 'string'
-    ));
+  return (
+    typeof value.localDate === 'string' &&
+    typeof value.timezone === 'string' &&
+    typeof value.generatedAt === 'string' &&
+    typeof value.nextRefreshAt === 'string' &&
+    typeof value.metricVersion === 'string' &&
+    typeof value.availableCandidateCount === 'number' &&
+    (value.partialExportProvider === undefined ||
+      value.partialExportProvider === 'uber_eats' ||
+      value.partialExportProvider === 'doordash') &&
+    Array.isArray(value.insights) &&
+    value.insights.every(
+      (insight) =>
+        isRecord(insight) &&
+        typeof insight.id === 'string' &&
+        typeof insight.category === 'string' &&
+        typeof insight.presentation === 'string' &&
+        typeof insight.icon === 'string' &&
+        typeof insight.eyebrow === 'string' &&
+        typeof insight.title === 'string',
+    )
+  );
 };
 
 const jsonCodec = <Value>(validator: (value: unknown) => value is Value): CacheCodec<Value> => ({

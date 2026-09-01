@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { authConfig } from '../config/auth';
+import type { GmailConnectionMode } from '../services/import/GmailConnectionContracts';
 
 export interface User {
   id: string;
@@ -13,7 +14,7 @@ export interface User {
   gmailConnected?: boolean; // Whether Gmail is connected
   gmailEmail?: string; // The email address of the connected Gmail account
   gmailScopes?: string[]; // OAuth scopes granted for Gmail integration
-  gmailConnectionMode?: 'temporary' | 'offline' | 'none'; // Whether Gmail can be refreshed or is access-token only
+  gmailConnectionMode?: GmailConnectionMode; // Whether Gmail can be refreshed or is access-token only
   createdAt?: string;
 }
 

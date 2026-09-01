@@ -1,8 +1,12 @@
-import { AppError, ConflictError } from '../../core/errors';
-import { CacheService } from '../core/CacheService';
-import { ExportProvider, ImportPreferencesRepository } from '../data/ImportPreferencesRepository';
+import { AppError, ApplicationErrorCode, ConflictError } from '../../core/errors';
+import type {
+  ImportLifecyclePort,
+  MailboxUserPort,
+  ReceiptWriterLockPort,
+} from '../ports/ImportPorts';
+import type { ReceiptWritePort, UserCacheInvalidationPort } from '../ports/ReceiptPorts';
+import type { ExportProvider } from './ImportLifecycleTypes';
 import { CsvImportService } from './CsvImportService';
-import { ImportLockService } from './ImportLockService';
 
 export interface CsvImportCommand {
   userId: string;
@@ -19,7 +23,7 @@ export interface CsvImportOperationResult {
 }
 
 const invalidImport = (
-  code: string,
+  code: ApplicationErrorCode,
   message: string,
   details?: Readonly<Record<string, unknown>>,
 ): AppError => new AppError({ code, message, publicMessage: message, details });
@@ -28,12 +32,11 @@ const invalidImport = (
 export class CsvImportUseCase {
   constructor(
     private readonly csv: CsvImportService,
-    private readonly preferences: ImportPreferencesRepository,
-    private readonly cache: CacheService,
-    private readonly locks: Pick<
-      typeof ImportLockService,
-      'acquireLock' | 'assertLockOwned' | 'releaseLock'
-    >,
+    private readonly receipts: Pick<ReceiptWritePort, 'replaceProviderExport'>,
+    private readonly users: Pick<MailboxUserPort, 'findById'>,
+    private readonly preferences: Pick<ImportLifecyclePort, 'setExportStatus'>,
+    private readonly cache: UserCacheInvalidationPort,
+    private readonly locks: ReceiptWriterLockPort,
   ) {}
 
   async execute(command: CsvImportCommand): Promise<CsvImportOperationResult> {
@@ -70,38 +73,48 @@ export class CsvImportUseCase {
         'import_processing',
       );
 
-      const parsed = await this.csv.parseCsvFile(command.csvBuffer, command.userId);
+      const user = await this.users.findById(command.userId);
+      const parsed = await this.csv.parseCsvFile(command.csvBuffer, command.userId, user?.timezone);
       if (parsed.receipts.length === 0) {
         throw invalidImport('NO_VALID_EXPORT_ORDERS', 'No valid orders found in file', {
           errors: parsed.errors.length > 0 ? parsed.errors : ['File contains no valid order data'],
         });
       }
 
-      await this.csv.importReceipts(
-        parsed.receipts,
-        command.userId,
-        () => this.locks.assertLockOwned(lock),
+      await this.receipts.replaceProviderExport(command.userId, parsed.receipts, () =>
+        this.locks.assertLockOwned(lock),
       );
       await this.preferences.setExportStatus(command.userId, provider, 'completed');
       completed = true;
       await this.cache.invalidateAllUserCaches(command.userId);
 
       return {
-        message: command.fileType === 'zip'
-          ? 'ZIP file processed and receipts imported successfully'
-          : 'CSV imported successfully',
+        message:
+          command.fileType === 'zip'
+            ? 'ZIP file processed and receipts imported successfully'
+            : 'CSV imported successfully',
         importedCount: parsed.totalReceipts,
         totalAmount: parsed.totalAmount,
         fileType: command.fileType,
         provider,
       };
     } catch (error) {
+      const failure =
+        error instanceof AppError
+          ? error
+          : new AppError({
+              code: 'EXPORT_IMPORT_FAILED',
+              message: 'Export import failed',
+              publicMessage: 'Export import failed. Please try again.',
+              details: provider ? { provider } : undefined,
+              cause: error,
+            });
       if (lifecycleStarted && !completed && provider) {
         await this.preferences
-          .setExportStatus(command.userId, provider, 'failed', 'EXPORT_IMPORT_FAILED')
+          .setExportStatus(command.userId, provider, 'failed', failure.code)
           .catch(() => undefined);
       }
-      throw error;
+      throw failure;
     } finally {
       await this.locks.releaseLock(lock);
     }

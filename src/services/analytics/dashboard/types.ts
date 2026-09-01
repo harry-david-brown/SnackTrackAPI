@@ -1,11 +1,24 @@
 export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v15';
 
-export type DashboardExportProvider = 'uber_eats' | 'doordash';
+import type { ExportProvider } from '../../import/ImportLifecycleTypes';
+
+export type DashboardExportProvider = ExportProvider;
 
 export type DashboardInsightCategory = 'favorites' | 'habits' | 'extremes' | 'progress';
 export type DashboardInsightIcon =
-  | 'restaurant' | 'time' | 'calendar' | 'moon' | 'heart' | 'receipt'
-  | 'meal' | 'delivery' | 'lock' | 'repeat' | 'trend' | 'trophy' | 'sparkles';
+  | 'restaurant'
+  | 'time'
+  | 'calendar'
+  | 'moon'
+  | 'heart'
+  | 'receipt'
+  | 'meal'
+  | 'delivery'
+  | 'lock'
+  | 'repeat'
+  | 'trend'
+  | 'trophy'
+  | 'sparkles';
 export type InsightValueFormat = 'currency' | 'number' | 'percent' | 'minutes' | 'hours' | 'days';
 export type InsightAction = 'open_export';
 
@@ -79,7 +92,12 @@ export interface OrderInsight extends InsightBase {
 
 export interface TimelineInsight extends InsightBase {
   presentation: 'timeline';
-  events: Array<{ label: string; value: string | number; valueFormat?: InsightValueFormat; detail?: string }>;
+  events: Array<{
+    label: string;
+    value: string | number;
+    valueFormat?: InsightValueFormat;
+    detail?: string;
+  }>;
 }
 
 export interface YearlyChampionsInsight extends InsightBase {

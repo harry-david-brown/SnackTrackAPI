@@ -1,0 +1,15 @@
+dist
+node_modules
+debug-emails
+debug-events
+coverage
+MockDoorDashData
+MockUberData
+
+# Owned by the parallel provider-auth worktree; remove when it lands.
+src/routes/auth.ts
+src/routes/authEmailVerification.ts
+src/routes/authPasswordReset.ts
+src/services/AuthService.ts
+src/services/data/OAuthRepository.ts
+src/services/data/UserRepository.ts

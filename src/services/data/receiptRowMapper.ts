@@ -1,12 +1,8 @@
-import { QueryResultRow } from 'pg';
-import {
-  DataSource,
-  Receipt,
-  ReceiptItem,
-  ReceiptType,
-} from '../../models/Receipt';
+import { DatabaseRow } from '../ports/DatabasePort';
+import { DatabaseError } from '../../core/errors';
+import { DataSource, Receipt, ReceiptItem, ReceiptType } from '../../models/Receipt';
 
-export interface ReceiptRow extends QueryResultRow {
+export interface ReceiptRow extends DatabaseRow {
   id: unknown;
   user_id: unknown;
   items: unknown;
@@ -19,59 +15,89 @@ export interface ReceiptRow extends QueryResultRow {
   external_id: unknown;
 }
 
+type UnknownRecord = Record<string, unknown>;
 const receiptTypes = new Set<string>(Object.values(ReceiptType));
 const dataSources = new Set<string>(Object.values(DataSource));
 const isReceiptType = (value: string): value is ReceiptType => receiptTypes.has(value);
 const isDataSource = (value: string): value is DataSource => dataSources.has(value);
+const invalid = (field: string): never => {
+  throw new DatabaseError(`Invalid receipts row field: ${field}`);
+};
+const nonemptyString = (value: unknown, field: string): string =>
+  typeof value === 'string' && value.trim().length > 0 ? value : invalid(field);
+const nullableString = (value: unknown, field: string): string | undefined =>
+  value === null || value === undefined ? undefined : nonemptyString(value, field);
+const nonnegativeNumber = (value: unknown, field: string): number => {
+  const candidate = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(candidate) && candidate >= 0 ? candidate : invalid(field);
+};
+const record = (value: unknown, field: string): UnknownRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : invalid(field);
 
-const parseDate = (value: unknown): Date | undefined => {
+const parseDate = (value: unknown, field: string): Date | undefined => {
   if (value === null || value === undefined) return undefined;
-  const date = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  const date = value instanceof Date ? value : new Date(nonemptyString(value, field));
+  return Number.isNaN(date.getTime()) ? invalid(field) : date;
 };
 
-const parseItems = (value: unknown): ReceiptItem[] => {
-  let candidate = value;
+const parseItem = (value: unknown, field: string): ReceiptItem => {
+  // Versioned migrations convert legacy TEXT[] items to a JSON string array.
+  if (typeof value === 'string')
+    return { name: nonemptyString(value, field), quantity: 1, price: 0 };
+  const item = record(value, field);
+  if (item.customizations !== undefined && !Array.isArray(item.customizations)) {
+    invalid(`${field}.customizations`);
+  }
+  const customizations = item.customizations as unknown[] | undefined;
+  return {
+    name: nonemptyString(item.name, `${field}.name`),
+    quantity: nonnegativeNumber(item.quantity, `${field}.quantity`),
+    price: nonnegativeNumber(item.price, `${field}.price`),
+    ...(item.category === undefined
+      ? {}
+      : { category: nonemptyString(item.category, `${field}.category`) }),
+    ...(customizations === undefined
+      ? {}
+      : {
+          customizations: customizations.map((entry, index) =>
+            nonemptyString(entry, `${field}.customizations.${index}`),
+          ),
+        }),
+  };
+};
+
+export const decodeReceiptItems = (value: unknown): ReceiptItem[] => {
+  if (value === null) return [];
+  let candidate: unknown = value;
   if (typeof candidate === 'string') {
     try {
-      candidate = JSON.parse(candidate);
-    } catch {
-      return [];
+      candidate = JSON.parse(candidate) as unknown;
+    } catch (cause) {
+      throw new DatabaseError('Invalid receipts row field: items', cause);
     }
   }
-  if (!Array.isArray(candidate)) return [];
-
-  return candidate.map((item): ReceiptItem => {
-    if (typeof item === 'string') return { name: item, quantity: 1, price: 0 };
-    if (typeof item !== 'object' || item === null) {
-      return { name: 'Unknown item', quantity: 1, price: 0 };
-    }
-    const record = item as Record<string, unknown>;
-    return {
-      name: typeof record.name === 'string' ? record.name : 'Unknown item',
-      quantity: typeof record.quantity === 'number' ? record.quantity : 1,
-      price: typeof record.price === 'number' ? record.price : 0,
-    };
-  });
+  if (!Array.isArray(candidate)) invalid('items');
+  return (candidate as unknown[]).map((item, index) => parseItem(item, `items.${index}`));
 };
 
 export const mapReceiptRow = (row: ReceiptRow): Receipt => {
-  const receiptTypeValue = String(row.receipt_type ?? ReceiptType.UNKNOWN);
-  const dataSourceValue = String(row.data_source ?? DataSource.CSV);
-  const amount = Number(row.amount_spent ?? 0);
+  const receiptTypeValue = nonemptyString(row.receipt_type, 'receipt_type');
+  const dataSourceValue = nonemptyString(row.data_source, 'data_source');
+  const receiptType = isReceiptType(receiptTypeValue) ? receiptTypeValue : invalid('receipt_type');
+  const dataSource = isDataSource(dataSourceValue) ? dataSourceValue : invalid('data_source');
 
   return new Receipt(
-    String(row.user_id),
-    parseItems(row.items),
-    Number.isFinite(amount) ? amount : 0,
-    isReceiptType(receiptTypeValue) ? receiptTypeValue : ReceiptType.UNKNOWN,
-    row.restaurant_name === null || row.restaurant_name === undefined
-      ? undefined
-      : String(row.restaurant_name),
-    parseDate(row.order_date),
-    isDataSource(dataSourceValue) ? dataSourceValue : DataSource.CSV,
-    parseDate(row.delivery_time),
-    row.external_id === null || row.external_id === undefined ? undefined : String(row.external_id),
-    String(row.id)
+    nonemptyString(row.user_id, 'user_id'),
+    decodeReceiptItems(row.items),
+    nonnegativeNumber(row.amount_spent, 'amount_spent'),
+    receiptType,
+    nullableString(row.restaurant_name, 'restaurant_name'),
+    parseDate(row.order_date, 'order_date'),
+    dataSource,
+    parseDate(row.delivery_time, 'delivery_time'),
+    nullableString(row.external_id, 'external_id'),
+    nonemptyString(row.id, 'id'),
   );
 };

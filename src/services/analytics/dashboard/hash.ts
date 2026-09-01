@@ -6,4 +6,3 @@ export function stableHash(value: string): number {
   }
   return hash >>> 0;
 }
-

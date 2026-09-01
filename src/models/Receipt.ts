@@ -4,13 +4,13 @@ export enum ReceiptType {
   GRUBHUB = 'grubhub',
   POSTMATES = 'postmates',
   CAVIAR = 'caviar',
-  UNKNOWN = 'unknown'
+  UNKNOWN = 'unknown',
 }
 
 export enum DataSource {
   CSV = 'csv',
   EMAIL = 'email',
-  API = 'api'
+  API = 'api',
 }
 
 export interface ReceiptItem {
@@ -21,11 +21,24 @@ export interface ReceiptItem {
   customizations?: string[];
 }
 
+/** Persistence input accepted by receipt writer ports; it has no persisted identity. */
+export interface ReceiptWriteCommand {
+  userId: string;
+  items: ReceiptItem[];
+  amountSpent: number;
+  receiptType: ReceiptType;
+  restaurantName?: string;
+  orderDate?: Date;
+  dataSource: DataSource;
+  deliveryTime?: Date;
+  externalId?: string;
+}
+
 /**
  * Streamlined Receipt model - development focused
  * Only essential fields for MVP
  */
-export class Receipt {
+export class Receipt implements ReceiptWriteCommand {
   constructor(
     public userId: string,
     public items: ReceiptItem[],
@@ -39,8 +52,8 @@ export class Receipt {
     public deliveryTime?: Date,
     // External Provider ID (e.g. Uber Order UUID) for deduplication
     public externalId?: string,
-    public readonly id?: string
-  ) { }
+    public readonly id?: string,
+  ) {}
 
   // Helper method to get total items count
   getTotalItems(): number {
@@ -49,7 +62,7 @@ export class Receipt {
 
   // Helper method to get items by category
   getItemsByCategory(category: string): ReceiptItem[] {
-    return this.items.filter(item => item.category === category);
+    return this.items.filter((item) => item.category === category);
   }
 
   // Helper method to check if this is an email-based receipt
@@ -60,21 +73,5 @@ export class Receipt {
   // Helper method to check if this is a CSV-based receipt
   isCsvBased(): boolean {
     return this.dataSource === DataSource.CSV;
-  }
-
-  // Helper method to get clean receipt data for API responses
-  toApiResponse() {
-    return {
-      id: this.id,
-      userId: this.userId,
-      items: this.items,
-      amountSpent: this.amountSpent,
-      receiptType: this.receiptType,
-      restaurantName: this.restaurantName,
-      orderDate: this.orderDate,
-      dataSource: this.dataSource,
-      deliveryTime: this.deliveryTime,
-      externalId: this.externalId
-    };
   }
 }

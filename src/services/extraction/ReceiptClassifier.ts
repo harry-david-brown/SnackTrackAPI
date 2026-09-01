@@ -1,11 +1,12 @@
 /**
  * Receipt Classifier
- * 
+ *
  * Determines whether an email is a receipt based on content analysis
  */
 
 import { EmailClassification, ExtractorConfig, DEFAULT_EXTRACTOR_CONFIG } from './types';
 import { HtmlTextExtractor } from './HtmlTextExtractor';
+import { isDoorDashReceiptEmail } from './DoorDashReceiptParser';
 
 export class ReceiptClassifier {
   private config: ExtractorConfig;
@@ -20,19 +21,34 @@ export class ReceiptClassifier {
    * Classify an email as receipt or non-receipt
    * Uses keyword matching and table word detection
    */
-  classify(htmlBody: string, subject?: string): EmailClassification {
+  classify(htmlBody: string, subject?: string, from: string = ''): EmailClassification {
+    const plainText = this.textExtractor.htmlToText(htmlBody);
     const coreText = this.textExtractor.extractCoreText(htmlBody);
     const subjectLower = (subject || '').toLowerCase();
     const combinedText = `${subjectLower} ${coreText}`;
 
+    if (isDoorDashReceiptEmail({ from, subject: subject || '', text: plainText })) {
+      const matchedKeywords = ['doordash order confirmation', 'your receipt'];
+      const tableWordHits = this.config.tableWords.filter((word) =>
+        plainText.toLowerCase().includes(word),
+      ).length;
+      return {
+        isReceipt: true,
+        confidence: 0.99,
+        reason: 'Trusted DoorDash sender with receipt confirmation and monetary breakdown',
+        matchedKeywords,
+        tableWordHits,
+      };
+    }
+
     // Check for receipt keywords (strong indicators)
-    const matchedKeywords = this.config.receiptKeywords.filter(
-      keyword => combinedText.includes(keyword)
+    const matchedKeywords = this.config.receiptKeywords.filter((keyword) =>
+      combinedText.includes(keyword),
     );
 
     // Check for table words (subtotal, tax, total, tip, etc.)
-    const tableWordHits = this.config.tableWords.filter(
-      word => combinedText.includes(word)
+    const tableWordHits = this.config.tableWords.filter((word) =>
+      combinedText.includes(word),
     ).length;
 
     // Determine if it's a receipt
@@ -42,11 +58,11 @@ export class ReceiptClassifier {
 
     if (matchedKeywords.length > 0) {
       isReceipt = true;
-      confidence = 0.9 + (matchedKeywords.length * 0.02); // Max ~0.98
+      confidence = 0.9 + matchedKeywords.length * 0.02; // Max ~0.98
       reason = `Matched receipt keywords: ${matchedKeywords.join(', ')}`;
     } else if (tableWordHits >= this.config.minTableWordHits) {
       isReceipt = true;
-      confidence = 0.7 + (tableWordHits * 0.05); // 0.8-0.95 range
+      confidence = 0.7 + tableWordHits * 0.05; // 0.8-0.95 range
       reason = `Found ${tableWordHits} table words indicating money breakdown`;
     } else {
       isReceipt = false;
@@ -62,15 +78,14 @@ export class ReceiptClassifier {
       confidence,
       reason,
       matchedKeywords,
-      tableWordHits
+      tableWordHits,
     };
   }
 
   /**
    * Quick check for receipt status
    */
-  isReceipt(htmlBody: string, subject?: string): boolean {
-    return this.classify(htmlBody, subject).isReceipt;
+  isReceipt(htmlBody: string, subject?: string, from: string = ''): boolean {
+    return this.classify(htmlBody, subject, from).isReceipt;
   }
 }
-
