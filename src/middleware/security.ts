@@ -73,6 +73,41 @@ export const userCreationRateLimit = createRateLimit(
   'Too many user creation attempts. Please wait before creating another user.',
 );
 
+export const adminAuthenticationRateLimit = createRateLimit(
+  15 * 60 * 1000,
+  5,
+  'Too many administrator authentication attempts. Please try again later.',
+);
+
+export const microsoftAuthAttemptRateLimit = createRateLimit(
+  15 * 60 * 1000,
+  30,
+  'Too many Microsoft sign-in attempts. Please try again later.',
+);
+
+export const microsoftAuthEmailRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req: Request) => {
+    const body: unknown = req.body;
+    const email =
+      typeof body === 'object' && body !== null && 'email' in body ? body.email : undefined;
+    return typeof email === 'string' && email.length > 0
+      ? `microsoft-login:${email.toLowerCase().trim()}`
+      : ipKeyGenerator(req.ip ?? '127.0.0.1');
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    sendRateLimitError(
+      req,
+      res,
+      'Too many Microsoft email verification requests. Please try again later.',
+      3600,
+    );
+  },
+});
+
 // Rate limiting for CSV/ZIP imports (viral-friendly with retry support)
 // Per-user rate limiting to allow retries but prevent abuse
 // Using production-level limits
@@ -113,6 +148,12 @@ export const csvImportRateLimit = rateLimit({
     return req.path === '/' || req.path === '/health';
   },
 });
+
+export const importStartIpRateLimit = createRateLimit(
+  15 * 60 * 1000,
+  20,
+  'Too many import requests from this network. Please try again later.',
+);
 
 // Rate limiting for email operations (external API calls - most restrictive)
 // Using production-level limits
@@ -227,10 +268,12 @@ export const securityHeaders = helmet({
 
 // CORS configuration
 export const corsConfig = cors({
-  origin: config.isProduction() ? [...config.getSecurityConfig().corsOrigins] : true, // Allow all origins in development
+  origin: config.isProduction()
+    ? [...new Set([...config.getSecurityConfig().corsOrigins, config.getSecurityConfig().adminDashboardUrl])]
+    : true, // Allow all origins in development
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'Idempotency-Key'],
   optionsSuccessStatus: 200,
 });
 
@@ -274,8 +317,9 @@ export const ipWhitelist = (allowedIPs: string[]) => {
 
 // API key validation middleware (for sensitive endpoints)
 export const validateApiKey = (req: Request, res: Response, next: NextFunction) => {
-  const apiKey = req.get('X-API-Key') || req.query.apiKey;
-  const validApiKey = config.getSecurityConfig().apiKey;
+  const apiKey = req.get('X-API-Key');
+  const security = config.getSecurityConfig();
+  const validApiKey = security.legacyAdminApiKeyEnabled ? security.apiKey : undefined;
 
   if (!validApiKey) {
     logger.error('Protected administrator endpoint is unavailable', {
@@ -284,13 +328,13 @@ export const validateApiKey = (req: Request, res: Response, next: NextFunction) 
       errorCode: 'CONFIGURATION_ERROR',
     });
     return res
-      .status(500)
+      .status(404)
       .json(
         buildErrorEnvelopeV1(
           req,
-          500,
-          'CONFIGURATION_ERROR',
-          'Administrator access is not configured',
+          404,
+          'NOT_FOUND',
+          'Endpoint not found',
         ),
       );
   }
@@ -303,6 +347,22 @@ export const validateApiKey = (req: Request, res: Response, next: NextFunction) 
       );
   }
 
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+  res.setHeader('Link', '</admin/v1/auth/login>; rel="successor-version"');
+
+  next();
+};
+
+export const validateSchedulerApiKey = (req: Request, res: Response, next: NextFunction) => {
+  const presented = req.get('X-API-Key');
+  const expected = config.getSecurityConfig().schedulerApiKey;
+  if (!expected) {
+    return res.status(500).json(buildErrorEnvelopeV1(req, 500, 'CONFIGURATION_ERROR', 'Scheduler access is not configured'));
+  }
+  if (!presented || presented !== expected) {
+    return res.status(401).json(buildErrorEnvelopeV1(req, 401, 'AUTHENTICATION_REQUIRED', 'Invalid or missing scheduler key'));
+  }
   next();
 };
 

@@ -64,15 +64,25 @@ export class AccountResetService {
            gmail_email = NULL,
            gmail_scopes = ARRAY[]::TEXT[],
            gmail_connection_mode = 'none',
+           import_generation = import_generation + 1,
            updated_at = NOW()
          WHERE id = $1`,
         [userId],
       );
       if (!userResult.rowCount) throw new NotFoundError('User', userId);
 
+      await transaction.query(
+        `UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW()
+         WHERE user_id=$1 AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')`,
+        [userId],
+      );
+
       const receiptResult = await transaction.query('DELETE FROM receipts WHERE user_id = $1', [
         userId,
       ]);
+      await transaction.query('DELETE FROM mailbox_connections WHERE user_id = $1', [userId]);
+      await transaction.query('DELETE FROM mailbox_sync_runs WHERE user_id = $1', [userId]);
+      await transaction.query('DELETE FROM mailbox_import_states WHERE user_id = $1', [userId]);
       await transaction.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
       await transaction.query('DELETE FROM user_import_preference_events WHERE user_id = $1', [
         userId,

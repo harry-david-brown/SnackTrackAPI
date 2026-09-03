@@ -1,4 +1,5 @@
 import type { User } from '../../models/User';
+import type { MailboxProvider } from '../mailbox/MailboxConnection';
 
 /** Provider-neutral message presented to the shared receipt-import pipeline. */
 export class MailboxMessage {
@@ -10,11 +11,29 @@ export class MailboxMessage {
     public subject?: string,
     public providerMessageId?: string,
     public receivedAt?: Date,
+    public provider: MailboxProvider = 'gmail',
   ) {}
 }
 
+export interface MailboxMessagePage {
+  readonly messages: readonly MailboxMessage[];
+  /** Opaque provider cursor for the next page; null means complete. */
+  readonly nextCursor: string | null;
+  readonly matchedCount: number;
+  readonly rejectedCount?: number;
+  readonly decodedBytes?: number;
+}
+
+export interface MailboxReadSafety {
+  readonly allowForwardedReceipts: boolean;
+}
+
 export interface MailboxClient {
-  getEmails(user: User, options?: { after?: Date }): Promise<MailboxMessage[]>;
+  getEmails(user: User, options?: { after?: Date; safety?: MailboxReadSafety }): Promise<MailboxMessage[]>;
+  getEmailPages(
+    user: User,
+    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety },
+  ): AsyncIterable<MailboxMessagePage>;
 }
 
 export interface EmailDebugCapturePort {

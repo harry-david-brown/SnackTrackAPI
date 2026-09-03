@@ -52,6 +52,7 @@ export interface RawEmail {
   providerMessageId?: string;
   /** Provider-normalized message timestamp, used when a receipt omits its order date. */
   receivedAt?: Date;
+  mailboxProvider?: 'gmail' | 'microsoft';
 }
 
 /**

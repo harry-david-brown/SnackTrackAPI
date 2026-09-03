@@ -78,7 +78,8 @@ export class GmailSyncRunRepository {
              unchanged_orders = $7, supported_receipts_found = $8,
              export_covered_receipts = $9, eligible_receipts = $10,
              deduplicated_receipts = $11
-         WHERE id = $1 AND user_id = $12`,
+             ,rejected_messages=$12,decoded_bytes_examined=$13
+         WHERE id = $1 AND user_id = $14`,
         [
           runId,
           outcome,
@@ -91,6 +92,8 @@ export class GmailSyncRunRepository {
           counts.exportCoveredReceipts,
           counts.eligibleReceipts,
           counts.deduplicatedReceipts,
+          counts.rejectedMessages,
+          counts.decodedBytesExamined,
           userId,
         ],
       );

@@ -8,6 +8,7 @@ import {
 } from '../analytics/dashboard';
 import type { DashboardCachePort, UserProfilePort } from '../ports/ProjectionPorts';
 import type { ReceiptReadPort } from '../ports/ReceiptPorts';
+import { SingleFlight } from '../core/SingleFlight';
 
 type DashboardUserPort = UserProfilePort;
 type DashboardReceiptPort = Pick<ReceiptReadPort, 'findByUserId'>;
@@ -20,6 +21,7 @@ export interface GetDashboardInsightsInput {
 
 /** Owns dashboard timezone repair, daily projection assembly, and cache policy. */
 export class GetDashboardInsightsService {
+  private readonly singleFlight = new SingleFlight();
   constructor(
     private readonly users: DashboardUserPort,
     private readonly receipts: DashboardReceiptPort,
@@ -48,6 +50,11 @@ export class GetDashboardInsightsService {
       if (cached) return cached;
     }
 
+    return this.singleFlight.run(cacheKey, async () => {
+    if (!isDevPreview) {
+      const cachedAfterWait = await this.cache.getDashboardInsightEdition(cacheKey);
+      if (cachedAfterWait) return cachedAfterWait;
+    }
     const receipts = await this.receipts.findByUserId(input.userId);
     const edition = buildDashboardInsightEdition(receipts, timezone, input.userId, now);
     if (!isDevPreview) {
@@ -55,5 +62,6 @@ export class GetDashboardInsightsService {
       await this.cache.cacheDashboardInsightEdition(cacheKey, edition, ttlSeconds);
     }
     return edition;
+    });
   }
 }

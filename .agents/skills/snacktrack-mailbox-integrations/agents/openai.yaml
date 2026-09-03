@@ -1,0 +1,4 @@
+interface:
+  display_name: "SnackTrack Mailbox Integrations"
+  short_description: "Add Gmail and Outlook mailbox providers"
+  default_prompt: "Use $snacktrack-mailbox-integrations to design or implement this SnackTrack mailbox-provider change."

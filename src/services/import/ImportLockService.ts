@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
-import { config } from '../../config/AppConfig';
 import { logger } from '../../config/logger';
-import { redisConfig } from '../../config/redis';
+import { redisLockStore } from '../../config/redis';
+import { AppError } from '../../core/errors';
 
 export type ImportLockBackend = 'redis' | 'memory';
 
@@ -46,8 +46,8 @@ export class ImportLockService {
     const expiresAt = acquiredAt + this.LOCK_TTL_SECONDS * 1000;
     const lockKey = this.lockKey(userId);
 
-    if (redisConfig.isAvailable()) {
-      const acquired = await redisConfig.setNX(lockKey, ownerToken, this.LOCK_TTL_SECONDS);
+    if (redisLockStore.isAvailable()) {
+      const acquired = await redisLockStore.setNX(lockKey, ownerToken, this.LOCK_TTL_SECONDS);
       if (!acquired) return null;
 
       logger.info('User receipt writer lock acquired', { userId, backend: 'redis' });
@@ -59,13 +59,17 @@ export class ImportLockService {
     // Production must fail closed when Redis was configured but is unavailable.
     // The fallback coordinates only this Node process and is safe solely for a
     // deliberately Redis-free deployment or local/test execution.
-    if (redisConfig.isEnabled() && config.isProduction()) {
+    if (redisLockStore.isEnabled()) {
       logger.error('User receipt writer lock unavailable', {
         userId,
         backend: 'redis',
         errorCode: 'LOCK_BACKEND_UNAVAILABLE',
       });
-      return null;
+      throw new AppError({
+        code: 'LOCK_BACKEND_UNAVAILABLE',
+        message: 'The distributed receipt-writer lock is unavailable.',
+        publicMessage: 'Imports are temporarily delayed. Please try again shortly.',
+      });
     }
 
     this.cleanupExpiredInMemoryLocks();
@@ -103,7 +107,7 @@ export class ImportLockService {
 
   static async renewLock(handle: ImportLockHandle): Promise<boolean> {
     if (handle.backend === 'redis') {
-      return redisConfig.expireIfValueMatches(
+      return redisLockStore.expireIfValueMatches(
         this.lockKey(handle.userId),
         handle.ownerToken,
         this.LOCK_TTL_SECONDS,
@@ -128,7 +132,7 @@ export class ImportLockService {
     this.stopRenewal(handle.ownerToken);
     let released = false;
     if (handle.backend === 'redis') {
-      released = await redisConfig.deleteIfValueMatches(
+      released = await redisLockStore.deleteIfValueMatches(
         this.lockKey(handle.userId),
         handle.ownerToken,
       );
@@ -148,8 +152,15 @@ export class ImportLockService {
   }
 
   static async isLocked(userId: string): Promise<boolean> {
-    if (redisConfig.isAvailable()) {
-      return redisConfig.exists(this.lockKey(userId));
+    if (redisLockStore.isAvailable()) {
+      return redisLockStore.exists(this.lockKey(userId));
+    }
+    if (redisLockStore.isEnabled()) {
+      throw new AppError({
+        code: 'LOCK_BACKEND_UNAVAILABLE',
+        message: 'The distributed receipt-writer lock is unavailable.',
+        publicMessage: 'Import status is temporarily unavailable. Please try again.',
+      });
     }
     return this.isInMemoryLocked(userId);
   }

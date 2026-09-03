@@ -6,7 +6,7 @@ import {
 } from '../../core/errors';
 import { AuthResponse } from '../../models/Token';
 import { UserModel } from '../../models/User';
-import type { AuthTokenPort, AuthUserPort } from '../ports/AuthPorts';
+import type { AuthenticationActivityPort, AuthTokenPort, AuthUserPort } from '../ports/AuthPorts';
 import { mapAuthResponse } from './AuthResponseMapper';
 
 const normalizeEmail = (email: string): string => email.toLowerCase().trim();
@@ -16,6 +16,7 @@ export class CredentialAuthService {
   constructor(
     private readonly users: AuthUserPort,
     private readonly tokens: AuthTokenPort,
+    private readonly activity?: AuthenticationActivityPort,
   ) {}
 
   async register(email: string, password: string, timezone: string): Promise<AuthResponse> {
@@ -46,6 +47,7 @@ export class CredentialAuthService {
     }
     const user = await this.users.findById(userId);
     if (!user) throw new Error('Created account could not be loaded');
+    await this.activity?.recordSuccess(user.id, 'password', 'registered');
     return mapAuthResponse(user, this.tokens.generateTokens(user));
   }
 
@@ -54,6 +56,7 @@ export class CredentialAuthService {
     if (!user?.password || !(await UserModel.comparePassword(password, user.password))) {
       throw new AuthenticationError('Invalid email or password', 'INVALID_CREDENTIALS');
     }
+    await this.activity?.recordSuccess(user.id, 'password', 'signed_in');
     return mapAuthResponse(user, this.tokens.generateTokens(user));
   }
 }

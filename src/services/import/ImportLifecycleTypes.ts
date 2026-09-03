@@ -18,6 +18,8 @@ export type OngoingTrackingStatus = (typeof ONGOING_TRACKING_STATUSES)[number];
 
 export const EXPORT_PROVIDERS = ['uber_eats', 'doordash'] as const;
 export type ExportProvider = (typeof EXPORT_PROVIDERS)[number];
+export const PROVIDER_RELEVANCE_VALUES = ['unknown', 'not_used'] as const;
+export type ProviderRelevance = (typeof PROVIDER_RELEVANCE_VALUES)[number];
 
 export const PROVIDER_EXPORT_LIFECYCLE_STATUSES = [
   'not_started',
@@ -42,6 +44,8 @@ export const isConsentDecision = (value: unknown): value is ConsentDecision =>
   includes(CONSENT_DECISIONS, value);
 export const isExportProvider = (value: unknown): value is ExportProvider =>
   includes(EXPORT_PROVIDERS, value);
+export const isProviderRelevance = (value: unknown): value is ProviderRelevance =>
+  includes(PROVIDER_RELEVANCE_VALUES, value);
 
 export interface ProviderExportPreference {
   provider: ExportProvider;
@@ -50,6 +54,11 @@ export interface ProviderExportPreference {
   updatedAt: string | null;
   errorCode: string | null;
   readySource: ExportReadySource | null;
+  relevance: ProviderRelevance;
+}
+
+export interface ImportSetupGuidance {
+  initialSetupDeferredUntil: string | null;
 }
 
 export interface ImportPreferences {
@@ -74,6 +83,7 @@ export interface ImportPreferences {
   lastNewOrderAt: string | null;
   lastTrackingErrorAt: string | null;
   lastTrackingErrorCode: string | null;
+  initialSetupDeferredUntil: string | null;
 }
 
 export interface SyncRunCounts {
@@ -86,11 +96,13 @@ export interface SyncRunCounts {
   newOrders: number;
   updatedOrders: number;
   unchangedOrders: number;
+  rejectedMessages: number;
+  decodedBytesExamined: number;
 }
 
 export interface TrackingBaseline {
   eligible: boolean;
-  source: 'gmail' | 'exports' | 'none';
+  source: 'gmail' | 'outlook' | 'exports' | 'none';
 }
 
 export interface ProviderSourceCoverage {
@@ -105,6 +117,10 @@ export interface ImportSourceCoverage {
   readonly exportReceiptCount: number;
   readonly hasEmailData: boolean;
   readonly hasExportData: boolean;
+  readonly emailProviders: {
+    readonly uberEats: ProviderSourceCoverage;
+    readonly doorDash: ProviderSourceCoverage;
+  };
   readonly exportProviders: {
     readonly uberEats: ProviderSourceCoverage;
     readonly doorDash: ProviderSourceCoverage;
@@ -113,10 +129,12 @@ export interface ImportSourceCoverage {
 
 export const resolveTrackingBaseline = ({
   gmailBaselineCompletedAt,
+  outlookBaselineCompletedAt,
   uberEatsExportCount,
   doorDashExportCount,
 }: {
   gmailBaselineCompletedAt: unknown;
+  outlookBaselineCompletedAt?: unknown;
   uberEatsExportCount: number;
   doorDashExportCount: number;
 }): TrackingBaseline => {
@@ -124,5 +142,6 @@ export const resolveTrackingBaseline = ({
     return { eligible: true, source: 'exports' };
   }
   if (gmailBaselineCompletedAt) return { eligible: true, source: 'gmail' };
+  if (outlookBaselineCompletedAt) return { eligible: true, source: 'outlook' };
   return { eligible: false, source: 'none' };
 };

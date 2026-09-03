@@ -14,6 +14,19 @@ const {
 } = require('../dist/services/import/ManualTrackingCheckService');
 
 const passThrough = (_request, _response, next) => next();
+const importJob = (id, userId, kind) => ({
+  id, userId, kind, trigger: 'user', status: 'pending_dispatch', phase: 'waiting', progress: 0,
+  result: null, errorCode: null, errorMessage: null, attempts: 0, heartbeatAt: null,
+  objectKey: null, originalFilename: null, contentType: null, contentLength: null,
+  importGeneration: 0, createdAt: '2026-09-02T12:00:00.000Z', queuedAt: null,
+  startedAt: null, completedAt: null, expiresAt: null, updatedAt: '2026-09-02T12:00:00.000Z',
+});
+const publicOperation = (id, kind) => ({
+  id, kind, trigger: 'user', status: 'pending_dispatch', phase: 'waiting', progress: 0,
+  result: null, errorCode: null, errorMessage: null, attempts: 0,
+  createdAt: '2026-09-02T12:00:00.000Z', queuedAt: null, startedAt: null,
+  completedAt: null, updatedAt: '2026-09-02T12:00:00.000Z',
+});
 
 const routeLayer = (router, path, method) =>
   router.stack.find((layer) => layer.route?.path === path && layer.route.methods[method]);
@@ -23,7 +36,11 @@ const invoke = (router, path, method, request) =>
     const layer = routeLayer(router, path, method);
     assert.ok(layer, `${method.toUpperCase()} ${path} should be registered`);
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
-    const response = { json: (value) => resolve(value) };
+    const response = {
+      statusCode: 200,
+      status(value) { this.statusCode = value; return this; },
+      json: (value) => resolve(value),
+    };
     handler(request, response, reject);
   });
 
@@ -40,6 +57,15 @@ test('Gmail preference routes use token identity and validated provider input', 
     },
     confirmExportReady: async () => projection,
     checkExportReady: async () => ({ detected: false, preferences: projection }),
+    getSetupGuidance: async () => ({ initialSetupDeferredUntil: null }),
+    setInitialSetupDeferral: async (...args) => {
+      calls.push(args);
+      return { initialSetupDeferredUntil: '2026-09-08T12:00:00.000Z' };
+    },
+    setProviderRelevance: async (...args) => {
+      calls.push(args);
+      return projection;
+    },
   };
   const router = createGmailPreferencesRouter({ authenticate: passThrough, preferences });
 
@@ -56,6 +82,32 @@ test('Gmail preference routes use token identity and validated provider input', 
     invoke(router, '/preferences/export-requested', 'post', {
       user: { userId: 'token-user' },
       body: { provider: 'other' },
+    }),
+    (error) => error.code === 'VALIDATION_ERROR',
+  );
+
+  assert.deepEqual(
+    await invoke(router, '/preferences/setup-deferral', 'put', {
+      user: { userId: 'token-user' },
+      body: { decision: 'defer' },
+    }),
+    { initialSetupDeferredUntil: '2026-09-08T12:00:00.000Z' },
+  );
+  assert.equal(
+    await invoke(router, '/preferences/provider-relevance', 'put', {
+      user: { userId: 'token-user' },
+      body: { provider: 'uber_eats', relevance: 'not_used' },
+    }),
+    projection,
+  );
+  assert.deepEqual(calls.slice(1), [
+    ['token-user', 'defer'],
+    ['token-user', 'uber_eats', 'not_used'],
+  ]);
+  await assert.rejects(
+    invoke(router, '/preferences/provider-relevance', 'put', {
+      user: { userId: 'token-user' },
+      body: { provider: 'uber_eats', relevance: 'irrelevant' },
     }),
     (error) => error.code === 'VALIDATION_ERROR',
   );
@@ -84,14 +136,15 @@ test('Gmail tracking and import routers delegate each endpoint to one capability
     authenticate: passThrough,
     validateScheduler: passThrough,
     manualCheck: { execute: async (userId) => ({ userId, success: true }) },
-    scheduledTracking: { runEligibleBatch: async (limit) => ({ limit }) },
+    importJobs: { start: async (userId, kind) => importJob('job-1', userId, kind) },
+    scheduledTracking: { enqueueEligible: async (limit) => ({ limit }) },
   });
   assert.deepEqual(
     await invoke(tracking, '/tracking/check', 'post', {
       user: { userId: 'user-1' },
       body: {},
     }),
-    { userId: 'user-1', success: true },
+    { operation: publicOperation('job-1', 'manual_tracking') },
   );
   assert.deepEqual(await invoke(tracking, '/tracking/run-batch', 'post', { body: { limit: 25 } }), {
     limit: 25,
@@ -101,37 +154,19 @@ test('Gmail tracking and import routers delegate each endpoint to one capability
     (error) => error.code === 'VALIDATION_ERROR',
   );
 
-  const timeouts = [];
   const imports = createGmailImportRouter({
     authenticate: passThrough,
     status: { getConnection: async () => ({ status: { connected: true } }) },
     historicalImport: {
       isInProgress: async () => true,
-      execute: async () => ({
-        success: true,
-        totalEmailsFound: 1,
-        totalReceiptsProcessed: 1,
-        emailsExamined: 1,
-        supportedReceiptsFound: 1,
-        exportCoveredReceipts: 0,
-        eligibleReceipts: 1,
-        deduplicatedReceipts: 0,
-        totalReceiptsImported: 1,
-        newOrders: 1,
-        updatedOrders: 0,
-        unchangedOrders: 0,
-        totalAmount: 12,
-        errors: [],
-      }),
     },
+    importJobs: { start: async (userId, kind) => importJob('job-2', userId, kind) },
   });
   assert.deepEqual(await invoke(imports, '/import/status', 'get', { user: { userId: 'user-1' } }), {
     inProgress: true,
   });
   const importResult = await invoke(imports, '/import', 'post', {
     user: { userId: 'user-1' },
-    setTimeout: (value) => timeouts.push(value),
   });
-  assert.equal(importResult.totalReceiptsImported, 1);
-  assert.deepEqual(timeouts, [600_000]);
+  assert.deepEqual(importResult, { operation: publicOperation('job-2', 'gmail_historical') });
 });

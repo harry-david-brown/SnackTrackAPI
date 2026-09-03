@@ -78,6 +78,31 @@ export class EmailSenderService implements TransactionalEmailPort {
     await this.sendEmail(email, subject, html, text);
   }
 
+  async sendProviderLoginVerificationEmail(email: string, code: string): Promise<void> {
+    const subject = 'Confirm your email for Microsoft sign-in';
+    const html = this.getProviderLoginVerificationTemplate(code);
+    const text = `Your Snack Track Microsoft sign-in verification code is: ${code}`;
+    await this.sendEmail(email, subject, html, text);
+  }
+
+  async sendAdminInvitation(email: string, link: string): Promise<void> {
+    await this.sendEmail(
+      email,
+      'You were invited to SnackTrack Admin',
+      `<p>You were invited to administer SnackTrack.</p><p><a href="${link}">Accept invitation</a></p><p>This link expires in 24 hours.</p>`,
+      `Accept your SnackTrack Admin invitation: ${link}\nThis link expires in 24 hours.`,
+    );
+  }
+
+  async sendAdminPasswordReset(email: string, link: string): Promise<void> {
+    await this.sendEmail(
+      email,
+      'Reset your SnackTrack Admin password',
+      `<p>A password reset was requested for your SnackTrack Admin account.</p><p><a href="${link}">Reset password</a></p><p>This link expires in 30 minutes.</p>`,
+      `Reset your SnackTrack Admin password: ${link}\nThis link expires in 30 minutes.`,
+    );
+  }
+
   private async sendEmail(to: string, subject: string, html: string, text: string): Promise<void> {
     if (!this.enabled || !this.transporter) {
       // In development, log the email instead of sending
@@ -189,6 +214,20 @@ export class EmailSenderService implements TransactionalEmailPort {
         <p>This is an automated message from Snack Track. Please do not reply to this email.</p>
         <p>© ${new Date().getFullYear()} Snack Track - getsnacktrack.com</p>
       </div>
+    </div>
+  </body>
+</html>`;
+  }
+
+  private getProviderLoginVerificationTemplate(code: string): string {
+    return `<!DOCTYPE html>
+<html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1>Confirm your email</h1>
+      <p>Enter this code in Snack Track to finish signing in with Microsoft:</p>
+      <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; padding: 20px; background: #f5f5f5; border-radius: 8px; margin: 20px 0;">${code}</div>
+      <p>This code expires in 15 minutes. If you did not try to sign in, you can ignore this message.</p>
     </div>
   </body>
 </html>`;

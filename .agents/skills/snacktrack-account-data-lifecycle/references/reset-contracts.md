@@ -18,7 +18,7 @@ For the selected operation, inventory:
 - `user_import_preferences` and consent timestamps;
 - `gmail_sync_runs` and `user_import_preference_events`;
 - server analytics/summary caches;
-- app query keys for analytics, wrapped, receipts, import preferences, and Gmail status;
+- app query keys for analytics, wrapped, receipts, and the import-preferences projection that owns Gmail connection status;
 - AsyncStorage/SecureStore keys for analytics, onboarding, export handoff, ready notifications, upsell state, and other feature-specific progress;
 - timers, schedulers, external batch endpoints, and in-flight uploads/imports;
 - any additional tables found by foreign keys or `user_id` searches.

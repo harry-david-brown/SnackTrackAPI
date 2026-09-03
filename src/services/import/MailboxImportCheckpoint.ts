@@ -1,0 +1,112 @@
+import { AppError } from '../../core/errors';
+import type { ImportExecutionCheckpoint } from './ImportJobTypes';
+
+export interface MailboxImportCounters {
+  pages: number;
+  matchedMessages: number;
+  emailsExamined: number;
+  receiptsProcessed: number;
+  supportedReceiptsFound: number;
+  exportCoveredReceipts: number;
+  eligibleReceipts: number;
+  deduplicatedReceipts: number;
+  totalReceiptsImported: number;
+  totalAmount: number;
+  errorCount: number;
+  newOrders: number;
+  updatedOrders: number;
+  unchangedOrders: number;
+  rejectedMessages: number;
+  decodedBytesExamined: number;
+}
+
+export interface MailboxImportState {
+  readonly provider: 'gmail' | 'microsoft';
+  readonly version: 1;
+  readonly cursor: string | null;
+  readonly done: boolean;
+  readonly counters: MailboxImportCounters;
+}
+
+export const emptyMailboxCounters = (): MailboxImportCounters => ({
+  pages: 0,
+  matchedMessages: 0,
+  emailsExamined: 0,
+  receiptsProcessed: 0,
+  supportedReceiptsFound: 0,
+  exportCoveredReceipts: 0,
+  eligibleReceipts: 0,
+  deduplicatedReceipts: 0,
+  totalReceiptsImported: 0,
+  totalAmount: 0,
+  errorCount: 0,
+  newOrders: 0,
+  updatedOrders: 0,
+  unchangedOrders: 0,
+  rejectedMessages: 0,
+  decodedBytesExamined: 0,
+});
+
+const nonNegativeNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+
+export const restoreMailboxCheckpoint = (
+  execution: ImportExecutionCheckpoint | undefined,
+  provider: MailboxImportState['provider'],
+): MailboxImportState => {
+  if (!execution || Object.keys(execution.checkpoint).length === 0) {
+    return { provider, version: 1, cursor: null, done: false, counters: emptyMailboxCounters() };
+  }
+  const raw = execution.checkpoint;
+  const counters = raw.counters;
+  if (
+    raw.provider !== provider ||
+    raw.version !== 1 ||
+    typeof raw.done !== 'boolean' ||
+    !('cursor' in raw) ||
+    (raw.cursor !== null && typeof raw.cursor !== 'string') ||
+    typeof counters !== 'object' ||
+    counters === null ||
+    Array.isArray(counters)
+  ) {
+    throw new AppError({
+      code: 'IMPORT_CHECKPOINT_INVALID',
+      message: `Invalid ${provider} import checkpoint`,
+      publicMessage: 'This import could not be resumed safely. Start a new import.',
+    });
+  }
+  const restored = emptyMailboxCounters();
+  for (const key of Object.keys(restored) as Array<keyof MailboxImportCounters>) {
+    const value = nonNegativeNumber((counters as Record<string, unknown>)[key]);
+    if (value === null) {
+      throw new AppError({
+        code: 'IMPORT_CHECKPOINT_INVALID',
+        message: `Invalid ${provider} import checkpoint counter: ${key}`,
+        publicMessage: 'This import could not be resumed safely. Start a new import.',
+      });
+    }
+    restored[key] = value;
+  }
+  return {
+    provider,
+    version: 1,
+    cursor: raw.cursor as string | null,
+    done: raw.done,
+    counters: restored,
+  };
+};
+
+export const checkpointProgress = (pages: number): number =>
+  Math.min(90, 15 + Math.max(0, pages) * 2);
+
+export const saveMailboxCheckpoint = async (
+  execution: ImportExecutionCheckpoint | undefined,
+  state: MailboxImportState,
+): Promise<void> => {
+  if (!execution) return;
+  await execution.save(
+    state as unknown as Readonly<Record<string, unknown>>,
+    state.done ? 'mailbox_imported' : 'importing_mailbox',
+    state.done ? 90 : checkpointProgress(state.counters.pages),
+  );
+};

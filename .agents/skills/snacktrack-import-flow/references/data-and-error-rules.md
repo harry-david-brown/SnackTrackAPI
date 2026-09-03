@@ -7,6 +7,7 @@
 - `invalid_grant` is a durable reconnect-required condition. Clear or disable unusable credentials while preserving the known account identity and already imported receipt history.
 - A timeout/provider outage is temporary unavailability, not revocation. Do not destroy credentials or mark import complete.
 - Preserve a machine-readable API error such as `GMAIL_RECONNECT_REQUIRED` so every UI surface chooses the same recovery.
+- A successful OAuth callback means credential persistence completed before the redirect. The app may still observe an in-flight pre-callback preference response; refresh with a bounded retry instead of showing a false connection failure from the first stale `disconnected`/null projection.
 
 ## Consent
 

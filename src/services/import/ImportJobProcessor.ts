@@ -1,0 +1,136 @@
+import type { Job } from 'bullmq';
+import { AppError } from '../../core/errors';
+import type { ImportJobRepository } from '../data/ImportJobRepository';
+import type { ImportObjectStorage } from '../storage/ImportObjectStorage';
+import type { HistoricalGmailImportService } from './HistoricalGmailImportService';
+import type { HistoricalOutlookImportService } from './HistoricalOutlookImportService';
+import type { ManualTrackingCheckService } from './ManualTrackingCheckService';
+import type { OngoingTrackingService } from './OngoingTrackingService';
+import type { CsvImportUseCase } from './CsvImportUseCase';
+import type { ZipExtractor } from './ZipExtractor';
+import type { QueuePayload } from '../queue/ImportQueues';
+import { ImportLockService, type ImportLockHandle } from './ImportLockService';
+import type { ImportJob } from './ImportJobTypes';
+import type { ImportExecutionCheckpoint } from './ImportJobTypes';
+
+const permanentCodes = new Set([
+  'VALIDATION_ERROR','INVALID_CSV_FORMAT','UNKNOWN_EXPORT_PROVIDER','NO_VALID_EXPORT_ORDERS',
+  'GMAIL_RECONNECT_REQUIRED','OUTLOOK_RECONNECT_REQUIRED','TRACKING_NOT_AVAILABLE',
+  'MAILBOX_IMPORT_LIMIT_REACHED','OUTLOOK_RESULT_LIMIT',
+  'IMPORT_CHECKPOINT_INVALID',
+  'UPLOAD_PROVIDER_REQUIRED','UPLOAD_PROVIDER_MISMATCH','UPLOAD_CHANGED','UPLOAD_SIZE_MISMATCH',
+  'UPLOAD_TOO_LARGE','UPLOAD_INTEGRITY_FAILED','UNSUPPORTED_UPLOAD_TYPE',
+  'ZIP_INVALID','ZIP_TOO_MANY_ENTRIES','ZIP_TOO_LARGE','ZIP_OUTPUT_TOO_LARGE',
+  'ZIP_UNSAFE_ENTRY','ZIP_ENCRYPTED','ZIP_COMPRESSION_RATIO','ZIP_AMBIGUOUS_EXPORT',
+  'ZIP_SIZE_MISMATCH','ZIP_INTEGRITY_FAILED','CSV_HEADER_TOO_LARGE','CSV_ROW_TOO_LARGE',
+]);
+
+export class ImportJobProcessor {
+  constructor(
+    private readonly jobs: ImportJobRepository,
+    private readonly storage: ImportObjectStorage,
+    private readonly zip: Pick<ZipExtractor, 'isZipFile'|'extractProviderCSVToFile'>,
+    private readonly csv: Pick<CsvImportUseCase, 'executeWithLock'>,
+    private readonly gmail: Pick<HistoricalGmailImportService, 'executeWithLock'>,
+    private readonly outlook: Pick<HistoricalOutlookImportService, 'executeWithLock'>,
+    private readonly manual: Pick<ManualTrackingCheckService, 'executeWithLock'>,
+    private readonly tracking: Pick<OngoingTrackingService, 'checkUserWithLock'>,
+  ) {}
+
+  async process(queueJob: Job<QueuePayload>): Promise<void> {
+    const pending = await this.jobs.findById(queueJob.data.jobId);
+    if (!pending) return;
+    const lock = await ImportLockService.acquireLockWithWait(pending.userId, 300_000);
+    if (!lock) throw new AppError({ code: 'IMPORT_IN_PROGRESS', message: 'Receipt writer remained busy.' });
+    let operation: ImportJob | null = null;
+    let heartbeat: NodeJS.Timeout | null = null;
+    try {
+      operation = await this.jobs.claimForRun(queueJob.data.jobId);
+      if (!operation) return;
+      const execution: ImportExecutionCheckpoint = {
+        checkpoint: operation.checkpoint,
+        save: (checkpoint, phase, progress) => this.jobs.saveCheckpoint(operation!.id, checkpoint, phase, progress),
+      };
+      heartbeat = setInterval(() => void this.jobs.heartbeat(operation!.id).catch(() => undefined), 30_000);
+      heartbeat.unref();
+      await this.jobs.progress(operation.id, 'processing', 10);
+      let result: Readonly<Record<string, unknown>>;
+      switch (operation.kind) {
+        case 'gmail_historical': result = this.compactMailboxResult(await this.gmail.executeWithLock(operation.userId, lock, execution)); break;
+        case 'outlook_historical': result = this.compactMailboxResult(await this.outlook.executeWithLock(operation.userId, lock, execution)); break;
+        case 'manual_tracking': result = this.requireTrackingSuccess(await this.manual.executeWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>>); break;
+        case 'scheduled_tracking': result = this.requireTrackingSuccess((await this.tracking.checkUserWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>> | null) ?? { success: true, newOrders: 0, updatedOrders: 0, skipped: true }); break;
+        case 'export_file': result = await this.processExport(operation, lock); break;
+      }
+      await this.jobs.progress(operation.id, 'finalizing', 95);
+      await this.jobs.succeed(operation, result);
+      if (operation.kind === 'export_file' && operation.objectKey) {
+        await this.storage.delete(operation.objectKey).catch(() => undefined);
+      }
+    } catch (error) {
+      if (!operation) throw error;
+      const code = error instanceof AppError ? error.code : 'IMPORT_WORKER_FAILED';
+      const message = error instanceof AppError ? error.publicMessage : 'The import could not be completed.';
+      const canRetry = !permanentCodes.has(code) && queueJob.attemptsMade + 1 < (queueJob.opts.attempts ?? 1);
+      if (canRetry) {
+        await this.jobs.retry(operation.id, code, message);
+        throw error;
+      }
+      await this.jobs.fail(operation, code, message);
+      if (operation.kind === 'export_file' && operation.objectKey) {
+        await this.storage.delete(operation.objectKey).catch(() => undefined);
+      }
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+      await ImportLockService.releaseLock(lock);
+    }
+  }
+
+  private compactMailboxResult<T extends object>(result: T): Readonly<Record<string, unknown>> {
+    const { receipts: _receipts, errors, ...compact } = result as T & { receipts?: unknown; errors?: unknown };
+    return {
+      ...compact,
+      errorCount: Array.isArray(errors) ? errors.length : 0,
+    };
+  }
+
+  private requireTrackingSuccess(result: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+    if (result.success !== false) return result;
+    const code = typeof result.errorCode === 'string' ? result.errorCode : 'MAILBOX_TRACKING_FAILED';
+    throw new AppError({
+      code,
+      message: `Mailbox tracking failed: ${code}`,
+      publicMessage: code.includes('RECONNECT_REQUIRED')
+        ? 'Reconnect your mailbox to continue.'
+        : 'Mailbox tracking could not be completed. Please try again.',
+    });
+  }
+
+  private async processExport(operation: ImportJob, lock: ImportLockHandle): Promise<Readonly<Record<string, unknown>>> {
+    if (!operation.objectKey) throw new AppError({ code: 'UPLOAD_NOT_FOUND', message: 'Import object key is missing.' });
+    if (!operation.exportProvider) throw new AppError({ code: 'UPLOAD_PROVIDER_REQUIRED', message: 'Import provider is missing.' });
+    if (!operation.objectEtag || !operation.submittedContentLength) throw new AppError({ code: 'UPLOAD_INTEGRITY_FAILED', message: 'Submitted upload integrity metadata is missing.' });
+    await this.jobs.progress(operation.id, 'downloading', 20);
+    const maximumBytes = operation.originalFilename?.toLowerCase().endsWith('.zip') ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+    const temporary = await this.storage.downloadToTemporaryFile(operation.objectKey, {
+      contentLength: operation.submittedContentLength,
+      etag: operation.objectEtag,
+      maximumBytes,
+    });
+    try {
+      const isZip = await this.zip.isZipFile(temporary.path);
+      const expectedZip = operation.originalFilename?.toLowerCase().endsWith('.zip') ?? false;
+      if (isZip !== expectedZip) throw new AppError({ code: 'UNSUPPORTED_UPLOAD_TYPE', message: 'The file contents do not match the selected file type.' });
+      await this.jobs.progress(operation.id, isZip ? 'extracting' : 'parsing', 40);
+      const extracted = isZip ? await this.zip.extractProviderCSVToFile(temporary.path, operation.exportProvider) : null;
+      try {
+        await this.jobs.progress(operation.id, 'importing', 70);
+        return await this.csv.executeWithLock({ userId: operation.userId, provider: operation.exportProvider, csvPath: extracted?.path ?? temporary.path, fileType: isZip ? 'zip' : 'csv', jobId: operation.id }, lock) as unknown as Readonly<Record<string, unknown>>;
+      } finally {
+        await extracted?.remove();
+      }
+    } finally {
+      await temporary.remove();
+    }
+  }
+}

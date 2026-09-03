@@ -12,8 +12,16 @@ These checks require credentials, external services, or a physical/simulator dev
 ## Gmail and import lifecycle
 
 - Connect Gmail with durable consent, cancel once at Google, reconnect, and verify callback navigation for historical import, tracking, and connection recovery.
+
+## Outlook and Microsoft Graph
+
+- Connect Outlook with delegated `Mail.Read`, cancel once at Microsoft, and verify callback recovery without changing the user's SnackTrack login identity.
+- Import from a personal Outlook.com mailbox and, when enabled in Entra, an organizational Microsoft 365 mailbox. Confirm HTML receipt bodies enter the shared parser and duplicates already imported from Gmail remain unchanged.
+- Revoke the Entra grant, confirm the next validation reports reconnect required, reconnect, then verify manual import and ongoing tracking resume.
+- Disconnect Outlook and verify imported receipts remain. Run onboarding reset and verify Outlook credentials, import state, and sync history are removed while SnackTrack login remains active.
 - Run a historical import, an immediate concurrent import, a manual tracking check, disconnect, and reconnect. Confirm busy, retry, and reconnect states match the canonical error codes.
 - Upload representative Uber Eats and DoorDash CSV/ZIP exports and confirm source coverage, receipts, analytics, dashboard insights, and export handoff state refresh only after success.
+- Exercise the provider-specific endpoints and the malicious/oversized ZIP, CSV, and mailbox cases listed in `docs/IMPORT_INPUT_SECURITY.md`; confirm rejected imports leave existing receipts unchanged.
 - Revoke the Google grant externally and verify the next forced health check produces reconnect-required without deleting prior receipts.
 
 ## Deployed infrastructure

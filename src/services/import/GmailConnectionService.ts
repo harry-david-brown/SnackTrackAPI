@@ -4,6 +4,7 @@ import type {
   ImportLifecyclePort,
   ImportPreferencesQueryPort,
   MailboxUserPort,
+  MicrosoftMailboxConnectionPort,
 } from '../ports/ImportPorts';
 import {
   GmailConnectionPurpose,
@@ -50,6 +51,7 @@ export class GmailConnectionService {
     private readonly lifecycle: LifecyclePort,
     private readonly syncRuns: SyncRunPort,
     private readonly connectionHealth: ConnectionHealthCachePort,
+    private readonly mailboxConnections?: Pick<MicrosoftMailboxConnectionPort, 'findMicrosoft'>,
   ) {}
 
   createAuthorizationUrl(
@@ -116,13 +118,19 @@ export class GmailConnectionService {
   }
 
   async disconnect(userId: string, resetImportStatus: boolean): Promise<void> {
-    const preferences = await this.queries.get(userId);
+    const [preferences, microsoft] = await Promise.all([
+      this.queries.get(userId),
+      this.mailboxConnections?.findMicrosoft(userId),
+    ]);
     await this.users.disconnectGmail(userId);
     this.connectionHealth.invalidate(userId);
-    if (preferences.monitoringConsentState === 'granted') {
+    const durableMicrosoft = Boolean(
+      microsoft && microsoft.state === 'connected' && microsoft.connectionMode === 'offline',
+    );
+    if (!durableMicrosoft && preferences.monitoringConsentState === 'granted') {
       await this.lifecycle.setMonitoringConsent(userId, 'revoked');
     }
-    if (preferences.ongoingTrackingConsentState === 'granted') {
+    if (!durableMicrosoft && preferences.ongoingTrackingConsentState === 'granted') {
       await this.lifecycle.setOngoingTrackingConsent(userId, 'revoked');
     }
     if (resetImportStatus) await this.syncRuns.resetGmailImportStatus(userId);

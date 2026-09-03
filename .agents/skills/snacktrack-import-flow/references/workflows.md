@@ -3,15 +3,19 @@
 ## Gmail baseline and catch-up check
 
 1. User connects or reconnects Gmail through OAuth.
-2. API validates credentials before presenting/running an import action.
-3. User explicitly starts the baseline or catch-up check.
-4. API acquires the per-user import lock.
-5. Gmail messages are fetched and parsed.
-6. Receipts are upserted using stable source identity and reported as new, updated, or unchanged.
-7. Preferences and user caches are updated/inactivated consistently.
-8. App refetches preferences and receipt/summary state.
+2. The OAuth callback persists validated credentials before redirecting to the signed app URI.
+3. The app refreshes the canonical import-preferences projection. A pre-OAuth query may already be in flight, so tolerate a bounded stale `disconnected` result before reporting that authorization failed.
+4. API validates credentials before presenting/running an import action.
+5. User explicitly starts the baseline or catch-up check.
+6. API acquires the per-user import lock.
+7. Mailbox messages are fetched through the provider adapter and parsed by the shared receipt pipeline.
+8. Receipts are upserted using stable source identity and reported as new, updated, or unchanged.
+9. Preferences and user caches are updated/invalidated consistently.
+10. App refetches preferences and receipt/summary state.
 
 If OAuth returns `invalid_grant`, stop and return a reconnect-required error. Do not log “completed,” write a completed preference, or return HTTP success with zero receipts.
+
+Do not treat the first stale/null connection projection after a successful callback as provider denial. Retry the authoritative read for a short bounded period; explicit callback errors and durable reconnect-required states remain terminal for that attempt.
 
 ## Export request and ready alert
 

@@ -10,7 +10,7 @@ import {
   databaseUuid,
 } from './DatabaseRowDecoder';
 
-const AUTH_PROVIDERS: readonly AuthProvider[] = ['google', 'apple'];
+const AUTH_PROVIDERS: readonly AuthProvider[] = ['google', 'apple', 'microsoft'];
 
 const mapOAuthAccount = (value: unknown): OAuthAccount => {
   const row = databaseRow(value, 'OAuth account');

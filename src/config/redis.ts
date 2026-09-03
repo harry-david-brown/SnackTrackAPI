@@ -1,309 +1,165 @@
-/**
- * Redis Configuration
- *
- * Manages Redis connection for caching
- * Optional in development, recommended for production
- */
-
-import { createClient, RedisClientType } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 import { config as appConfig } from './AppConfig';
 import logger from './logger';
+import { AppError } from '../core/errors';
 
-interface RedisConfig {
-  url: string;
-  password?: string;
-  enabled: boolean;
-  defaultTTL: number;
+export type RedisLifecycleState = 'connecting' | 'ready' | 'recovering' | 'unavailable' | 'closed';
+export interface RedisLifecycleSnapshot {
+  readonly enabled: boolean;
+  readonly state: RedisLifecycleState;
+  readonly reconnectCount: number;
+  readonly outageStartedAt: string | null;
+  readonly readyAt: string | null;
 }
+type StateListener = (snapshot: RedisLifecycleSnapshot) => void;
+const PROJECTION_CACHE_PATTERNS = ['user_summary:*', 'analytics:*', 'dashboard_insights:*'] as const;
 
-class RedisConfigManager {
-  private config: RedisConfig;
+/** Owns the process-wide Redis connection and its recovery lifecycle. */
+class RedisConnectionManager {
+  private readonly settings = appConfig.getRedisConfig();
   private client: RedisClientType | null = null;
-  private connecting: boolean = false;
+  private state: RedisLifecycleState = 'closed';
+  private reconnectCount = 0;
+  private outageStartedAt: Date | null = null;
+  private readyAt: Date | null = null;
+  private initializationStarted = false;
+  private closing = false;
+  private recovery: Promise<void> | null = null;
+  private readonly listeners = new Set<StateListener>();
+  private readonly readyWaiters = new Set<() => void>();
 
-  constructor() {
-    this.config = this.loadConfig();
-  }
-
-  private loadConfig(): RedisConfig {
-    const redis = appConfig.getRedisConfig();
-
-    return {
-      url: redis.url,
-      password: redis.password,
-      enabled: redis.enabled,
-      defaultTTL: redis.defaultTTLSeconds,
-    };
-  }
-
-  /**
-   * Initialize Redis connection
-   */
-  async initialize(): Promise<void> {
-    if (!this.config.enabled) {
-      logger.info('Redis caching disabled');
-      return;
-    }
-
-    if (this.client || this.connecting) {
-      return; // Already initialized or connecting
-    }
-
-    this.connecting = true;
-
-    try {
-      this.client = createClient({
-        url: this.config.url,
-        password: this.config.password,
-        socket: {
-          reconnectStrategy: (retries) => {
-            if (retries > 10) {
-              logger.error('Redis connection retry limit reached', { retries });
-              return new Error('Redis connection failed');
-            }
-            return Math.min(retries * 100, 3000); // Exponential backoff, max 3s
-          },
+  initialize(): Promise<void> {
+    if (!this.settings.enabled || this.initializationStarted || this.closing) return Promise.resolve();
+    this.initializationStarted = true;
+    this.transition('connecting');
+    this.client = createClient({
+      url: this.settings.url,
+      password: this.settings.password,
+      socket: {
+        reconnectStrategy: (retries) => {
+          const base = Math.min(30_000, 250 * 2 ** Math.min(retries, 7));
+          return Math.max(250, Math.round(base * (0.8 + Math.random() * 0.4)));
         },
-      });
-
-      this.client.on('error', (err: unknown) => {
-        logger.error('Redis client error', { error: err });
-      });
-
-      this.client.on('connect', () => {
-        logger.info('Redis connected');
-      });
-
-      this.client.on('reconnecting', () => {
-        logger.warn('Redis reconnecting');
-      });
-
-      await this.client.connect();
-
-      // Test connection
-      await this.client.ping();
-
-      logger.info('Redis cache initialized', { defaultTtlSeconds: this.config.defaultTTL });
-    } catch (error) {
-      logger.error('Failed to connect to Redis; caching unavailable', { error });
-      if (this.client?.isOpen) {
-        await this.client.disconnect();
-      }
-      this.client = null;
-    } finally {
-      this.connecting = false;
-    }
+      },
+    });
+    this.client.on('error', (error: unknown) => {
+      if (this.closing) return;
+      this.markUnavailable();
+      logger.warn('Redis unavailable', { operation: 'redis_connection', state: this.state, error: error instanceof Error ? error.message : String(error) });
+    });
+    this.client.on('reconnecting', () => {
+      if (this.closing) return;
+      this.reconnectCount += 1;
+      this.transition('recovering');
+    });
+    this.client.on('ready', () => void this.recoverProjectionCaches());
+    this.client.on('end', () => { if (!this.closing) this.markUnavailable(); });
+    void this.client.connect().catch((error: unknown) => {
+      if (this.closing) return;
+      this.markUnavailable();
+      logger.error('Redis connection loop stopped unexpectedly', { operation: 'redis_connection', error: error instanceof Error ? error.message : String(error) });
+    });
+    return Promise.resolve();
   }
 
-  /**
-   * Get Redis client (returns null if not connected)
-   */
-  getClient(): RedisClientType | null {
-    return this.client;
-  }
-
-  /**
-   * Check if Redis is available
-   */
-  isAvailable(): boolean {
-    return this.client !== null && this.client.isOpen;
-  }
-
-  isEnabled(): boolean {
-    return this.config.enabled;
-  }
-
-  /**
-   * Get a cached value
-   */
-  async get(key: string): Promise<string | null> {
-    if (!this.isAvailable()) {
-      return null;
-    }
-
-    try {
-      return await this.client!.get(key);
-    } catch (error) {
-      logger.error('Redis get failed', { error });
-      return null;
-    }
-  }
-
-  /**
-   * Set a cached value with TTL
-   */
-  async set(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
-    if (!this.isAvailable()) {
-      return false;
-    }
-
-    try {
-      const ttl = ttlSeconds || this.config.defaultTTL;
-      await this.client!.setEx(key, ttl, value);
-      return true;
-    } catch (error) {
-      logger.error('Redis set failed', { error });
-      return false;
-    }
-  }
-
-  /**
-   * Delete a cached value
-   */
-  async del(key: string): Promise<boolean> {
-    if (!this.isAvailable()) {
-      return false;
-    }
-
-    try {
-      await this.client!.del(key);
-      return true;
-    } catch (error) {
-      logger.error('Redis delete failed', { error });
-      return false;
-    }
-  }
-
-  /**
-   * Set a value only if it doesn't exist (for distributed locking)
-   * Returns true if the lock was acquired, false if already locked
-   */
-  async setNX(key: string, value: string, ttlSeconds: number): Promise<boolean> {
-    if (!this.isAvailable()) {
-      // If Redis is not available, use in-memory fallback (see ImportLockService)
-      return false;
-    }
-
-    try {
-      // SET key value NX EX ttl - sets only if key doesn't exist, with expiry
-      const result = await this.client!.set(key, value, {
-        NX: true,
-        EX: ttlSeconds,
-      });
-      return result === 'OK';
-    } catch (error) {
-      logger.error('Redis conditional set failed', { error });
-      return false;
-    }
-  }
-
-  /** Delete a distributed lock only when the caller still owns it. */
-  async deleteIfValueMatches(key: string, expectedValue: string): Promise<boolean> {
-    if (!this.isAvailable()) return false;
-
-    try {
-      const result = await this.client!.eval(
-        `if redis.call('get', KEYS[1]) == ARGV[1] then
-           return redis.call('del', KEYS[1])
-         end
-         return 0`,
-        { keys: [key], arguments: [expectedValue] },
-      );
-      return Number(result) === 1;
-    } catch (error) {
-      logger.error('Redis compare-and-delete failed', { error });
-      return false;
-    }
-  }
-
-  /** Extend a distributed lock lease only when the caller still owns it. */
-  async expireIfValueMatches(
-    key: string,
-    expectedValue: string,
-    ttlSeconds: number,
-  ): Promise<boolean> {
-    if (!this.isAvailable()) return false;
-
-    try {
-      const result = await this.client!.eval(
-        `if redis.call('get', KEYS[1]) == ARGV[1] then
-           return redis.call('expire', KEYS[1], ARGV[2])
-         end
-         return 0`,
-        { keys: [key], arguments: [expectedValue, String(ttlSeconds)] },
-      );
-      return Number(result) === 1;
-    } catch (error) {
-      logger.error('Redis compare-and-expire failed', { error });
-      return false;
-    }
-  }
-
-  /**
-   * Check if a key exists
-   */
-  async exists(key: string): Promise<boolean> {
-    if (!this.isAvailable()) {
-      return false;
-    }
-
-    try {
-      const count = await this.client!.exists(key);
-      return count > 0;
-    } catch (error) {
-      logger.error('Redis exists check failed', { error });
-      return false;
-    }
-  }
-
-  /**
-   * Delete multiple keys by pattern
-   */
-  async delPattern(pattern: string): Promise<number> {
-    if (!this.isAvailable()) {
-      return 0;
-    }
-
-    try {
+  private async recoverProjectionCaches(): Promise<void> {
+    if (this.recovery || this.closing || !this.client?.isReady) return this.recovery ?? Promise.resolve();
+    this.transition('recovering');
+    this.recovery = (async () => {
       let deleted = 0;
-      for await (const keys of this.client!.scanIterator({ MATCH: pattern, COUNT: 100 })) {
-        if (keys.length === 0) continue;
-        deleted += await this.client!.del(keys);
+      try {
+        for (const pattern of PROJECTION_CACHE_PATTERNS) {
+          for await (const keys of this.client!.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+            if (keys.length > 0) deleted += await this.client!.del(keys);
+          }
+        }
+        this.outageStartedAt = null;
+        this.readyAt = new Date();
+        this.transition('ready');
+        for (const resolve of this.readyWaiters) resolve();
+        this.readyWaiters.clear();
+        logger.info('Redis ready after projection-cache reconciliation', { operation: 'redis_recovery', reconnectCount: this.reconnectCount, deletedProjectionKeys: deleted });
+      } catch (error) {
+        this.markUnavailable();
+        logger.warn('Redis cache reconciliation failed', { operation: 'redis_recovery', error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        this.recovery = null;
       }
-      return deleted;
-    } catch (error) {
-      logger.error('Redis pattern delete failed', { error });
-      return 0;
-    }
+    })();
+    return this.recovery;
   }
 
-  /**
-   * Get cache statistics
-   */
-  async getStats(): Promise<{ keys: number; memory: string } | null> {
-    if (!this.isAvailable()) {
-      return null;
-    }
-
-    try {
-      const info = await this.client!.info('stats');
-      const keys = await this.client!.dbSize();
-      return {
-        keys,
-        memory: this.parseMemoryUsage(info),
-      };
-    } catch (error) {
-      logger.error('Redis stats read failed', { error });
-      return null;
-    }
+  snapshot(): RedisLifecycleSnapshot {
+    return { enabled: this.settings.enabled, state: this.settings.enabled ? this.state : 'closed', reconnectCount: this.reconnectCount, outageStartedAt: this.outageStartedAt?.toISOString() ?? null, readyAt: this.readyAt?.toISOString() ?? null };
   }
-
-  private parseMemoryUsage(info: string): string {
-    const match = info.match(/used_memory_human:([^\r\n]+)/);
-    return match ? match[1] : 'unknown';
+  isEnabled(): boolean { return this.settings.enabled; }
+  isReady(): boolean { return Boolean(this.client?.isReady && this.state === 'ready'); }
+  getDefaultTtlSeconds(): number { return this.settings.defaultTTLSeconds; }
+  rawReadyClient(): RedisClientType | null { return this.isReady() ? this.client : null; }
+  requireReady(code: 'LOCK_BACKEND_UNAVAILABLE' | 'SESSION_STORE_UNAVAILABLE'): RedisClientType {
+    const client = this.rawReadyClient();
+    if (client) return client;
+    throw new AppError({ code, message: code === 'LOCK_BACKEND_UNAVAILABLE' ? 'The distributed lock service is unavailable.' : 'The session store is unavailable.', publicMessage: 'This service is temporarily unavailable. Please try again.' });
   }
-
-  /**
-   * Close Redis connection
-   */
+  onStateChange(listener: StateListener): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  waitUntilReady(): Promise<void> {
+    if (!this.settings.enabled || this.isReady()) return Promise.resolve();
+    return new Promise((resolve) => this.readyWaiters.add(resolve));
+  }
+  private markUnavailable(): void { if (!this.outageStartedAt) this.outageStartedAt = new Date(); this.transition('unavailable'); }
+  private transition(next: RedisLifecycleState): void {
+    if (this.state === next) return;
+    const previous = this.state;
+    this.state = next;
+    const snapshot = this.snapshot();
+    logger.info('Redis lifecycle transition', { operation: 'redis_connection', previousState: previous, state: next, reconnectCount: snapshot.reconnectCount });
+    for (const listener of this.listeners) listener(snapshot);
+  }
   async close(): Promise<void> {
-    if (this.client && this.client.isOpen) {
-      logger.info('Closing Redis connection');
-      await this.client.quit();
-      logger.info('Redis connection closed');
-    }
+    if (this.closing) return;
+    this.closing = true;
+    this.transition('closed');
+    this.readyWaiters.clear();
+    const client = this.client;
+    this.client = null;
+    if (client?.isOpen) await client.quit().catch(() => client.disconnect());
   }
 }
 
-// Export singleton instance
-export const redisConfig = new RedisConfigManager();
+export class RedisCacheStore {
+  constructor(private readonly connection: RedisConnectionManager) {}
+  isAvailable(): boolean { return this.connection.isReady(); }
+  isEnabled(): boolean { return this.connection.isEnabled(); }
+  snapshot(): RedisLifecycleSnapshot { return this.connection.snapshot(); }
+  async get(key: string): Promise<string | null> { const client = this.connection.rawReadyClient(); if (!client) return null; try { return await client.get(key); } catch (error) { logger.warn('Redis cache read failed', { operation: 'cache_get', error }); return null; } }
+  async set(key: string, value: string, ttlSeconds?: number): Promise<boolean> { const client = this.connection.rawReadyClient(); if (!client) return false; try { await client.setEx(key, ttlSeconds ?? this.connection.getDefaultTtlSeconds(), value); return true; } catch (error) { logger.warn('Redis cache write failed', { operation: 'cache_set', error }); return false; } }
+  async del(key: string): Promise<boolean> { const client = this.connection.rawReadyClient(); if (!client) return false; try { return (await client.del(key)) > 0; } catch (error) { logger.warn('Redis cache delete failed', { operation: 'cache_delete', error }); return false; } }
+  async delPattern(pattern: string): Promise<number> { const client = this.connection.rawReadyClient(); if (!client) return 0; try { let deleted = 0; for await (const keys of client.scanIterator({ MATCH: pattern, COUNT: 100 })) { if (keys.length > 0) deleted += await client.del(keys); } return deleted; } catch (error) { logger.warn('Redis cache pattern delete failed', { operation: 'cache_delete_pattern', error }); return 0; } }
+  async getStats(): Promise<{ keys: number; memory: string } | null> { const client = this.connection.rawReadyClient(); if (!client) return null; try { const [info, keys] = await Promise.all([client.info('memory'), client.dbSize()]); return { keys, memory: info.match(/used_memory_human:([^\r\n]+)/)?.[1] ?? 'unknown' }; } catch (error) { logger.warn('Redis cache stats failed', { operation: 'cache_stats', error }); return null; } }
+}
+
+export class RedisLockStore {
+  constructor(private readonly connection: RedisConnectionManager) {}
+  isAvailable(): boolean { return this.connection.isReady(); }
+  isEnabled(): boolean { return this.connection.isEnabled(); }
+  snapshot(): RedisLifecycleSnapshot { return this.connection.snapshot(); }
+  onStateChange(listener: StateListener): () => void { return this.connection.onStateChange(listener); }
+  waitUntilReady(): Promise<void> { return this.connection.waitUntilReady(); }
+  async setNX(key: string, value: string, ttlSeconds: number): Promise<boolean> { return (await this.connection.requireReady('LOCK_BACKEND_UNAVAILABLE').set(key, value, { NX: true, EX: ttlSeconds })) === 'OK'; }
+  async exists(key: string): Promise<boolean> { return (await this.connection.requireReady('LOCK_BACKEND_UNAVAILABLE').exists(key)) > 0; }
+  async deleteIfValueMatches(key: string, value: string): Promise<boolean> { return Number(await this.connection.requireReady('LOCK_BACKEND_UNAVAILABLE').eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0", { keys: [key], arguments: [value] })) === 1; }
+  async expireIfValueMatches(key: string, value: string, ttlSeconds: number): Promise<boolean> { return Number(await this.connection.requireReady('LOCK_BACKEND_UNAVAILABLE').eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) end return 0", { keys: [key], arguments: [value, String(ttlSeconds)] })) === 1; }
+}
+
+export class RedisRefreshTokenStore {
+  constructor(private readonly connection: RedisConnectionManager) {}
+  isAvailable(): boolean { return this.connection.isReady(); }
+  async exists(key: string): Promise<boolean> { return (await this.connection.requireReady('SESSION_STORE_UNAVAILABLE').exists(key)) > 0; }
+  async set(key: string, value: string, ttlSeconds: number): Promise<void> { await this.connection.requireReady('SESSION_STORE_UNAVAILABLE').setEx(key, ttlSeconds, value); }
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> { return (await this.connection.requireReady('SESSION_STORE_UNAVAILABLE').set(key, value, { NX: true, EX: ttlSeconds })) === 'OK'; }
+}
+
+export const redisConfig = new RedisConnectionManager();
+export const redisCacheStore = new RedisCacheStore(redisConfig);
+export const redisLockStore = new RedisLockStore(redisConfig);
+export const refreshTokenStore = new RedisRefreshTokenStore(redisConfig);

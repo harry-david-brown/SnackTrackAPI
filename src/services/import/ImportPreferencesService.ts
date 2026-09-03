@@ -4,16 +4,17 @@ import type {
   ConsentDecision,
   ExportProvider,
   ImportPreferences,
+  ImportSetupGuidance,
   MonitoringConsentState,
   ProviderExportPreference,
+  ProviderRelevance,
 } from './ImportLifecycleTypes';
-import type { ImportLifecyclePort, ImportPreferencesQueryPort } from '../ports/ImportPorts';
 import type {
-  GmailConnectionHealthResult,
-  GmailConnectionStatus,
-  ImportPreferencesProjection,
-  ImportStatusService,
-} from './ImportStatusService';
+  ImportLifecyclePort,
+  ImportPreferencesQueryPort,
+  ImportSourceCoveragePort,
+} from '../ports/ImportPorts';
+import type { ImportPreferencesProjection, ImportStatusService } from './ImportStatusService';
 
 type LifecyclePort = Pick<
   ImportLifecyclePort,
@@ -22,11 +23,14 @@ type LifecyclePort = Pick<
   | 'markExportRequested'
   | 'confirmExportReady'
   | 'setExportStatus'
+  | 'setInitialSetupDeferral'
+  | 'setProviderRelevance'
 >;
 type PreferencesQueryPort = Pick<
   ImportPreferencesQueryPort,
-  'getTrackingBaseline' | 'get' | 'getProviderExports'
+  'getTrackingBaseline' | 'get' | 'getProviderExports' | 'getSetupGuidance'
 >;
+type SourceCoveragePort = Pick<ImportSourceCoveragePort, 'getForUser'>;
 
 type StatusPort = Pick<ImportStatusService, 'getPreferences' | 'getConnection'>;
 
@@ -34,28 +38,14 @@ interface ExportReadyDetector {
   hasUberExportReadyEmail(user: User, requestedAt: string): Promise<boolean>;
 }
 
+interface OutlookExportReadyDetector {
+  hasUberExportReadyEmail(userId: string, requestedAt: string): Promise<boolean>;
+}
+
 export interface ExportReadyCheckResult {
   readonly detected: boolean;
   readonly preferences: ImportPreferencesProjection;
 }
-
-const requireDurableGmail = (
-  health: GmailConnectionHealthResult,
-  status: GmailConnectionStatus,
-): void => {
-  if (health.status === 'unavailable') {
-    throw new AppError({
-      code: 'GMAIL_VALIDATION_UNAVAILABLE',
-      message: 'Gmail could not be reached. Your connection is unchanged; try again shortly.',
-    });
-  }
-  if (health.status !== 'valid' || !status.connected || status.connectionMode !== 'offline') {
-    throw new ConflictError(
-      'GMAIL_RECONNECT_REQUIRED',
-      'Reconnect Gmail with durable access before enabling ongoing tracking.',
-    );
-  }
-};
 
 /** Owns import consent and provider-export preference transitions. */
 export class ImportPreferencesService {
@@ -64,10 +54,50 @@ export class ImportPreferencesService {
     private readonly queries: PreferencesQueryPort,
     private readonly status: StatusPort,
     private readonly exportReadyDetector: ExportReadyDetector,
+    private readonly sourceCoverage: SourceCoveragePort,
+    private readonly outlookExportReadyDetector?: OutlookExportReadyDetector,
   ) {}
 
   get(userId: string, requestTimezone?: string): Promise<ImportPreferencesProjection> {
     return this.status.getPreferences(userId, requestTimezone);
+  }
+
+  getSetupGuidance(userId: string): Promise<ImportSetupGuidance> {
+    return this.queries.getSetupGuidance(userId);
+  }
+
+  async setInitialSetupDeferral(
+    userId: string,
+    decision: 'defer' | 'resume',
+  ): Promise<ImportSetupGuidance> {
+    await this.lifecycle.setInitialSetupDeferral(userId, decision);
+    return this.queries.getSetupGuidance(userId);
+  }
+
+  async setProviderRelevance(
+    userId: string,
+    provider: ExportProvider,
+    relevance: ProviderRelevance,
+  ): Promise<ImportPreferencesProjection> {
+    const updated = await this.lifecycle.setProviderRelevance(userId, provider, relevance);
+    if (!updated && relevance === 'not_used') {
+      const coverage = await this.sourceCoverage.getForUser(userId);
+      const providerCoverage = provider === 'uber_eats' ? 'uberEats' : 'doorDash';
+      if (
+        coverage.emailProviders[providerCoverage].hasData ||
+        coverage.exportProviders[providerCoverage].hasData
+      ) {
+        throw new ConflictError(
+          'PROVIDER_USAGE_EVIDENCE_EXISTS',
+          'Order history already shows activity for this provider.',
+        );
+      }
+      throw new ConflictError(
+        'PROVIDER_WORKFLOW_ACTIVE',
+        'This provider already has an active history request or import.',
+      );
+    }
+    return this.status.getPreferences(userId);
   }
 
   async setMonitoringConsent(
@@ -92,8 +122,22 @@ export class ImportPreferencesService {
           'Import Gmail history or a provider export before enabling ongoing tracking.',
         );
       }
-      const { health, status } = await this.status.getConnection(userId, true);
-      requireDurableGmail(health, status);
+      const projection = await this.status.getPreferences(userId);
+      if (!projection.ongoingTracking.capability.canTrack) {
+        const temporarilyUnavailable =
+          projection.gmailConnection.connectionHealth === 'unavailable' ||
+          projection.outlookConnection.connectionHealth === 'unavailable';
+        if (temporarilyUnavailable) {
+          throw new AppError({
+            code: 'MAILBOX_VALIDATION_UNAVAILABLE',
+            message: 'Connected mailboxes could not be reached. Try again shortly.',
+          });
+        }
+        throw new ConflictError(
+          'MAILBOX_RECONNECT_REQUIRED',
+          'Reconnect Gmail or Outlook with durable access before enabling ongoing tracking.',
+        );
+      }
     }
 
     await this.lifecycle.setOngoingTrackingConsent(userId, decision, consentVersion);
@@ -132,20 +176,31 @@ export class ImportPreferencesService {
       return { detected: false, preferences: await this.status.getPreferences(userId) };
     }
 
-    const { user, health, status } = await this.status.getConnection(userId);
+    const projection = await this.status.getPreferences(userId);
+    let detected = false;
     if (
-      health.status !== 'valid' ||
-      !status.connected ||
-      !status.canImport ||
-      status.connectionMode !== 'offline'
+      projection.gmailConnection.connectionHealth === 'valid' &&
+      projection.gmailConnection.canImport &&
+      projection.gmailConnection.connectionMode === 'offline'
     ) {
-      return { detected: false, preferences: await this.status.getPreferences(userId) };
+      const { user } = await this.status.getConnection(userId);
+      detected = await this.exportReadyDetector.hasUberExportReadyEmail(
+        user,
+        uberExport.requestedAt,
+      );
     }
-
-    const detected = await this.exportReadyDetector.hasUberExportReadyEmail(
-      user,
-      uberExport.requestedAt,
-    );
+    if (
+      !detected &&
+      this.outlookExportReadyDetector &&
+      projection.outlookConnection.connectionHealth === 'valid' &&
+      projection.outlookConnection.canImport &&
+      projection.outlookConnection.connectionMode === 'offline'
+    ) {
+      detected = await this.outlookExportReadyDetector.hasUberExportReadyEmail(
+        userId,
+        uberExport.requestedAt,
+      );
+    }
     if (detected) {
       await this.lifecycle.setExportStatus(
         userId,

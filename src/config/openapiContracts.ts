@@ -30,7 +30,7 @@ const gmailHealth = {
 const providerState = {
   type: 'object',
   additionalProperties: false,
-  required: ['provider', 'status', 'requestedAt', 'updatedAt', 'errorCode', 'readySource'],
+  required: ['provider', 'status', 'requestedAt', 'updatedAt', 'errorCode', 'readySource', 'relevance'],
   properties: {
     provider: { type: 'string', enum: ['uber_eats', 'doordash'] },
     status: {
@@ -45,6 +45,7 @@ const providerState = {
       enum: ['detected_email', 'user_confirmed'],
       nullable: true,
     },
+    relevance: { type: 'string', enum: ['unknown', 'not_used'] },
   },
 };
 const sourceCoverage = {
@@ -117,6 +118,64 @@ export const contractSchemas = {
           },
         },
       },
+    },
+  },
+  MicrosoftLoginAttempt: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['attemptToken', 'nonce', 'expiresIn'],
+    properties: {
+      attemptToken: { type: 'string', minLength: 32 },
+      nonce: { type: 'string', minLength: 32 },
+      expiresIn: { type: 'integer', minimum: 1 },
+    },
+  },
+  MicrosoftAuthRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['identityToken', 'attemptToken'],
+    properties: {
+      identityToken: { type: 'string', minLength: 20 },
+      attemptToken: { type: 'string', minLength: 32 },
+    },
+  },
+  MicrosoftEmailVerificationRequired: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['status', 'attemptToken'],
+    properties: {
+      status: { type: 'string', enum: ['email_verification_required'] },
+      attemptToken: { type: 'string', minLength: 32 },
+      suggestedEmail: { type: 'string', format: 'email' },
+    },
+  },
+  MicrosoftEmailRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['attemptToken', 'email'],
+    properties: {
+      attemptToken: { type: 'string', minLength: 32 },
+      email: { type: 'string', format: 'email' },
+    },
+  },
+  MicrosoftEmailCodeRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['attemptToken', 'email', 'code'],
+    properties: {
+      attemptToken: { type: 'string', minLength: 32 },
+      email: { type: 'string', format: 'email' },
+      code: { type: 'string', pattern: '^\\d{6}$' },
+    },
+  },
+  MicrosoftEmailCodeSent: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['success', 'expiresIn', 'resendAfter'],
+    properties: {
+      success: { type: 'boolean', enum: [true] },
+      expiresIn: { type: 'integer', minimum: 1 },
+      resendAfter: { type: 'integer', minimum: 1 },
     },
   },
   RefreshTokenRequest: {
@@ -251,6 +310,27 @@ export const contractSchemas = {
     required: ['provider'],
     properties: { provider: { type: 'string', enum: ['uber_eats', 'doordash'] } },
   },
+  SetupDeferralRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['decision'],
+    properties: { decision: { type: 'string', enum: ['defer', 'resume'] } },
+  },
+  ProviderRelevanceRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['provider', 'relevance'],
+    properties: {
+      provider: { type: 'string', enum: ['uber_eats', 'doordash'] },
+      relevance: { type: 'string', enum: ['unknown', 'not_used'] },
+    },
+  },
+  SetupGuidance: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['initialSetupDeferredUntil'],
+    properties: { initialSetupDeferredUntil: nullableTimestamp },
+  },
   TrackingBatchRequest: {
     type: 'object',
     additionalProperties: false,
@@ -286,19 +366,55 @@ export const contractSchemas = {
       statusMessage: { type: 'string' },
     },
   },
+  OutlookConnectionStatus: {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'provider',
+      'connected',
+      'canImport',
+      'needsReconnect',
+      'email',
+      'connectionMode',
+      'scopes',
+      'hasRequiredScope',
+      'expiresAt',
+      'connectionHealth',
+      'lastValidatedAt',
+      'statusMessage',
+    ],
+    properties: {
+      provider: { type: 'string', enum: ['microsoft'] },
+      connected: { type: 'boolean' },
+      canImport: { type: 'boolean' },
+      needsReconnect: { type: 'boolean' },
+      email: { type: 'string', format: 'email', nullable: true },
+      connectionMode: { type: 'string', enum: ['none', 'temporary', 'offline'] },
+      scopes: { type: 'array', items: { type: 'string' } },
+      hasRequiredScope: { type: 'boolean' },
+      expiresAt: nullableTimestamp,
+      connectionHealth: gmailHealth,
+      lastValidatedAt: nullableTimestamp,
+      statusMessage: { type: 'string' },
+    },
+  },
   ImportPreferences: {
     type: 'object',
     additionalProperties: false,
     required: [
       'gmailConnection',
+      'outlookConnection',
       'monitoring',
       'export',
       'gmailBaseline',
+      'outlookBaseline',
       'ongoingTracking',
       'coverage',
+      'setupGuidance',
     ],
     properties: {
       gmailConnection: schema('GmailConnectionStatus'),
+      outlookConnection: schema('OutlookConnectionStatus'),
       monitoring: {
         type: 'object',
         required: [
@@ -322,6 +438,7 @@ export const contractSchemas = {
             type: 'object',
             required: [
               'gmailConnected',
+              'outlookConnected',
               'durableAccess',
               'needsReconnect',
               'connectionHealth',
@@ -330,6 +447,7 @@ export const contractSchemas = {
             ],
             properties: {
               gmailConnected: { type: 'boolean' },
+              outlookConnected: { type: 'boolean' },
               durableAccess: { type: 'boolean' },
               needsReconnect: { type: 'boolean' },
               connectionHealth: gmailHealth,
@@ -351,6 +469,27 @@ export const contractSchemas = {
         },
       },
       gmailBaseline: {
+        type: 'object',
+        required: ['hasCompleted', 'completedAt', 'latestAttempt'],
+        properties: {
+          hasCompleted: { type: 'boolean' },
+          completedAt: nullableTimestamp,
+          latestAttempt: {
+            type: 'object',
+            required: ['status', 'updatedAt', 'importedCount', 'errorCode'],
+            properties: {
+              status: {
+                type: 'string',
+                enum: ['never_started', 'importing', 'completed', 'failed'],
+              },
+              updatedAt: nullableTimestamp,
+              importedCount: { type: 'integer', minimum: 0 },
+              errorCode: { type: 'string', nullable: true },
+            },
+          },
+        },
+      },
+      outlookBaseline: {
         type: 'object',
         required: ['hasCompleted', 'completedAt', 'latestAttempt'],
         properties: {
@@ -410,13 +549,14 @@ export const contractSchemas = {
             required: ['eligible', 'source'],
             properties: {
               eligible: { type: 'boolean' },
-              source: { type: 'string', enum: ['gmail', 'exports', 'none'] },
+              source: { type: 'string', enum: ['gmail', 'outlook', 'exports', 'none'] },
             },
           },
           capability: {
             type: 'object',
             required: [
               'gmailConnected',
+              'outlookConnected',
               'durableAccess',
               'needsReconnect',
               'connectionHealth',
@@ -425,6 +565,7 @@ export const contractSchemas = {
             ],
             properties: {
               gmailConnected: { type: 'boolean' },
+              outlookConnected: { type: 'boolean' },
               durableAccess: { type: 'boolean' },
               needsReconnect: { type: 'boolean' },
               connectionHealth: gmailHealth,
@@ -462,6 +603,7 @@ export const contractSchemas = {
           'exportReceiptCount',
           'hasEmailData',
           'hasExportData',
+          'emailProviders',
           'exportProviders',
         ],
         properties: {
@@ -469,6 +611,11 @@ export const contractSchemas = {
           exportReceiptCount: { type: 'integer', minimum: 0 },
           hasEmailData: { type: 'boolean' },
           hasExportData: { type: 'boolean' },
+          emailProviders: {
+            type: 'object',
+            required: ['uberEats', 'doorDash'],
+            properties: { uberEats: sourceCoverage, doorDash: sourceCoverage },
+          },
           exportProviders: {
             type: 'object',
             required: ['uberEats', 'doorDash'],
@@ -476,6 +623,7 @@ export const contractSchemas = {
           },
         },
       },
+      setupGuidance: schema('SetupGuidance'),
     },
   },
   GmailImportResult: {
@@ -516,6 +664,44 @@ export const contractSchemas = {
       code: { type: 'string', nullable: true },
     },
   },
+  ImportOperation: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id', 'kind', 'trigger', 'status', 'phase', 'progress', 'result', 'errorCode', 'errorMessage', 'attempts', 'createdAt', 'queuedAt', 'startedAt', 'completedAt', 'updatedAt'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'export_file'] },
+      trigger: { type: 'string', enum: ['user', 'scheduler'] },
+      status: { type: 'string', enum: ['awaiting_upload', 'pending_dispatch', 'queued', 'running', 'retrying', 'succeeded', 'failed', 'expired', 'superseded'] },
+      phase: { type: 'string' },
+      progress: { type: 'integer', minimum: 0, maximum: 100 },
+      result: { type: 'object', nullable: true, additionalProperties: true },
+      errorCode: { type: 'string', nullable: true },
+      errorMessage: { type: 'string', nullable: true },
+      attempts: { type: 'integer', minimum: 0 },
+      createdAt: { type: 'string', format: 'date-time' },
+      queuedAt: nullableTimestamp,
+      startedAt: nullableTimestamp,
+      completedAt: nullableTimestamp,
+      updatedAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  ImportOperationEnvelope: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['operation'],
+    properties: { operation: schema('ImportOperation') },
+  },
+  ExportUploadIntentRequest: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['filename', 'contentType', 'contentLength'],
+    properties: {
+      filename: { type: 'string', maxLength: 120 },
+      contentType: { type: 'string' },
+      contentLength: { type: 'integer', minimum: 1, maximum: 52428800 },
+    },
+  },
 } as const;
 
 const authOperation = (
@@ -534,6 +720,7 @@ const authOperation = (
       '401': { $ref: '#/components/responses/Unauthorized' },
       '409': { $ref: '#/components/responses/Conflict' },
       '429': { $ref: '#/components/responses/RateLimitExceeded' },
+      '503': response('Authentication provider unavailable', 'Error'),
     },
   },
 });
@@ -564,6 +751,90 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
   '/auth/login': authOperation('Log in with credentials', 'CredentialRequest', 'AuthSession'),
   '/auth/google': authOperation('Log in with Google identity', 'GoogleAuthRequest', 'AuthSession'),
   '/auth/apple': authOperation('Log in with Apple identity', 'AppleAuthRequest', 'AuthSession'),
+  '/imports/active': {
+    get: {
+      summary: 'Read the authenticated account active import operation', tags: ['Imports'], security: secured,
+      responses: { '200': { description: 'Nullable active operation' }, '401': { $ref: '#/components/responses/Unauthorized' } },
+    },
+  },
+  '/imports/recent': {
+    get: {
+      summary: 'List recent import operations', tags: ['Imports'], security: secured,
+      responses: { '200': { description: 'Recent operations' }, '401': { $ref: '#/components/responses/Unauthorized' } },
+    },
+  },
+  '/imports/{id}': {
+    get: {
+      summary: 'Read one owned import operation', tags: ['Imports'], security: secured,
+      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+      responses: { '200': response('Import operation', 'ImportOperationEnvelope'), '401': { $ref: '#/components/responses/Unauthorized' }, '404': { $ref: '#/components/responses/NotFound' } },
+    },
+  },
+  '/imports/exports/uber-eats/upload-intent': {
+    post: {
+      summary: 'Create an Uber Eats export upload intent', tags: ['Imports'], security: secured,
+      requestBody: jsonBody('ExportUploadIntentRequest'),
+      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+    },
+  },
+  '/imports/exports/doordash/upload-intent': {
+    post: {
+      summary: 'Create a DoorDash export upload intent', tags: ['Imports'], security: secured,
+      requestBody: jsonBody('ExportUploadIntentRequest'),
+      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+    },
+  },
+  '/imports/{id}/upload-url': {
+    post: {
+      summary: 'Refresh a signed URL for an awaiting upload', tags: ['Imports'], security: secured,
+      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+      responses: { '200': { description: 'Refreshed signed upload URL' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+    },
+  },
+  '/imports/{id}/submit': {
+    post: {
+      summary: 'Validate an uploaded export and queue processing', tags: ['Imports'], security: secured,
+      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+      responses: { '202': response('Queued import operation', 'ImportOperationEnvelope'), '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+    },
+  },
+  '/auth/microsoft/attempt': {
+    post: {
+      summary: 'Create a short-lived Microsoft login attempt',
+      tags: ['Authentication'],
+      responses: {
+        '201': response('Login attempt created', 'MicrosoftLoginAttempt'),
+        '429': { $ref: '#/components/responses/RateLimitExceeded' },
+        '503': response('Microsoft login unavailable', 'Error'),
+      },
+    },
+  },
+  '/auth/microsoft': {
+    post: {
+      summary: 'Verify a Microsoft identity token',
+      tags: ['Authentication'],
+      requestBody: jsonBody('MicrosoftAuthRequest'),
+      responses: {
+        '200': response('Authenticated', 'AuthSession'),
+        '202': response('Email ownership must be verified', 'MicrosoftEmailVerificationRequired'),
+        '400': { $ref: '#/components/responses/ValidationError' },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+        '409': { $ref: '#/components/responses/Conflict' },
+        '429': { $ref: '#/components/responses/RateLimitExceeded' },
+        '503': response('Microsoft login unavailable', 'Error'),
+      },
+    },
+  },
+  '/auth/microsoft/email/send': authOperation(
+    'Send a Microsoft-login email verification code',
+    'MicrosoftEmailRequest',
+    'MicrosoftEmailCodeSent',
+  ),
+  '/auth/microsoft/email/confirm': authOperation(
+    'Confirm Microsoft-login email ownership',
+    'MicrosoftEmailCodeRequest',
+    'AuthSession',
+  ),
   '/auth/refresh': authOperation('Rotate a refresh token', 'RefreshTokenRequest', 'TokenPair'),
   '/auth/logout': authOperation(
     'Revoke a refresh token',
@@ -685,6 +956,44 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
       },
     },
   },
+  '/gmail/preferences/setup-guidance': {
+    get: {
+      summary: 'Get lightweight initial setup guidance without mailbox validation',
+      tags: ['Gmail Integration'],
+      security: secured,
+      responses: {
+        '200': response('Initial setup guidance', 'SetupGuidance'),
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/gmail/preferences/setup-deferral': {
+    put: {
+      summary: 'Defer or resume initial data setup',
+      tags: ['Gmail Integration'],
+      security: secured,
+      requestBody: jsonBody('SetupDeferralRequest'),
+      responses: {
+        '200': response('Updated setup guidance', 'SetupGuidance'),
+        '400': { $ref: '#/components/responses/ValidationError' },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/gmail/preferences/provider-relevance': {
+    put: {
+      summary: 'Update whether a delivery provider is relevant to import guidance',
+      tags: ['Gmail Integration'],
+      security: secured,
+      requestBody: jsonBody('ProviderRelevanceRequest'),
+      responses: {
+        '200': response('Canonical import preferences', 'ImportPreferences'),
+        '400': { $ref: '#/components/responses/ValidationError' },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+        '409': { $ref: '#/components/responses/Conflict' },
+      },
+    },
+  },
   '/gmail/preferences/monitoring-consent': {
     put: gmailPreferenceMutation('Set export-ready monitoring consent', 'ConsentRequest').post,
   },
@@ -747,11 +1056,11 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
   },
   '/gmail/import': {
     post: {
-      summary: 'Run a historical receipt import from Gmail',
+      summary: 'Queue a historical receipt import from Gmail',
       tags: ['Gmail Integration'],
       security: secured,
       responses: {
-        '200': response('Committed import result', 'GmailImportResult'),
+        '202': response('Durable import operation', 'ImportOperationEnvelope'),
         '401': { $ref: '#/components/responses/Unauthorized' },
         '409': { $ref: '#/components/responses/Conflict' },
         '502': response('Provider import failure', 'Error'),
@@ -761,27 +1070,11 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
   },
   '/gmail/tracking/check': {
     post: {
-      summary: 'Run one explicit ongoing-tracking check',
+      summary: 'Queue one explicit ongoing-tracking check',
       tags: ['Gmail Integration'],
       security: secured,
       responses: {
-        '200': {
-          description: 'Committed import result plus canonical preferences',
-          content: {
-            'application/json': {
-              schema: {
-                allOf: [
-                  schema('GmailImportResult'),
-                  {
-                    type: 'object',
-                    required: ['preferences'],
-                    properties: { preferences: schema('ImportPreferences') },
-                  },
-                ],
-              },
-            },
-          },
-        },
+        '202': response('Durable import operation', 'ImportOperationEnvelope'),
         '401': { $ref: '#/components/responses/Unauthorized' },
         '409': { $ref: '#/components/responses/Conflict' },
       },
@@ -796,6 +1089,94 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
         '200': { description: 'Per-user batch outcomes' },
         '400': { $ref: '#/components/responses/ValidationError' },
         '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/outlook/auth-url': {
+    post: {
+      summary: 'Create an Outlook mailbox authorization URL using Microsoft OAuth and PKCE',
+      tags: ['Outlook Integration'],
+      security: secured,
+      requestBody: jsonBody('GmailAuthUrlRequest'),
+      responses: {
+        '200': {
+          description: 'Microsoft provider authorization URL',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['success', 'authUrl'],
+                properties: {
+                  success: { type: 'boolean' },
+                  authUrl: { type: 'string', format: 'uri' },
+                },
+              },
+            },
+          },
+        },
+        '400': { $ref: '#/components/responses/ValidationError' },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/outlook/callback': {
+    get: {
+      summary: 'Complete Microsoft mailbox OAuth and redirect to the signed app URI',
+      tags: ['Outlook Integration'],
+      parameters: [
+        { in: 'query', name: 'state', schema: { type: 'string' } },
+        { in: 'query', name: 'code', schema: { type: 'string' } },
+        { in: 'query', name: 'error', schema: { type: 'string' } },
+      ],
+      responses: { '302': { description: 'Redirect to the allowlisted app URI' } },
+    },
+  },
+  '/outlook/status': {
+    get: {
+      summary: 'Get canonical Outlook connection status',
+      tags: ['Outlook Integration'],
+      security: secured,
+      responses: {
+        '200': response('Outlook connection status', 'OutlookConnectionStatus'),
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/outlook/disconnect': {
+    post: {
+      summary: 'Disconnect the authenticated Outlook mailbox',
+      tags: ['Outlook Integration'],
+      security: secured,
+      requestBody: jsonBody('GmailDisconnectRequest'),
+      responses: {
+        '200': response('Outlook disconnected', 'OperationResult'),
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/outlook/import/status': {
+    get: {
+      summary: 'Check whether the receipt writer is occupied',
+      tags: ['Outlook Integration'],
+      security: secured,
+      responses: {
+        '200': { description: 'Current writer activity' },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+  '/outlook/import': {
+    post: {
+      summary: 'Queue a historical supported-receipt import from Outlook',
+      tags: ['Outlook Integration'],
+      security: secured,
+      responses: {
+        '202': response('Durable import operation', 'ImportOperationEnvelope'),
+        '401': { $ref: '#/components/responses/Unauthorized' },
+        '409': { $ref: '#/components/responses/Conflict' },
+        '502': response('Provider import failure', 'Error'),
+        '503': response('Provider validation unavailable', 'Error'),
       },
     },
   },

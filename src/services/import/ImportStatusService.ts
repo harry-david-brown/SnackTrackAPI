@@ -12,7 +12,13 @@ import type {
   ImportPreferencesQueryPort,
   ImportSourceCoveragePort,
   MailboxUserPort,
+  MicrosoftMailboxConnectionPort,
+  MicrosoftMailboxHealthPort,
 } from '../ports/ImportPorts';
+import type {
+  MailboxImportState,
+  MicrosoftMailboxConnectionStatus,
+} from '../mailbox/MailboxConnection';
 
 const REQUIRED_GMAIL_SCOPES = new Set([
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -50,6 +56,8 @@ type PreferencesPort = Pick<
   'get' | 'getProviderExports' | 'getOrdersAddedThisWeek'
 >;
 type SourceCoveragePort = Pick<ImportSourceCoveragePort, 'getForUser'>;
+type OutlookHealthPort = MicrosoftMailboxHealthPort;
+type MailboxStatePort = Pick<MicrosoftMailboxConnectionPort, 'getMicrosoftImportState'>;
 
 export type MonitoringEffectiveState =
   'not_offered' | 'declined' | 'enabled' | 'disabled' | 'reconnect_required';
@@ -59,6 +67,7 @@ export type TrackingEffectiveState =
 
 export interface ImportPreferencesProjection {
   readonly gmailConnection: GmailConnectionStatus;
+  readonly outlookConnection: MicrosoftMailboxConnectionStatus;
   readonly monitoring: {
     readonly consentState: ImportPreferences['monitoringConsentState'];
     readonly consentVersion: string | null;
@@ -67,6 +76,7 @@ export interface ImportPreferencesProjection {
     readonly effectiveState: MonitoringEffectiveState;
     readonly capability: {
       readonly gmailConnected: boolean;
+      readonly outlookConnected: boolean;
       readonly durableAccess: boolean;
       readonly needsReconnect: boolean;
       readonly connectionHealth: GmailConnectionHealth;
@@ -90,6 +100,16 @@ export interface ImportPreferencesProjection {
       readonly errorCode: string | null;
     };
   };
+  readonly outlookBaseline: {
+    readonly hasCompleted: boolean;
+    readonly completedAt: string | null;
+    readonly latestAttempt: {
+      readonly status: MailboxImportState['status'];
+      readonly updatedAt: string | null;
+      readonly importedCount: number;
+      readonly errorCode: string | null;
+    };
+  };
   readonly ongoingTracking: {
     readonly consentState: ImportPreferences['ongoingTrackingConsentState'];
     readonly consentVersion: string | null;
@@ -100,6 +120,7 @@ export interface ImportPreferencesProjection {
     readonly baseline: TrackingBaseline;
     readonly capability: {
       readonly gmailConnected: boolean;
+      readonly outlookConnected: boolean;
       readonly durableAccess: boolean;
       readonly needsReconnect: boolean;
       readonly connectionHealth: GmailConnectionHealth;
@@ -117,6 +138,9 @@ export interface ImportPreferencesProjection {
     };
   };
   readonly coverage: ImportSourceCoverage;
+  readonly setupGuidance: {
+    readonly initialSetupDeferredUntil: string | null;
+  };
 }
 
 const connectionModeFor = (user: User): GmailConnectionMode => {
@@ -180,12 +204,10 @@ export const buildGmailConnectionStatus = (
 
 const monitoringState = (
   preferences: ImportPreferences,
-  status: GmailConnectionStatus,
+  durableMailbox: boolean,
 ): MonitoringEffectiveState => {
   if (preferences.monitoringConsentState === 'granted') {
-    return status.connected && status.canImport && status.connectionMode === 'offline'
-      ? 'enabled'
-      : 'reconnect_required';
+    return durableMailbox ? 'enabled' : 'reconnect_required';
   }
   if (preferences.monitoringConsentState === 'declined') return 'declined';
   if (preferences.monitoringConsentState === 'revoked') return 'disabled';
@@ -194,12 +216,10 @@ const monitoringState = (
 
 const trackingState = (
   preferences: ImportPreferences,
-  status: GmailConnectionStatus,
+  durableMailbox: boolean,
 ): TrackingEffectiveState => {
   if (preferences.ongoingTrackingConsentState === 'granted') {
-    if (!status.connected || !status.canImport || status.connectionMode !== 'offline') {
-      return 'reconnect_required';
-    }
+    if (!durableMailbox) return 'reconnect_required';
     if (preferences.trackingStatus === 'error') return 'error';
     if (preferences.trackingStatus === 'setting_up') return 'setting_up';
     if (preferences.trackingStatus === 'inactive' || preferences.trackingStatus === 'paused') {
@@ -212,6 +232,30 @@ const trackingState = (
   return 'not_offered';
 };
 
+const disconnectedOutlookStatus = (): MicrosoftMailboxConnectionStatus => ({
+  provider: 'microsoft',
+  connected: false,
+  canImport: false,
+  needsReconnect: false,
+  email: null,
+  connectionMode: 'none',
+  scopes: [],
+  hasRequiredScope: false,
+  expiresAt: null,
+  connectionHealth: 'disconnected',
+  lastValidatedAt: null,
+  statusMessage: 'Connect Outlook to import receipts.',
+});
+
+const emptyOutlookImportState = (): MailboxImportState => ({
+  provider: 'microsoft',
+  status: 'never_started',
+  updatedAt: null,
+  importedCount: 0,
+  errorCode: null,
+  baselineCompletedAt: null,
+});
+
 /** Application owner for Gmail connection health and the canonical import-state projection. */
 export class ImportStatusService {
   constructor(
@@ -219,6 +263,8 @@ export class ImportStatusService {
     private readonly health: ConnectionHealthPort,
     private readonly preferences: PreferencesPort,
     private readonly sourceCoverage: SourceCoveragePort,
+    private readonly outlookHealth?: OutlookHealthPort,
+    private readonly mailboxStates?: MailboxStatePort,
   ) {}
 
   async getConnection(
@@ -244,18 +290,27 @@ export class ImportStatusService {
     requestTimezone?: string,
   ): Promise<ImportPreferencesProjection> {
     if (requestTimezone) await this.users.updateTimezone(userId, requestTimezone);
-    const [{ user, status }, preferences, coverage, providers] = await Promise.all([
-      this.getConnection(userId),
-      this.preferences.get(userId),
-      this.sourceCoverage.getForUser(userId),
-      this.preferences.getProviderExports(userId),
-    ]);
+    const [{ user, status }, preferences, coverage, providers, outlookHealth, outlookState] =
+      await Promise.all([
+        this.getConnection(userId),
+        this.preferences.get(userId),
+        this.sourceCoverage.getForUser(userId),
+        this.preferences.getProviderExports(userId),
+        this.outlookHealth?.validate(userId) ?? Promise.resolve(undefined),
+        this.mailboxStates?.getMicrosoftImportState(userId) ?? Promise.resolve(undefined),
+      ]);
+    const outlookConnection =
+      outlookHealth && this.outlookHealth
+        ? this.outlookHealth.buildStatus(outlookHealth.connection, outlookHealth.health)
+        : disconnectedOutlookStatus();
+    const resolvedOutlookState = outlookState ?? emptyOutlookImportState();
     const ordersAddedThisWeek = await this.preferences.getOrdersAddedThisWeek(
       userId,
       user.timezone || 'America/New_York',
     );
     const trackingBaseline = resolveTrackingBaseline({
       gmailBaselineCompletedAt: preferences.gmailBaselineCompletedAt,
+      outlookBaselineCompletedAt: resolvedOutlookState.baselineCompletedAt,
       uberEatsExportCount: coverage.exportProviders.uberEats.receiptCount,
       doorDashExportCount: coverage.exportProviders.doorDash.receiptCount,
     });
@@ -264,22 +319,40 @@ export class ImportStatusService {
       status.connected &&
       status.canImport &&
       status.connectionMode === 'offline';
+    const durableOutlook =
+      outlookConnection.connectionHealth === 'valid' &&
+      outlookConnection.connected &&
+      outlookConnection.canImport &&
+      outlookConnection.connectionMode === 'offline';
+    const durableMailbox = durableGmail || durableOutlook;
+    const mailboxConnectionHealth: GmailConnectionHealth = durableMailbox
+      ? 'valid'
+      : status.connectionHealth === 'reconnect_required' ||
+          outlookConnection.connectionHealth === 'reconnect_required'
+        ? 'reconnect_required'
+        : status.connectionHealth === 'unavailable' ||
+            outlookConnection.connectionHealth === 'unavailable'
+          ? 'unavailable'
+          : 'disconnected';
 
     return {
       gmailConnection: status,
+      outlookConnection,
       monitoring: {
         consentState: preferences.monitoringConsentState,
         consentVersion: preferences.monitoringConsentVersion,
         consentedAt: preferences.monitoringConsentedAt,
         revokedAt: preferences.monitoringRevokedAt,
-        effectiveState: monitoringState(preferences, status),
+        effectiveState: monitoringState(preferences, durableMailbox),
         capability: {
           gmailConnected: status.connected,
-          durableAccess: status.connectionMode === 'offline',
-          needsReconnect: status.needsReconnect,
-          connectionHealth: status.connectionHealth,
-          lastValidatedAt: status.lastValidatedAt,
-          canMonitor: durableGmail,
+          outlookConnected: outlookConnection.connected,
+          durableAccess: durableMailbox,
+          needsReconnect:
+            !durableMailbox && (status.needsReconnect || outlookConnection.needsReconnect),
+          connectionHealth: mailboxConnectionHealth,
+          lastValidatedAt: status.lastValidatedAt ?? outlookConnection.lastValidatedAt,
+          canMonitor: durableMailbox,
         },
       },
       export: {
@@ -295,21 +368,33 @@ export class ImportStatusService {
           errorCode: preferences.gmailImportErrorCode,
         },
       },
+      outlookBaseline: {
+        hasCompleted: resolvedOutlookState.baselineCompletedAt !== null,
+        completedAt: resolvedOutlookState.baselineCompletedAt,
+        latestAttempt: {
+          status: resolvedOutlookState.status,
+          updatedAt: resolvedOutlookState.updatedAt,
+          importedCount: resolvedOutlookState.importedCount,
+          errorCode: resolvedOutlookState.errorCode,
+        },
+      },
       ongoingTracking: {
         consentState: preferences.ongoingTrackingConsentState,
         consentVersion: preferences.ongoingTrackingConsentVersion,
         consentedAt: preferences.ongoingTrackingConsentedAt,
         revokedAt: preferences.ongoingTrackingRevokedAt,
         status: preferences.trackingStatus,
-        effectiveState: trackingState(preferences, status),
+        effectiveState: trackingState(preferences, durableMailbox),
         baseline: trackingBaseline,
         capability: {
           gmailConnected: status.connected,
-          durableAccess: status.connectionMode === 'offline',
-          needsReconnect: status.needsReconnect,
-          connectionHealth: status.connectionHealth,
-          lastValidatedAt: status.lastValidatedAt,
-          canTrack: durableGmail,
+          outlookConnected: outlookConnection.connected,
+          durableAccess: durableMailbox,
+          needsReconnect:
+            !durableMailbox && (status.needsReconnect || outlookConnection.needsReconnect),
+          connectionHealth: mailboxConnectionHealth,
+          lastValidatedAt: status.lastValidatedAt ?? outlookConnection.lastValidatedAt,
+          canTrack: durableMailbox,
         },
         activity: {
           lastCheckAttemptAt: preferences.lastCheckAttemptAt,
@@ -322,6 +407,9 @@ export class ImportStatusService {
         },
       },
       coverage,
+      setupGuidance: {
+        initialSetupDeferredUntil: preferences.initialSetupDeferredUntil,
+      },
     };
   }
 }

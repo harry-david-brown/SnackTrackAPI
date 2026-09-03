@@ -29,10 +29,21 @@ export interface OAuthIdentityPort {
 export interface AuthTokenPort {
   generateTokens(user: User): AuthTokens;
   verifyRefreshTokenWithBlacklist(token: string): Promise<TokenPayload>;
+  consumeRefreshToken(token: string): Promise<TokenPayload>;
   revokeRefreshToken(token: string): Promise<void>;
 }
 
-export type CodeType = 'password_reset' | 'email_verification';
+export type AuthenticationMethod = 'password' | 'google' | 'apple' | 'microsoft';
+
+export interface AuthenticationActivityPort {
+  recordSuccess(
+    userId: string,
+    method: AuthenticationMethod,
+    action: 'registered' | 'signed_in',
+  ): Promise<void>;
+}
+
+export type CodeType = 'password_reset' | 'email_verification' | 'provider_login';
 export type ConsumeCodeResult = 'consumed' | 'invalid' | 'not_pending';
 
 export interface VerificationCodePort {
@@ -50,10 +61,19 @@ export interface VerificationCodePort {
     codeType: CodeType,
     onVerified: (transaction: DatabaseQueryExecutor) => Promise<void>,
   ): Promise<ConsumeCodeResult>;
+  storeScopedOTP(scopeId: string, email: string, codeType: 'provider_login'): Promise<string>;
+  consumeScopedOTP(
+    scopeId: string,
+    email: string,
+    code: string,
+    codeType: 'provider_login',
+    onVerified: (transaction: DatabaseQueryExecutor) => Promise<void>,
+  ): Promise<ConsumeCodeResult>;
 }
 
 export interface TransactionalEmailPort {
   isEnabled(): boolean;
   sendVerificationEmail(email: string, code: string): Promise<void>;
   sendPasswordResetEmail(email: string, code: string): Promise<void>;
+  sendProviderLoginVerificationEmail(email: string, code: string): Promise<void>;
 }

@@ -27,7 +27,7 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 - Acquire coordination locks before opening a database transaction or external call; release them in `finally`.
 - Every writer of the same resource must participate in the same lock protocol.
 - Prefer ownership-token/fenced distributed locks; never let an expired owner delete a newer owner’s lock.
-- Make startup migrations idempotent for both fresh and existing databases.
+- Add immutable ordered migrations through `MigrationRunner`; preserve applied checksums and make each migration safe for its documented fresh/existing-schema inputs.
 - Invalidate every derived cache only after durable writes commit.
 - Preserve stable machine-readable error codes and distinguish conflict, validation, provider, and server failures.
 - Use read-only, narrowly scoped SQL for diagnosis; never expose credentials or unrelated user data.

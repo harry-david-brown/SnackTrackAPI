@@ -50,6 +50,7 @@ export class ReceiptExtractor {
       data = this.dataExtractor.extract(body, subject, from, {
         providerMessageId: email.providerMessageId,
         receivedAt: email.receivedAt,
+        mailboxProvider: email.mailboxProvider,
       });
     }
 

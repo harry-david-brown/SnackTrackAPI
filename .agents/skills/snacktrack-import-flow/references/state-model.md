@@ -21,7 +21,7 @@ Do not collapse these axes. Similar-looking UI states often have different recov
 
 ## App enums
 
-Verify current declarations in `SnackTrackApp/services/gmailApi.ts`. The established model includes:
+Verify current declarations in `SnackTrackApp/features/import-flow/contracts.ts` and API lifecycle constants in `SnackTrackAPI/src/services/import/ImportLifecycleTypes.ts`. The established model includes:
 
 - monitoring consent: `not_offered`, `declined`, `granted`, `revoked`;
 - effective monitoring: `not_offered`, `declined`, `enabled`, `disabled`, `reconnect_required`;

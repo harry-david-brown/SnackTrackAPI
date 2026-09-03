@@ -6,6 +6,7 @@ import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import {
   isConsentDecision,
   isExportProvider,
+  isProviderRelevance,
   type ConsentDecision,
   type ExportProvider,
 } from '../services/import/ImportLifecycleTypes';
@@ -21,6 +22,9 @@ export interface GmailPreferencesRouterDependencies {
     | 'markExportRequested'
     | 'confirmExportReady'
     | 'checkExportReady'
+    | 'getSetupGuidance'
+    | 'setInitialSetupDeferral'
+    | 'setProviderRelevance'
   >;
 }
 
@@ -55,6 +59,49 @@ export const createGmailPreferencesRouter = (
 ): Router => {
   const router = Router();
 
+  router.get(
+    '/preferences/setup-guidance',
+    dependencies.authenticate,
+    asyncHandler(async (request: Request, response: Response) => {
+      response.json(await dependencies.preferences.getSetupGuidance(authenticatedUserId(request)));
+    }),
+  );
+  router.put(
+    '/preferences/setup-deferral',
+    dependencies.authenticate,
+    asyncHandler(async (request: Request, response: Response) => {
+      const decision = requireObject(request.body as unknown).decision;
+      if (decision !== 'defer' && decision !== 'resume') {
+        throw new ValidationError('decision must be defer or resume');
+      }
+      response.json(
+        await dependencies.preferences.setInitialSetupDeferral(
+          authenticatedUserId(request),
+          decision,
+        ),
+      );
+    }),
+  );
+  router.put(
+    '/preferences/provider-relevance',
+    dependencies.authenticate,
+    asyncHandler(async (request: Request, response: Response) => {
+      const body = requireObject(request.body as unknown);
+      if (!isExportProvider(body.provider)) {
+        throw new ValidationError('provider must be uber_eats or doordash');
+      }
+      if (!isProviderRelevance(body.relevance)) {
+        throw new ValidationError('relevance must be unknown or not_used');
+      }
+      response.json(
+        await dependencies.preferences.setProviderRelevance(
+          authenticatedUserId(request),
+          body.provider,
+          body.relevance,
+        ),
+      );
+    }),
+  );
   router.get(
     '/preferences',
     dependencies.authenticate,

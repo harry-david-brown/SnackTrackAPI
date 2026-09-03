@@ -1,19 +1,29 @@
 import type { User } from '../../models/User';
-import { Receipt, ReceiptType } from '../../models/Receipt';
+import type { Receipt } from '../../models/Receipt';
+import { AppError } from '../../core/errors';
 import type { StructuredLogger } from '../core/StructuredLogger';
 import { silentStructuredLogger } from '../core/StructuredLogger';
 import type { ImportLockHandle } from './ImportLockService';
-import type {
-  ExportCutoffsByReceiptType,
-  GmailImportAcquisitionService,
-} from './GmailImportAcquisitionService';
+import type { ImportExecutionCheckpoint } from './ImportJobTypes';
+import type { GmailImportAcquisitionService } from './GmailImportAcquisitionService';
 import type { GmailImportLifecycleService } from './GmailImportLifecycleService';
 import type { ReceiptEmailBatchExtractor } from './ReceiptEmailBatchExtractor';
 import { deduplicateReceipts } from './ReceiptDeduplicator';
 import type { ReceiptImportPersistenceService } from './ReceiptImportPersistenceService';
+import {
+  restoreMailboxCheckpoint,
+  saveMailboxCheckpoint,
+  type MailboxImportState,
+} from './MailboxImportCheckpoint';
 
 export { resolveIncrementalGmailSearchAfter } from './GmailImportAcquisitionService';
 export type { ExportCutoffsByReceiptType } from './GmailImportAcquisitionService';
+import type { ExportCutoffsByReceiptType } from './GmailImportAcquisitionService';
+
+const MAX_IMPORT_MESSAGES = 20_000;
+const MAX_IMPORT_PAGES = 1_000;
+const HISTORICAL_BYTE_BUDGET = 500 * 1024 * 1024;
+const TRACKING_BYTE_BUDGET = 100 * 1024 * 1024;
 
 export interface GmailImportResult {
   success: boolean;
@@ -37,41 +47,20 @@ export interface GmailImportResult {
 type AcquisitionPort = Pick<GmailImportAcquisitionService, 'acquire'>;
 type ExtractionPort = Pick<ReceiptEmailBatchExtractor, 'extract'>;
 type PersistencePort = Pick<ReceiptImportPersistenceService, 'persist'>;
-type LifecyclePort = Pick<
-  GmailImportLifecycleService,
-  'start' | 'complete' | 'fail' | 'markReconnectRequired'
->;
+type LifecyclePort = Pick<GmailImportLifecycleService, 'start' | 'complete' | 'fail' | 'markReconnectRequired'>;
 
 export const isGmailReconnectError = (error: unknown): boolean => {
-  const candidate =
-    typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : {};
-  const response =
-    typeof candidate.response === 'object' && candidate.response !== null
-      ? (candidate.response as Record<string, unknown>)
-      : {};
-  const responseData =
-    typeof response.data === 'object' && response.data !== null
-      ? (response.data as Record<string, unknown>)
-      : {};
-  return [
-    candidate.message,
-    candidate.code,
-    responseData.error,
-    responseData.error_description,
-  ].some((value) =>
-    String(value || '')
-      .toLowerCase()
-      .includes('invalid_grant'),
-  );
+  const candidate = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  const response = typeof candidate.response === 'object' && candidate.response !== null ? candidate.response as Record<string, unknown> : {};
+  const data = typeof response.data === 'object' && response.data !== null ? response.data as Record<string, unknown> : {};
+  return [candidate.message, candidate.code, data.error, data.error_description]
+    .some((value) => String(value || '').toLowerCase().includes('invalid_grant'));
 };
 
 export const gmailImportErrorCode = (error: unknown): string => {
   if (isGmailReconnectError(error)) return 'GMAIL_RECONNECT_REQUIRED';
-  const candidate = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
-  const response =
-    candidate.response && typeof candidate.response === 'object'
-      ? (candidate.response as Record<string, unknown>)
-      : {};
+  const candidate = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  const response = candidate.response && typeof candidate.response === 'object' ? candidate.response as Record<string, unknown> : {};
   if (candidate.code) return String(candidate.code).substring(0, 80);
   if (response.status) return `HTTP_${response.status}`;
   return 'GMAIL_SYNC_FAILED';
@@ -80,32 +69,31 @@ export const gmailImportErrorCode = (error: unknown): string => {
 export const filterReceiptsAfterExportCutoffs = (
   receipts: readonly Receipt[],
   cutoffs: ExportCutoffsByReceiptType,
-): Receipt[] =>
-  receipts.filter((receipt) => {
-    const cutoff = cutoffs[receipt.receiptType];
-    return !cutoff || Boolean(receipt.orderDate && receipt.orderDate > cutoff);
-  });
+): Receipt[] => receipts.filter((receipt) => {
+  const cutoff = cutoffs[receipt.receiptType];
+  return !cutoff || Boolean(receipt.orderDate && receipt.orderDate > cutoff);
+});
 
-const emptyFailure = (error: unknown, errorCode: string): GmailImportResult => ({
-  success: false,
-  totalEmailsFound: 0,
-  totalReceiptsProcessed: 0,
-  emailsExamined: 0,
-  supportedReceiptsFound: 0,
-  exportCoveredReceipts: 0,
-  eligibleReceipts: 0,
-  deduplicatedReceipts: 0,
-  totalReceiptsImported: 0,
-  totalAmount: 0,
-  errors: [error instanceof Error ? error.message : 'Unknown error'],
+const resultFromState = (state: MailboxImportState, success = true, errorCode: string | null = null, errors: string[] = []): GmailImportResult => ({
+  success,
+  totalEmailsFound: state.counters.matchedMessages,
+  totalReceiptsProcessed: state.counters.receiptsProcessed,
+  emailsExamined: state.counters.emailsExamined,
+  supportedReceiptsFound: state.counters.supportedReceiptsFound,
+  exportCoveredReceipts: state.counters.exportCoveredReceipts,
+  eligibleReceipts: state.counters.eligibleReceipts,
+  deduplicatedReceipts: state.counters.deduplicatedReceipts,
+  totalReceiptsImported: state.counters.totalReceiptsImported,
+  totalAmount: state.counters.totalAmount,
+  errors,
   receipts: [],
-  newOrders: 0,
-  updatedOrders: 0,
-  unchangedOrders: 0,
+  newOrders: state.counters.newOrders,
+  updatedOrders: state.counters.updatedOrders,
+  unchangedOrders: state.counters.unchangedOrders,
   errorCode,
 });
 
-/** Coordinates a Gmail import through focused acquisition, extraction, write, and lifecycle ports. */
+/** Processes and commits one mailbox page at a time, checkpointing only after durable writes. */
 export class GmailImportService {
   constructor(
     private readonly acquisition: AcquisitionPort,
@@ -119,197 +107,72 @@ export class GmailImportService {
     user: User,
     lock: ImportLockHandle,
     trigger: 'manual' | 'background' = 'manual',
+    execution?: ImportExecutionCheckpoint,
   ): Promise<GmailImportResult> {
     const syncRunId = await this.lifecycle.start(user.id, trigger);
+    let state = restoreMailboxCheckpoint(execution, 'gmail');
     try {
-      const acquired = await this.acquisition.acquire(user, trigger);
-      const extracted = await this.extraction.extract(acquired.emails, user.timezone, {
-        userId: user.id,
-        trigger,
-      });
-      this.logExtraction(user.id, syncRunId, trigger, acquired.emails.length, extracted);
-
-      const eligibleReceipts = filterReceiptsAfterExportCutoffs(
-        extracted.supportedReceipts,
-        acquired.exportCutoffs,
-      );
-      const exportCoveredReceipts = extracted.supportedReceipts.length - eligibleReceipts.length;
-      const deduplicated = deduplicateReceipts(eligibleReceipts);
-      this.logDeduplication(user.id, syncRunId, eligibleReceipts, deduplicated);
-
-      let persisted;
-      try {
-        persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock);
-      } catch (error) {
-        const message = `Batch insert failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        this.logger.error('Gmail receipt persistence failed', {
-          userId: user.id,
-          importId: syncRunId,
-          operation: 'gmail_receipt_persistence',
-          provider: 'gmail',
-          outcome: 'failure',
-          error,
-        });
-        await this.lifecycle.fail(syncRunId, user.id, 'GMAIL_IMPORT_WRITE_FAILED', trigger);
-        return {
-          ...this.resultForBatch(
-            acquired.emails.length,
-            extracted.extractedReceipts.length,
-            extracted.supportedReceipts.length,
-            exportCoveredReceipts,
-            eligibleReceipts.length,
-            deduplicated.receipts,
-            extracted.errors.concat(message),
-          ),
-          success: false,
-          errorCode: 'GMAIL_IMPORT_WRITE_FAILED',
-        };
+      if (!state.done) {
+        const acquired = await this.acquisition.acquire(user, trigger, state.cursor ?? undefined);
+        for await (const page of acquired.pages) {
+          const byteBudget = trigger === 'manual' ? HISTORICAL_BYTE_BUDGET : TRACKING_BYTE_BUDGET;
+          if (state.counters.pages >= MAX_IMPORT_PAGES || state.counters.matchedMessages + page.matchedCount > MAX_IMPORT_MESSAGES) {
+            throw new AppError({
+              code: 'MAILBOX_IMPORT_LIMIT_REACHED',
+              message: 'Gmail import exceeded its cumulative page or message budget',
+              publicMessage: 'This mailbox has too many matching messages to import safely in one operation.',
+            });
+          }
+          if (state.counters.decodedBytesExamined + (page.decodedBytes ?? 0) > byteBudget) {
+            throw new AppError({ code: 'MAILBOX_IMPORT_LIMIT_REACHED', message: 'Gmail import exceeded its decoded byte budget', publicMessage: 'This mailbox is too large to import safely in one operation.' });
+          }
+          const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
+          const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
+          const deduplicated = deduplicateReceipts(eligible);
+          const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock);
+          const counters = state.counters;
+          counters.pages += 1;
+          counters.matchedMessages += page.matchedCount;
+          counters.emailsExamined += page.messages.length;
+          counters.receiptsProcessed += extracted.extractedReceipts.length;
+          counters.supportedReceiptsFound += extracted.supportedReceipts.length;
+          counters.exportCoveredReceipts += extracted.supportedReceipts.length - eligible.length;
+          counters.eligibleReceipts += eligible.length;
+          counters.deduplicatedReceipts += deduplicated.receipts.length;
+          counters.totalReceiptsImported += persisted.totalReceiptsImported;
+          counters.totalAmount += deduplicated.receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
+          counters.errorCount += extracted.errors.length;
+          counters.newOrders += persisted.newOrders;
+          counters.updatedOrders += persisted.updatedOrders;
+          counters.unchangedOrders += persisted.unchangedOrders;
+          counters.rejectedMessages += page.rejectedCount ?? 0;
+          counters.decodedBytesExamined += page.decodedBytes ?? 0;
+          counters.errorCount += page.rejectedCount ?? 0;
+          state = { ...state, cursor: page.nextCursor, done: page.nextCursor === null };
+          await saveMailboxCheckpoint(execution, state);
+        }
       }
-
-      await this.lifecycle.complete(
-        syncRunId,
-        user.id,
-        extracted.errors.length ? 'partial' : 'success',
-        {
-          emailsScanned: acquired.emails.length,
-          receiptsProcessed: extracted.extractedReceipts.length,
-          supportedReceiptsFound: extracted.supportedReceipts.length,
-          exportCoveredReceipts,
-          eligibleReceipts: eligibleReceipts.length,
-          deduplicatedReceipts: deduplicated.receipts.length,
-          newOrders: persisted.newOrders,
-          updatedOrders: persisted.updatedOrders,
-          unchangedOrders: persisted.unchangedOrders,
-        },
-        trigger,
-      );
-      this.logger.info('Gmail receipt persistence completed', {
-        userId: user.id,
-        importId: syncRunId,
-        operation: 'gmail_receipt_persistence',
-        provider: 'gmail',
-        outcome: 'success',
-        ...persisted,
-      });
-      return {
-        ...this.resultForBatch(
-          acquired.emails.length,
-          extracted.extractedReceipts.length,
-          extracted.supportedReceipts.length,
-          exportCoveredReceipts,
-          eligibleReceipts.length,
-          deduplicated.receipts,
-          extracted.errors,
-        ),
-        totalReceiptsImported: persisted.totalReceiptsImported,
-        newOrders: persisted.newOrders,
-        updatedOrders: persisted.updatedOrders,
-        unchangedOrders: persisted.unchangedOrders,
-      };
+      await this.lifecycle.complete(syncRunId, user.id, state.counters.errorCount ? 'partial' : 'success', {
+        emailsScanned: state.counters.emailsExamined,
+        receiptsProcessed: state.counters.receiptsProcessed,
+        supportedReceiptsFound: state.counters.supportedReceiptsFound,
+        exportCoveredReceipts: state.counters.exportCoveredReceipts,
+        eligibleReceipts: state.counters.eligibleReceipts,
+        deduplicatedReceipts: state.counters.deduplicatedReceipts,
+        newOrders: state.counters.newOrders,
+        updatedOrders: state.counters.updatedOrders,
+        unchangedOrders: state.counters.unchangedOrders,
+        rejectedMessages: state.counters.rejectedMessages,
+        decodedBytesExamined: state.counters.decodedBytesExamined,
+      }, trigger);
+      this.logger.info('Gmail paged import completed', { userId: user.id, importId: syncRunId, provider: 'gmail', operation: 'gmail_import', outcome: 'success', pages: state.counters.pages, emailsExamined: state.counters.emailsExamined });
+      return resultFromState(state);
     } catch (error) {
       const errorCode = gmailImportErrorCode(error);
-      this.logger.error('Gmail import orchestration failed', {
-        userId: user.id,
-        importId: syncRunId,
-        operation: 'gmail_import',
-        provider: 'gmail',
-        outcome: 'failure',
-        errorCode,
-        error,
-      });
       await this.lifecycle.fail(syncRunId, user.id, errorCode, trigger);
-      if (errorCode === 'GMAIL_RECONNECT_REQUIRED') {
-        await this.lifecycle.markReconnectRequired(user.id);
-      }
-      return emptyFailure(error, errorCode);
+      if (errorCode === 'GMAIL_RECONNECT_REQUIRED') await this.lifecycle.markReconnectRequired(user.id);
+      this.logger.error('Gmail paged import failed', { userId: user.id, importId: syncRunId, provider: 'gmail', operation: 'gmail_import', outcome: 'failure', errorCode, error });
+      return resultFromState(state, false, errorCode, [error instanceof Error ? error.message : 'Unknown error']);
     }
-  }
-
-  private resultForBatch(
-    emailsExamined: number,
-    receiptsProcessed: number,
-    supportedReceiptsFound: number,
-    exportCoveredReceipts: number,
-    eligibleReceipts: number,
-    receipts: Receipt[],
-    errors: string[],
-  ): GmailImportResult {
-    return {
-      success: true,
-      totalEmailsFound: emailsExamined,
-      totalReceiptsProcessed: receiptsProcessed,
-      emailsExamined,
-      supportedReceiptsFound,
-      exportCoveredReceipts,
-      eligibleReceipts,
-      deduplicatedReceipts: receipts.length,
-      totalReceiptsImported: 0,
-      totalAmount: receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0),
-      errors,
-      receipts,
-      newOrders: 0,
-      updatedOrders: 0,
-      unchangedOrders: 0,
-      errorCode: null,
-    };
-  }
-
-  private logExtraction(
-    userId: string,
-    syncRunId: string,
-    trigger: 'manual' | 'background',
-    emailsExamined: number,
-    batch: Awaited<ReturnType<ExtractionPort['extract']>>,
-  ): void {
-    this.logger.info('Gmail receipt extraction completed', {
-      userId,
-      importId: syncRunId,
-      operation: 'gmail_receipt_extraction',
-      provider: 'gmail',
-      outcome: 'success',
-      triggerType: trigger,
-      emailsExamined,
-      receiptsExtracted: batch.extractedReceipts.length,
-      nonReceiptCount: batch.nonReceiptCount,
-      nonFoodCount: batch.nonFoodCount,
-      durationMs: batch.durationMs,
-    });
-  }
-
-  private logDeduplication(
-    userId: string,
-    syncRunId: string,
-    eligible: readonly Receipt[],
-    result: ReturnType<typeof deduplicateReceipts>,
-  ): void {
-    const uberCandidates = eligible.filter(
-      (receipt) =>
-        receipt.receiptType === ReceiptType.UBER_EATS ||
-        receipt.restaurantName?.toLowerCase().includes('uber'),
-    ).length;
-    if (!result.totalWithIdentity && uberCandidates) {
-      this.logger.warn('Gmail receipt identity extraction coverage is empty', {
-        userId,
-        importId: syncRunId,
-        operation: 'gmail_receipt_deduplication',
-        provider: 'gmail',
-        outcome: 'identity_missing',
-        candidateCount: uberCandidates,
-      });
-    }
-    this.logger.info('Gmail receipt deduplication completed', {
-      userId,
-      importId: syncRunId,
-      operation: 'gmail_receipt_deduplication',
-      provider: 'gmail',
-      outcome: 'success',
-      originalCount: eligible.length,
-      uniqueCount: result.receipts.length,
-      duplicatesFound: result.duplicatesFound,
-      higherAmountReplacements: result.higherAmountReplacements,
-      totalWithIdentity: result.totalWithIdentity,
-      totalBeforeDeduplication: result.totalBeforeDeduplication,
-      totalAfterDeduplication: result.totalAfterDeduplication,
-    });
   }
 }

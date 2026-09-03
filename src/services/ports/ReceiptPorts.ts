@@ -38,6 +38,12 @@ export interface ReceiptWritePort {
     receipts: readonly ReceiptWriteCommand[],
     assertWriteAllowed: () => Promise<void>,
   ): Promise<void>;
+  stageProviderExport(jobId: string, receipts: readonly ReceiptWriteCommand[]): Promise<void>;
+  replaceStagedProviderExport(
+    jobId: string,
+    userId: string,
+    assertWriteAllowed: () => Promise<void>,
+  ): Promise<void>;
 }
 
 export interface UserCacheInvalidationPort {

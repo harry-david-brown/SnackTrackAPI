@@ -276,6 +276,63 @@ export class ReceiptRepository {
     });
   }
 
+  async stageProviderExport(jobId: string, receipts: readonly ReceiptWriteCommand[]): Promise<void> {
+    await this.postgres.query('DELETE FROM import_receipt_staging WHERE job_id=$1', [jobId]);
+    const batchSize = 100;
+    for (let offset = 0; offset < receipts.length; offset += batchSize) {
+      const batch = receipts.slice(offset, offset + batchSize);
+      const values: unknown[] = [];
+      const placeholders = batch.map((receipt, index) => {
+        values.push(jobId, offset + index, JSON.stringify(receipt));
+        const parameter = index * 3 + 1;
+        return `($${parameter},$${parameter + 1},$${parameter + 2}::jsonb)`;
+      });
+      await this.postgres.query(
+        `INSERT INTO import_receipt_staging(job_id,sequence_number,receipt) VALUES ${placeholders.join(',')}`,
+        values,
+      );
+    }
+  }
+
+  async replaceStagedProviderExport(
+    jobId: string,
+    userId: string,
+    assertWriteAllowed: () => Promise<void>,
+  ): Promise<void> {
+    await this.postgres.withTransaction(async (transaction) => {
+      const metadata = await transaction.query<Record<string, unknown>>(
+        `SELECT COUNT(*) AS count,
+           ARRAY_AGG(DISTINCT receipt->>'receiptType') AS receipt_types,
+           MAX(NULLIF(receipt->>'orderDate','')::timestamptz) AS latest_export_date
+         FROM import_receipt_staging s JOIN import_jobs j ON j.id=s.job_id
+         WHERE s.job_id=$1 AND j.user_id=$2`,
+        [jobId, userId],
+      );
+      const row = metadata.rows[0] ?? {};
+      const receiptTypes = Array.isArray(row.receipt_types) ? row.receipt_types : [];
+      if (Number(row.count ?? 0) <= 0 || receiptTypes.length !== 1 || typeof receiptTypes[0] !== 'string' || !row.latest_export_date) {
+        throw new Error('Staged export must contain dated receipts from exactly one provider');
+      }
+      await assertWriteAllowed();
+      await transaction.query(
+        `DELETE FROM receipts WHERE user_id=$1 AND receipt_type=$2
+         AND (data_source='csv' OR (data_source='email' AND order_date<=$3))`,
+        [userId, receiptTypes[0], row.latest_export_date],
+      );
+      await transaction.query(
+        `INSERT INTO receipts(user_id,receipt_type,data_source,restaurant_name,order_date,amount_spent,items,delivery_time,external_id)
+         SELECT $2,(receipt->>'receiptType')::varchar,(receipt->>'dataSource')::varchar,
+           NULLIF(receipt->>'restaurantName',''),NULLIF(receipt->>'orderDate','')::timestamptz,
+           (receipt->>'amountSpent')::numeric,COALESCE(receipt->'items','[]'::jsonb),
+           NULLIF(receipt->>'deliveryTime','')::timestamptz,NULLIF(receipt->>'externalId','')
+         FROM import_receipt_staging WHERE job_id=$1 ORDER BY sequence_number`,
+        [jobId,userId],
+      );
+      await assertWriteAllowed();
+      await transaction.query('DELETE FROM import_receipt_staging WHERE job_id=$1', [jobId]);
+    });
+  }
+
   async getLatestCsvReceiptDates(userId: string): Promise<Partial<Record<ReceiptType, Date>>> {
     const result = await this.postgres.query<ReceiptCutoffRow>(
       `SELECT receipt_type, MAX(order_date) AS latest

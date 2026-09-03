@@ -120,6 +120,9 @@ const createImportDependencies = (email) => {
     async getEmails() {
       return [email];
     },
+    async *getEmailPages() {
+      yield { messages: [email], matchedCount: 1, nextCursor: null };
+    },
   };
   const receipts = {
     async getLatestCsvReceiptDates() {

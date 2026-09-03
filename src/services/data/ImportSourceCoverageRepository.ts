@@ -5,6 +5,12 @@ import { DatabaseQueryExecutor, DatabaseRow } from '../ports/DatabasePort';
 interface CoverageRow extends DatabaseRow {
   email_count: unknown;
   export_count: unknown;
+  uber_eats_email_count: unknown;
+  doordash_email_count: unknown;
+  uber_eats_email_earliest: unknown;
+  uber_eats_email_latest: unknown;
+  doordash_email_earliest: unknown;
+  doordash_email_latest: unknown;
   uber_eats_export_count: unknown;
   doordash_export_count: unknown;
   uber_eats_export_earliest: unknown;
@@ -40,6 +46,24 @@ export class ImportSourceCoverageRepository {
          COUNT(*) FILTER (WHERE data_source = 'email')::int AS email_count,
          COUNT(*) FILTER (WHERE data_source = 'csv')::int AS export_count,
          COUNT(*) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+         )::int AS uber_eats_email_count,
+         COUNT(*) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'doordash'
+         )::int AS doordash_email_count,
+         MIN(order_date) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+         ) AS uber_eats_email_earliest,
+         MAX(order_date) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+         ) AS uber_eats_email_latest,
+         MIN(order_date) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'doordash'
+         ) AS doordash_email_earliest,
+         MAX(order_date) FILTER (
+           WHERE data_source = 'email' AND receipt_type = 'doordash'
+         ) AS doordash_email_latest,
+         COUNT(*) FILTER (
            WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
          )::int AS uber_eats_export_count,
          COUNT(*) FILTER (
@@ -66,6 +90,8 @@ export class ImportSourceCoverageRepository {
 
     const emailReceiptCount = nonNegativeInteger(row.email_count, 'email_count');
     const exportReceiptCount = nonNegativeInteger(row.export_count, 'export_count');
+    const uberEatsEmailReceiptCount = nonNegativeInteger(row.uber_eats_email_count, 'uber_eats_email_count');
+    const doorDashEmailReceiptCount = nonNegativeInteger(row.doordash_email_count, 'doordash_email_count');
     const uberEatsReceiptCount = nonNegativeInteger(
       row.uber_eats_export_count,
       'uber_eats_export_count',
@@ -80,6 +106,20 @@ export class ImportSourceCoverageRepository {
       exportReceiptCount,
       hasEmailData: emailReceiptCount > 0,
       hasExportData: exportReceiptCount > 0,
+      emailProviders: {
+        uberEats: {
+          receiptCount: uberEatsEmailReceiptCount,
+          hasData: uberEatsEmailReceiptCount > 0,
+          earliestOrderDate: optionalIsoDate(row.uber_eats_email_earliest, 'uber_eats_email_earliest'),
+          latestOrderDate: optionalIsoDate(row.uber_eats_email_latest, 'uber_eats_email_latest'),
+        },
+        doorDash: {
+          receiptCount: doorDashEmailReceiptCount,
+          hasData: doorDashEmailReceiptCount > 0,
+          earliestOrderDate: optionalIsoDate(row.doordash_email_earliest, 'doordash_email_earliest'),
+          latestOrderDate: optionalIsoDate(row.doordash_email_latest, 'doordash_email_latest'),
+        },
+      },
       exportProviders: {
         uberEats: {
           receiptCount: uberEatsReceiptCount,

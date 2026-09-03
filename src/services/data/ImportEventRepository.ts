@@ -10,7 +10,7 @@ export type ImportEventName =
   | 'export_failed'
   | 'gmail_import_reset';
 
-export type ImportEventMetadata = Readonly<Record<string, string | null>>;
+export type ImportEventMetadata = Readonly<Record<string, string | number | boolean | null>>;
 
 /** Persists the append-only audit trail for import lifecycle changes. */
 export class ImportEventRepository {

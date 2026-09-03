@@ -1,4 +1,4 @@
-export type AuthProvider = 'google' | 'apple';
+export type AuthProvider = 'google' | 'apple' | 'microsoft';
 
 export interface OAuthAccount {
   id: string;

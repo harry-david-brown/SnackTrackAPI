@@ -8,6 +8,7 @@ export interface RefreshTokenBlacklist {
   isAvailable(): boolean;
   exists(key: string): Promise<boolean>;
   set(key: string, value: string, ttlSeconds: number): Promise<unknown>;
+  setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean>;
 }
 
 export interface TokenServiceLogger {
@@ -85,13 +86,28 @@ export class TokenService {
 
   async verifyRefreshTokenWithBlacklist(token: string): Promise<TokenPayload> {
     const payload = this.verifyRefreshToken(token);
-    if (
-      payload.jti &&
-      this.blacklist.isAvailable() &&
-      (await this.blacklist.exists(`blacklist:refresh:${payload.jti}`))
-    ) {
+    if (!payload.jti || !payload.exp) {
+      throw new AuthenticationError('Invalid refresh token', 'REFRESH_TOKEN_INVALID');
+    }
+    if (await this.blacklist.exists(`blacklist:refresh:${payload.jti}`)) {
       throw new AuthenticationError('Refresh token has been revoked', 'REFRESH_TOKEN_REVOKED');
     }
+    return payload;
+  }
+
+  async consumeRefreshToken(token: string): Promise<TokenPayload> {
+    const payload = this.verifyRefreshToken(token);
+    if (!payload.jti || !payload.exp) {
+      throw new AuthenticationError('Invalid refresh token', 'REFRESH_TOKEN_INVALID');
+    }
+    const ttlSeconds = payload.exp - Math.floor(this.now() / 1000);
+    if (ttlSeconds <= 0) throw new AuthenticationError('Refresh token has expired', 'REFRESH_TOKEN_EXPIRED');
+    const consumed = await this.blacklist.setIfAbsent(
+      `blacklist:refresh:${payload.jti}`,
+      'consumed',
+      ttlSeconds,
+    );
+    if (!consumed) throw new AuthenticationError('Refresh token has been revoked', 'REFRESH_TOKEN_REVOKED');
     return payload;
   }
 
@@ -107,7 +123,7 @@ export class TokenService {
       });
       return;
     }
-    if (!payload.jti || !payload.exp || !this.blacklist.isAvailable()) return;
+    if (!payload.jti || !payload.exp) return;
     const ttlSeconds = payload.exp - Math.floor(this.now() / 1000);
     if (ttlSeconds <= 0) return;
     await this.blacklist.set(`blacklist:refresh:${payload.jti}`, 'revoked', ttlSeconds);

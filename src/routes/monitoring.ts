@@ -57,21 +57,6 @@ export const createMonitoringRouter = (dependencies: MonitoringRouterDependencie
       res.json({
         status: healthStatus.status,
         timestamp: new Date().toISOString(),
-        metrics: {
-          ...healthStatus.metrics,
-          // Add clarity: all times are in milliseconds
-          avgResponseTime: healthStatus.metrics.avgResponseTime, // milliseconds
-          p95ResponseTime: healthStatus.metrics.p95ResponseTime, // milliseconds (95th percentile)
-          databaseLatency: healthStatus.metrics.databaseLatency, // milliseconds
-        },
-        thresholds: healthStatus.thresholds,
-        // Explanation of metrics
-        _note: {
-          responseTime: 'All response times are in milliseconds',
-          p95ResponseTime: '95th percentile - 95% of requests are faster than this value',
-          errorRate: 'Errors per minute',
-          errorCount: `Total errors in last ${healthStatus.metrics.timestamp ? '5 minutes' : 'current window'}`,
-        },
       });
     }),
   );
@@ -89,6 +74,7 @@ export const createMonitoringRouter = (dependencies: MonitoringRouterDependencie
    */
   router.get(
     '/alerts',
+    dependencies.authorizeSensitive,
     asyncHandler(async (req: Request, res: Response) => {
       const healthStatus = dependencies.alerting.getHealthStatus();
 

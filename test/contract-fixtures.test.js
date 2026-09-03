@@ -54,10 +54,19 @@ test('the shared auth fixture is accepted unchanged by the route contract and Op
       loginWithGoogle: async () => AUTH_SESSION_FIXTURE,
       loginWithApple: async () => AUTH_SESSION_FIXTURE,
     },
+    microsoft: {
+      createAttempt: async () => ({}),
+      login: async () => ({ status: 'authenticated', session: AUTH_SESSION_FIXTURE }),
+      sendVerificationEmail: async () => ({}),
+      confirmVerificationEmail: async () => AUTH_SESSION_FIXTURE,
+    },
     sessions: { refresh: async () => ({}), revoke: async () => undefined },
     accountDeletion: { deleteAccount: async () => ({}) },
     authenticate: pass,
     rateLimitRegistration: pass,
+    rateLimitMicrosoftAttempt: pass,
+    rateLimitMicrosoftEmail: pass,
+    rateLimitMicrosoftConfirmation: pass,
   });
   const result = await invoke(router, '/register', 'post', {
     body: { email: 'person@example.com', password: 'secret' },

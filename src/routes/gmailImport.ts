@@ -1,13 +1,15 @@
 import { Request, RequestHandler, Response, Router } from 'express';
 import { authenticatedUserId } from '../http/authenticatedUser';
 import { asyncHandler } from '../middleware/errorHandler';
-import type { HistoricalGmailImportService } from '../services/import/HistoricalGmailImportService';
+import type { ImportJobService } from '../services/import/ImportJobService';
 import type { ImportStatusService } from '../services/import/ImportStatusService';
+import { toImportOperation } from '../services/import/ImportJobTypes';
 
 export interface GmailImportRouterDependencies {
   readonly authenticate: RequestHandler;
   readonly status: Pick<ImportStatusService, 'getConnection'>;
-  readonly historicalImport: Pick<HistoricalGmailImportService, 'execute' | 'isInProgress'>;
+  readonly historicalImport: { isInProgress(userId: string): Promise<boolean> };
+  readonly importJobs: Pick<ImportJobService, 'start'>;
 }
 
 export const createGmailImportRouter = (dependencies: GmailImportRouterDependencies): Router => {
@@ -67,25 +69,10 @@ export const createGmailImportRouter = (dependencies: GmailImportRouterDependenc
     '/import',
     dependencies.authenticate,
     asyncHandler(async (request: Request, response: Response) => {
-      request.setTimeout(600_000);
-      const result = await dependencies.historicalImport.execute(authenticatedUserId(request));
-      response.json({
-        success: result.success,
-        totalEmailsFound: result.totalEmailsFound,
-        totalReceiptsProcessed: result.totalReceiptsProcessed,
-        emailsExamined: result.emailsExamined,
-        supportedReceiptsFound: result.supportedReceiptsFound,
-        exportCoveredReceipts: result.exportCoveredReceipts,
-        eligibleReceipts: result.eligibleReceipts,
-        deduplicatedReceipts: result.deduplicatedReceipts,
-        totalReceiptsImported: result.totalReceiptsImported,
-        newOrders: result.newOrders,
-        updatedOrders: result.updatedOrders,
-        unchangedOrders: result.unchangedOrders,
-        totalAmount: result.totalAmount,
-        errors: result.errors,
-        code: result.errorCode,
-      });
+      const operation = await dependencies.importJobs.start(
+        authenticatedUserId(request), 'gmail_historical', 'user', request.get('Idempotency-Key')?.trim(),
+      );
+      response.status(202).json({ operation: toImportOperation(operation) });
     }),
   );
 

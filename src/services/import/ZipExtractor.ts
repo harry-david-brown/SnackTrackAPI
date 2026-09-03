@@ -1,345 +1,224 @@
-/**
- * ZIP Extractor Service
- *
- * Extracts CSV files from ZIP archives for multiple platforms:
- * - Uber Eats: [path]/Uber Data/Eats/user_orders-0.csv
- * - DoorDash: [path]/data_archive/consumer_order_details.csv
- *
- * Security measures implemented:
- * - Zip Slip protection (path traversal prevention)
- * - Zip Bomb protection (size, file count, compression ratio limits)
- * - Symlink detection and rejection
- * - Sanitized error messages
- * - Basic CSV content validation
- */
-
-import yauzl from 'yauzl';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
-import { ValidationError } from '../../core/errors';
+import { once } from 'events';
+import yauzl from 'yauzl';
+import { AppError } from '../../core/errors';
+import type { ExportProvider } from './ImportJobTypes';
 
-export interface ExtractedFile {
-  content: Buffer;
-  filename: string;
-  path: string;
-  platform?: 'uber' | 'doordash';
+const MAX_ENTRIES = 1_000;
+const MAX_TOTAL_DECLARED_BYTES = 250 * 1024 * 1024;
+const MAX_CSV_BYTES = 25 * 1024 * 1024;
+const MAX_HEADER_BYTES = 64 * 1024;
+const MAX_COMPRESSION_RATIO = 100;
+const MAX_PATH_BYTES = 512;
+
+export interface ExtractedTemporaryFile {
+  readonly path: string;
+  readonly filename: string;
+  readonly size: number;
+  remove(): Promise<void>;
 }
 
-export type Platform = 'uber' | 'doordash' | 'unknown';
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+const updateCrc = (current: number, chunk: Buffer): number => {
+  let crc = current;
+  for (const byte of chunk) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return crc >>> 0;
+};
+
+const normalizedHeader = (value: Buffer): string => value.toString('utf8')
+  .replace(/^\uFEFF/, '')
+  .replace(/\r?\n$/, '')
+  .trim();
 
 export class ZipExtractor {
-  // Configurable limits
-  private static MAX_UNCOMPRESSED_SIZE = 100 * 1024 * 1024; // 100MB limit for uncompressed data
-  private static MAX_FILE_COUNT = 1000; // Limit number of files in zip to scan
-  private static MAX_COMPRESSION_RATIO = 100; // Maximum allowed compression ratio (uncompressed/compressed)
-
-  /**
-   * Validate file path to prevent Zip Slip attacks
-   * Checks for path traversal, absolute paths, and encoded variants
-   */
-  private isPathSafe(fileName: string): boolean {
-    // Normalize the path to resolve any . or .. segments
-    const normalizedPath = path.normalize(fileName);
-
-    // Check for path traversal attempts
-    if (
-      normalizedPath.startsWith('..') ||
-      normalizedPath.includes('/..') ||
-      normalizedPath.includes('\\..')
-    ) {
-      return false;
-    }
-
-    // Check for absolute paths (Unix and Windows)
-    if (path.isAbsolute(normalizedPath) || /^[a-zA-Z]:/.test(normalizedPath)) {
-      return false;
-    }
-
-    // Check for URL-encoded path traversal attempts
-    let decodedPath: string;
+  async extractProviderCSVToFile(filePath: string, provider: ExportProvider): Promise<ExtractedTemporaryFile> {
+    const { zipfile, candidates } = await this.scan(filePath, provider);
+    const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'snacktrack-export-'));
+    await fs.promises.chmod(directory, 0o700);
+    const targetPath = path.join(directory, 'export.csv');
+    const output = fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 });
+    let combinedBytes = 0;
+    let expectedHeader: string | null = null;
     try {
-      decodedPath = decodeURIComponent(fileName);
-    } catch {
-      return false;
-    }
-    if (
-      decodedPath.includes('..') ||
-      (decodedPath !== fileName && path.normalize(decodedPath).startsWith('..'))
-    ) {
-      return false;
-    }
-
-    // Check for backslash variants (Windows-style paths in Unix context)
-    if (fileName.includes('..\\') || fileName.includes('\\..')) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Check if entry is a symbolic link based on external file attributes
-   * Unix symlinks have mode 0120000 (octal) in the high 16 bits
-   */
-  private isSymlink(entry: yauzl.Entry): boolean {
-    // External file attributes: high 16 bits contain Unix mode
-    // Symlink mode is 0120000 (octal) = 40960 (decimal)
-    const unixMode = (entry.externalFileAttributes >> 16) & 0xffff;
-    const S_IFLNK = 0o120000; // Symbolic link file type
-    return (unixMode & 0o170000) === S_IFLNK;
-  }
-
-  /**
-   * Check compression ratio to detect potential zip bombs
-   */
-  private isCompressionRatioSafe(entry: yauzl.Entry): boolean {
-    // If compressed size is 0 or very small, be cautious
-    if (entry.compressedSize <= 0) {
-      // Allow if uncompressed size is also small (empty or near-empty files)
-      return entry.uncompressedSize <= 1024;
-    }
-
-    const ratio = entry.uncompressedSize / entry.compressedSize;
-    return ratio <= ZipExtractor.MAX_COMPRESSION_RATIO;
-  }
-
-  /**
-   * Basic validation that content appears to be CSV
-   * Checks for printable ASCII/UTF-8 and common CSV patterns
-   */
-  private isValidCSVContent(content: Buffer): boolean {
-    if (content.length === 0) {
-      return false;
-    }
-
-    // Check first 1KB for basic CSV characteristics
-    const sample = content.slice(0, 1024).toString('utf-8');
-
-    // Check for binary content (non-printable characters except common whitespace)
-    // eslint-disable-next-line no-control-regex -- binary-file detection is intentional.
-    const nonPrintableRegex = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
-    if (nonPrintableRegex.test(sample)) {
-      return false;
-    }
-
-    // Check for at least one comma or newline (basic CSV structure)
-    if (!sample.includes(',') && !sample.includes('\n')) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Sanitize filename for error messages to prevent information disclosure
-   */
-  private sanitizeFilenameForError(fileName: string): string {
-    // Only show the base filename, not the full path
-    const baseName = path.basename(fileName);
-    // Truncate if too long
-    if (baseName.length > 50) {
-      return baseName.substring(0, 47) + '...';
-    }
-    return baseName;
-  }
-
-  /**
-   * Extract CSV from ZIP based on detected platform (Streaming)
-   * Prevents Zip Bombs by checking uncompressed size.
-   */
-  async extractCSV(filePath: string): Promise<ExtractedFile> {
-    return new Promise((resolve, reject) => {
-      // open with lazyEntries: true to read sequentially
-      yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
-        if (err) {
-          return reject(new ValidationError('Failed to open ZIP file', 'file'));
-        }
-        if (!zipfile) {
-          return reject(new ValidationError('Failed to open ZIP file', 'file'));
-        }
-
-        let foundEntry: yauzl.Entry | null = null;
-        let platform: Platform = 'unknown';
-        let entriesCount = 0;
-
-        zipfile.readEntry();
-
-        zipfile.on('entry', (entry: yauzl.Entry) => {
-          entriesCount++;
-          if (entriesCount > ZipExtractor.MAX_FILE_COUNT) {
-            zipfile.close();
-            return reject(new ValidationError('ZIP file contains too many files', 'file'));
+      for (let index = 0; index < candidates.length; index += 1) {
+        const entry = candidates[index];
+        const stream = await this.openEntry(zipfile, entry);
+        let actualBytes = 0;
+        let crc = 0xffffffff;
+        let header = Buffer.alloc(0);
+        let headerComplete = false;
+        for await (const value of stream) {
+          const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+          actualBytes += chunk.length;
+          if (actualBytes > entry.uncompressedSize || actualBytes > MAX_CSV_BYTES) {
+            throw this.error('ZIP_SIZE_MISMATCH', 'A ZIP entry expanded beyond its declared or allowed size.');
           }
-
-          // Security: Check for malicious paths (Zip Slip) - comprehensive check
-          if (!this.isPathSafe(entry.fileName)) {
-            zipfile.close();
-            return reject(new ValidationError('Invalid file path detected in ZIP', 'file'));
-          }
-
-          // Security: Check for symbolic links
-          if (this.isSymlink(entry)) {
-            zipfile.close();
-            return reject(new ValidationError('Symbolic links are not allowed in ZIP', 'file'));
-          }
-
-          const entryPath = entry.fileName.toLowerCase();
-
-          // Logic to find the correct file
-          let isMatch = false;
-
-          // DoorDash match
-          if (
-            (entryPath.includes('consumer_order_details') ||
-              entryPath.includes('consumer_profile_details')) &&
-            entryPath.endsWith('.csv') &&
-            !entryPath.endsWith('/')
-          ) {
-            platform = 'doordash';
-            isMatch = true;
-          }
-          // Uber match
-          else if (
-            ((entryPath.includes('uber data/eats/') && entryPath.endsWith('user_orders-0.csv')) ||
-              (entryPath.includes('eats') &&
-                entryPath.includes('user_orders') &&
-                entryPath.endsWith('.csv'))) &&
-            !entryPath.endsWith('/')
-          ) {
-            platform = 'uber';
-            isMatch = true;
-          }
-
-          if (isMatch) {
-            foundEntry = entry;
-
-            // Zip Bomb Check: Uncompressed size
-            if (entry.uncompressedSize > ZipExtractor.MAX_UNCOMPRESSED_SIZE) {
-              zipfile.close();
-              return reject(
-                new ValidationError('File exceeds maximum allowed size (250MB)', 'file'),
-              );
+          crc = updateCrc(crc, chunk);
+          let writable = chunk;
+          if (!headerComplete) {
+            header = Buffer.concat([header, chunk]);
+            if (header.length > MAX_HEADER_BYTES) throw this.error('CSV_HEADER_TOO_LARGE', 'The CSV header is too large.');
+            const newline = header.indexOf(0x0a);
+            if (newline < 0) continue;
+            const currentHeader = normalizedHeader(header.subarray(0, newline + 1));
+            if (!currentHeader || (expectedHeader !== null && currentHeader !== expectedHeader)) {
+              throw this.error('INVALID_CSV_FORMAT', 'CSV shards do not have the same header.');
             }
-
-            // Zip Bomb Check: Compression ratio
-            if (!this.isCompressionRatioSafe(entry)) {
-              zipfile.close();
-              return reject(new ValidationError('Suspicious compression ratio detected', 'file'));
-            }
-
-            // Extract this entry
-            zipfile.openReadStream(entry, (err, readStream) => {
-              if (err || !readStream) {
-                return reject(new ValidationError('Failed to read file from ZIP', 'file'));
-              }
-
-              const chunks: Buffer[] = [];
-              let size = 0;
-
-              readStream.on('data', (chunk: Buffer) => {
-                size += chunk.length;
-                if (size > ZipExtractor.MAX_UNCOMPRESSED_SIZE) {
-                  readStream.destroy();
-                  zipfile.close();
-                  return reject(new ValidationError('Extracted file exceeds size limit', 'file'));
-                }
-                chunks.push(chunk);
-              });
-
-              readStream.on('end', () => {
-                zipfile.close();
-                const content = Buffer.concat(chunks);
-
-                // If the file is empty (e.g. Uber sometimes), we handle it
-                if (content.length === 0 && platform === 'uber') {
-                  // Return empty structure for Uber to handle "no orders" case gracefully
-                  const emptyCsv =
-                    'Restaurant_Name,Request_Time_Local,Order_Status,Item_Name,Item_quantity,Item_Price,Order_Price\n';
-                  return resolve({
-                    content: Buffer.from(emptyCsv),
-                    filename: 'user_orders-0.csv',
-                    path: 'Uber Data/Eats/user_orders-0.csv',
-                    platform: 'uber',
-                  });
-                }
-
-                if (content.length === 0) {
-                  return reject(new ValidationError('CSV file is empty', 'file'));
-                }
-
-                // Security: Validate CSV content
-                if (!this.isValidCSVContent(content)) {
-                  return reject(
-                    new ValidationError('File does not appear to be valid CSV content', 'file'),
-                  );
-                }
-
-                resolve({
-                  content,
-                  filename: this.sanitizeFilenameForError(entry.fileName),
-                  path: entry.fileName,
-                  platform: platform !== 'unknown' ? platform : undefined,
-                });
-              });
-
-              readStream.on('error', () => {
-                reject(new ValidationError('Error reading file from ZIP', 'file'));
-              });
-            });
-          } else {
-            // Continue reading next entry
-            zipfile.readEntry();
+            expectedHeader ??= currentHeader;
+            writable = index === 0 ? header : header.subarray(newline + 1);
+            headerComplete = true;
+            header = Buffer.alloc(0);
           }
-        });
-
-        zipfile.on('end', () => {
-          if (!foundEntry) {
-            // Fallback for Uber: Check if structure exists but file is missing (no orders)
-            // This is tricky with sequential scanning, but if we reached the end without finding a match,
-            // then we assume it's NOT a valid export.
-            // (Logic for emptiness check in Uber zip was previously detecting folder existence,
-            // but here we just fail if we don't find the file).
-            return reject(
-              new ValidationError('Could not find Uber Eats or DoorDash CSV in ZIP file', 'file'),
-            );
+          if (writable.length > 0) {
+            combinedBytes += writable.length;
+            if (combinedBytes > MAX_CSV_BYTES) throw this.error('ZIP_OUTPUT_TOO_LARGE', 'The extracted CSV exceeds the safe size limit.');
+            if (!output.write(writable)) await once(output, 'drain');
           }
-        });
-
-        zipfile.on('error', (err) => {
-          reject(new ValidationError('ZIP file corrupted or unreadable', 'file'));
-        });
-      });
-    });
+        }
+        if (!headerComplete || actualBytes !== entry.uncompressedSize) {
+          throw this.error('ZIP_SIZE_MISMATCH', 'A ZIP entry ended before its declared size.');
+        }
+        if (((crc ^ 0xffffffff) >>> 0) !== entry.crc32) {
+          throw this.error('ZIP_INTEGRITY_FAILED', 'A ZIP entry failed its integrity check.');
+        }
+      }
+      output.end();
+      await once(output, 'finish');
+      if (combinedBytes <= 0) throw this.error('NO_VALID_EXPORT_ORDERS', 'The export contains no order data.');
+      return {
+        path: targetPath,
+        filename: provider === 'uber_eats' ? 'user_orders.csv' : 'consumer_order_details.csv',
+        size: combinedBytes,
+        remove: async () => void (await fs.promises.rm(directory, { recursive: true, force: true })),
+      };
+    } catch (error) {
+      output.destroy();
+      await fs.promises.rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    } finally {
+      zipfile.close();
+    }
   }
 
-  /**
-   * Check if a file is a ZIP based on magic bytes (Reads first 4 bytes from disk)
-   */
   async isZipFile(filePath: string): Promise<boolean> {
+    const handle = await fs.promises.open(filePath, 'r');
     try {
-      const buffer = Buffer.alloc(4);
-      const fd = await fs.promises.open(filePath, 'r');
-      await fd.read(buffer, 0, 4, 0);
-      await fd.close();
-      return buffer[0] === 0x50 && buffer[1] === 0x4b; // PK
-    } catch (e) {
-      return false;
+      const signature = Buffer.alloc(4);
+      const { bytesRead } = await handle.read(signature, 0, signature.length, 0);
+      return bytesRead === 4 && signature[0] === 0x50 && signature[1] === 0x4b;
+    } finally {
+      await handle.close();
     }
   }
 
-  /**
-   * Validate ZIP structure
-   * (Now mostly checking if it opens, since Multer handles upload size)
-   */
-  async validateZipFile(filePath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
-        if (err || !zipfile) {
-          return reject(new ValidationError('Invalid ZIP file or corrupted', 'file'));
-        }
-        zipfile.close();
-        resolve();
+  private async scan(filePath: string, provider: ExportProvider): Promise<{ zipfile: yauzl.ZipFile; candidates: yauzl.Entry[] }> {
+    const zipfile = await new Promise<yauzl.ZipFile>((resolve, reject) => {
+      yauzl.open(filePath, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (error, archive) => {
+        if (error || !archive) reject(this.error('ZIP_INVALID', 'The ZIP file is corrupt or unreadable.'));
+        else resolve(archive);
       });
     });
+    try {
+      const entries = await new Promise<yauzl.Entry[]>((resolve, reject) => {
+        const selected: yauzl.Entry[] = [];
+        let count = 0;
+        let totalDeclared = 0;
+        let settled = false;
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        };
+        zipfile.on('entry', (entry) => {
+          try {
+            count += 1;
+            if (count > MAX_ENTRIES) throw this.error('ZIP_TOO_MANY_ENTRIES', 'The ZIP contains too many files.');
+            this.assertSafeEntry(entry);
+            if (!entry.fileName.endsWith('/')) {
+              totalDeclared += entry.uncompressedSize;
+              if (totalDeclared > MAX_TOTAL_DECLARED_BYTES) throw this.error('ZIP_TOO_LARGE', 'The ZIP expands beyond the safe archive limit.');
+            }
+            if (this.matches(entry.fileName, provider)) selected.push(entry);
+            zipfile.readEntry();
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error('ZIP validation failed'));
+          }
+        });
+        zipfile.once('end', () => {
+          if (!settled) {
+            settled = true;
+            resolve(selected);
+          }
+        });
+        zipfile.once('error', () => fail(this.error('ZIP_INVALID', 'The ZIP file is corrupt or unreadable.')));
+        zipfile.readEntry();
+      });
+      if (provider === 'doordash' && entries.length !== 1) {
+        throw this.error(entries.length ? 'ZIP_AMBIGUOUS_EXPORT' : 'NO_VALID_EXPORT_ORDERS', entries.length ? 'The ZIP contains multiple DoorDash order files.' : 'The ZIP does not contain DoorDash order data.');
+      }
+      if (provider === 'uber_eats') {
+        if (!entries.length) throw this.error('NO_VALID_EXPORT_ORDERS', 'The ZIP does not contain Uber Eats order data.');
+        const indexes = entries.map((entry) => Number(entry.fileName.match(/user_orders-(\d+)\.csv$/i)?.[1]));
+        if (indexes.some((value) => !Number.isInteger(value)) || new Set(indexes).size !== indexes.length) {
+          throw this.error('ZIP_AMBIGUOUS_EXPORT', 'The ZIP contains ambiguous Uber Eats order files.');
+        }
+        entries.sort((left, right) => Number(left.fileName.match(/(\d+)\.csv$/)?.[1]) - Number(right.fileName.match(/(\d+)\.csv$/)?.[1]));
+      }
+      if (entries.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > MAX_CSV_BYTES) {
+        throw this.error('ZIP_OUTPUT_TOO_LARGE', 'The extracted CSV exceeds the safe size limit.');
+      }
+      return { zipfile, candidates: entries };
+    } catch (error) {
+      zipfile.close();
+      throw error;
+    }
+  }
+
+  private assertSafeEntry(entry: yauzl.Entry): void {
+    const name = entry.fileName;
+    if (!name || Buffer.byteLength(name) > MAX_PATH_BYTES || name.includes('\0') || name.includes('\\')) {
+      throw this.error('ZIP_UNSAFE_ENTRY', 'The ZIP contains an unsafe path.');
+    }
+    let decoded: string;
+    try { decoded = decodeURIComponent(name); } catch { throw this.error('ZIP_UNSAFE_ENTRY', 'The ZIP contains an unsafe path.'); }
+    const normalized = path.posix.normalize(decoded);
+    if (normalized.startsWith('../') || normalized === '..' || normalized.startsWith('/') || /^[a-z]:/i.test(normalized)) {
+      throw this.error('ZIP_UNSAFE_ENTRY', 'The ZIP contains an unsafe path.');
+    }
+    if ((entry.generalPurposeBitFlag & 0x1) !== 0) throw this.error('ZIP_ENCRYPTED', 'Encrypted ZIP entries are not supported.');
+    const mode = (entry.externalFileAttributes >>> 16) & 0xffff;
+    const type = mode & 0o170000;
+    if (type && type !== 0o100000 && type !== 0o040000) throw this.error('ZIP_UNSAFE_ENTRY', 'The ZIP contains an unsupported file type.');
+    if (entry.compressedSize === 0 ? entry.uncompressedSize > 1_024 : entry.uncompressedSize / entry.compressedSize > MAX_COMPRESSION_RATIO) {
+      throw this.error('ZIP_COMPRESSION_RATIO', 'The ZIP has a suspicious compression ratio.');
+    }
+  }
+
+  private matches(name: string, provider: ExportProvider): boolean {
+    const normalized = name.replace(/\\/g, '/').toLowerCase();
+    if (provider === 'doordash') return path.posix.basename(normalized) === 'consumer_order_details.csv';
+    return normalized.includes('/eats/') && /(?:^|\/)user_orders-\d+\.csv$/.test(normalized);
+  }
+
+  private openEntry(zipfile: yauzl.ZipFile, entry: yauzl.Entry): Promise<NodeJS.ReadableStream & AsyncIterable<unknown>> {
+    return new Promise((resolve, reject) => zipfile.openReadStream(entry, (error, stream) => {
+      if (error || !stream) reject(this.error('ZIP_INVALID', 'The ZIP entry could not be read.'));
+      else resolve(stream as NodeJS.ReadableStream & AsyncIterable<unknown>);
+    }));
+  }
+
+  private error(code: string, message: string): AppError {
+    return new AppError({ code, message, publicMessage: message });
   }
 }

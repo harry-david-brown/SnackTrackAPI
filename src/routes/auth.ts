@@ -9,6 +9,7 @@ import { AccountDeletionResult } from '../services/account/AccountDeletionServic
 import { CredentialAuthService } from '../services/auth/CredentialAuthService';
 import { AppleFirstSignInData, ProviderAuthService } from '../services/auth/ProviderAuthService';
 import { SessionService } from '../services/auth/SessionService';
+import { MicrosoftLoginService } from '../services/auth/MicrosoftLoginService';
 import { getDefaultTimezone } from '../utils/timezone';
 
 export interface AuthAccountDeletionOperation {
@@ -18,15 +19,24 @@ export interface AuthAccountDeletionOperation {
 export interface AuthRouterDependencies {
   readonly credentials: Pick<CredentialAuthService, 'register' | 'login'>;
   readonly providers: Pick<ProviderAuthService, 'loginWithGoogle' | 'loginWithApple'>;
+  readonly microsoft: Pick<
+    MicrosoftLoginService,
+    'createAttempt' | 'login' | 'sendVerificationEmail' | 'confirmVerificationEmail'
+  >;
   readonly sessions: Pick<SessionService, 'refresh' | 'revoke'>;
   readonly accountDeletion: AuthAccountDeletionOperation;
   readonly authenticate: RequestHandler;
   readonly rateLimitRegistration: RequestHandler;
+  readonly rateLimitMicrosoftAttempt: RequestHandler;
+  readonly rateLimitMicrosoftEmail: RequestHandler;
+  readonly rateLimitMicrosoftConfirmation: RequestHandler;
 }
 
 const emailField = (body: unknown): string => {
   const email = requireStringField(body, 'email');
-  if (!validateEmail(email)) throw new ValidationError('Invalid email format', 'email');
+  if (email.length > 255 || !validateEmail(email)) {
+    throw new ValidationError('Invalid email format', 'email');
+  }
   return email;
 };
 
@@ -90,6 +100,59 @@ export const createAuthRouter = (dependencies: AuthRouterDependencies): Router =
       res
         .status(200)
         .json(await dependencies.providers.loginWithApple(identityToken, appleUserData(req.body)));
+    }),
+  );
+
+  router.post(
+    '/microsoft/attempt',
+    dependencies.rateLimitMicrosoftAttempt,
+    asyncHandler(async (_req, res) => {
+      res.status(201).json(await dependencies.microsoft.createAttempt());
+    }),
+  );
+
+  router.post(
+    '/microsoft',
+    dependencies.rateLimitMicrosoftAttempt,
+    asyncHandler(async (req, res) => {
+      const identityToken = requireStringField(req.body, 'identityToken', { trim: false });
+      const attemptToken = requireStringField(req.body, 'attemptToken', { trim: false });
+      const result = await dependencies.microsoft.login(identityToken, attemptToken);
+      if (result.status === 'authenticated') {
+        res.status(200).json(result.session);
+        return;
+      }
+      res.status(202).json(result);
+    }),
+  );
+
+  router.post(
+    '/microsoft/email/send',
+    dependencies.rateLimitMicrosoftEmail,
+    asyncHandler(async (req, res) => {
+      const attemptToken = requireStringField(req.body, 'attemptToken', { trim: false });
+      res
+        .status(200)
+        .json(await dependencies.microsoft.sendVerificationEmail(attemptToken, emailField(req.body)));
+    }),
+  );
+
+  router.post(
+    '/microsoft/email/confirm',
+    dependencies.rateLimitMicrosoftConfirmation,
+    asyncHandler(async (req, res) => {
+      const attemptToken = requireStringField(req.body, 'attemptToken', { trim: false });
+      const code = requireStringField(req.body, 'code', { trim: false });
+      if (!/^\d{6}$/.test(code)) throw new ValidationError('Code must be 6 digits', 'code');
+      res
+        .status(200)
+        .json(
+          await dependencies.microsoft.confirmVerificationEmail(
+            attemptToken,
+            emailField(req.body),
+            code,
+          ),
+        );
     }),
   );
 

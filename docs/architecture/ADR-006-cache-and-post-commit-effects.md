@@ -11,10 +11,11 @@ Effects are classified before implementation:
    refresh-token revocation after account deletion, and observability. These run only after commit.
    Cache invalidation is awaited by ordinary mutations; account-deletion cleanup is best effort so a
    committed deletion is never reported as undone. Failures are structured and observable.
-3. **Durable asynchronous effects:** none are currently required. A future effect that must eventually
-   happen despite process loss must use a transactional outbox or durable job table with an idempotency
-   key, attempt count, next-attempt time, terminal state, and operator visibility. An in-memory promise
-   is not acceptable.
+3. **Durable asynchronous effects:** mailbox imports, provider-export imports, scheduled tracking, and
+   import completion notifications use `import_jobs` plus `import_job_outbox`. PostgreSQL records intent
+   and terminal state transactionally; BullMQ/Redis provides bounded delivery and retry. Operation IDs,
+   idempotency keys, attempts, progress, generation fences, and stale-job recovery make process loss
+   visible and recoverable. In-memory promises are not an accepted durable boundary.
 
 Retry and idempotency rules:
 

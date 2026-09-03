@@ -29,6 +29,7 @@ const validPreferenceRow = (overrides = {}) => ({
   last_new_order_at: null,
   last_tracking_error_at: null,
   last_tracking_error_code: null,
+  initial_setup_deferred_until: null,
   ...overrides,
 });
 
@@ -64,6 +65,7 @@ test('provider export reads return both default projections without inserting ro
             updated_at: new Date('2026-08-01T10:00:00.000Z'),
             error_code: null,
             ready_source: null,
+            relevance: 'unknown',
           },
           {
             provider: 'doordash',
@@ -72,6 +74,7 @@ test('provider export reads return both default projections without inserting ro
             updated_at: null,
             error_code: null,
             ready_source: null,
+            relevance: 'unknown',
           },
         ],
       };

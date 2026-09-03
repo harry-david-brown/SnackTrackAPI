@@ -65,12 +65,28 @@ test(
         'receipts',
         'verification_codes',
         'oauth_accounts',
+        'oauth_login_attempts',
         'user_import_preferences',
         'user_export_provider_preferences',
         'user_import_preference_events',
         'gmail_sync_runs',
       ])
         assert.equal(names.has(expected), true, `${expected} should exist`);
+      const guidanceColumns = await pool.query(
+        `SELECT table_name, column_name FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND ((table_name = 'user_import_preferences' AND column_name = 'initial_setup_deferred_until')
+             OR (table_name = 'user_export_provider_preferences' AND column_name = 'relevance'))`,
+      );
+      assert.equal(guidanceColumns.rowCount, 2);
+      const checkpointColumn = await pool.query(
+        `SELECT data_type, column_default, is_nullable FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'import_jobs' AND column_name = 'checkpoint'`,
+      );
+      assert.equal(checkpointColumn.rowCount, 1);
+      assert.equal(checkpointColumn.rows[0].data_type, 'jsonb');
+      assert.equal(checkpointColumn.rows[0].is_nullable, 'NO');
     });
   },
 );
@@ -149,6 +165,20 @@ test(
         [userId],
       );
       assert.deepEqual(provider.rows, [{ provider: 'uber_eats', status: 'file_ready' }]);
+      await pool.query(
+        `UPDATE user_export_provider_preferences SET relevance = 'not_used'
+         WHERE user_id = $1 AND provider = 'uber_eats'`,
+        [userId],
+      );
+      await pool.query(`UPDATE receipts SET receipt_type = 'uber_eats' WHERE id = $1`, [receiptId]);
+      assert.equal(
+        (await pool.query(
+          `SELECT relevance FROM user_export_provider_preferences
+           WHERE user_id = $1 AND provider = 'uber_eats'`,
+          [userId],
+        )).rows[0].relevance,
+        'unknown',
+      );
       const removedLegacyColumns = await pool.query(
         `SELECT column_name FROM information_schema.columns
          WHERE table_schema = current_schema()

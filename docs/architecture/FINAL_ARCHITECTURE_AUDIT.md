@@ -23,7 +23,7 @@ Receipt mutations share the user-scoped ownership lock. Account deletion, onboar
 
 ## Intentional exceptions
 
-1. `POST /csv/import`, multipart field `csvFile`, and the redundant multipart `userId` remain for released-client compatibility. Authenticated token identity is authoritative and ownership is checked. Removal is gated on a versioned provider-export endpoint rollout and the supported-client window recorded in `docs/API_CONTRACT_CATALOG.md`.
+1. The async-import release intentionally removes the mounted `POST /csv/import` compatibility path. Provider exports now use an authenticated upload intent, direct signed object upload, and durable submission under `/imports`; the app and API must deploy together.
 2. PostgreSQL integration tests require `MIGRATION_TEST_DATABASE_URL`. The final local gate ran all 177 API tests against isolated schemas with no skips. Environments without a configured database explicitly skip five integration scenarios rather than silently mocking them.
 3. Live Gmail OAuth, Redis multi-process behavior, SMTP delivery, and physical-device navigation require deployment credentials or external systems. Automated contract, decoder, cache, lock, and failure-policy tests cover their local boundaries; the remaining live checks are listed in `docs/MANUAL_VERIFICATION.md`.
 

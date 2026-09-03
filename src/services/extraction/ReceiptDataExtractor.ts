@@ -12,6 +12,7 @@ import { isDoorDashReceiptEmail, parseDoorDashReceipt } from './DoorDashReceiptP
 interface ExtractionMetadata {
   providerMessageId?: string;
   receivedAt?: Date;
+  mailboxProvider?: 'gmail' | 'microsoft';
 }
 
 // Regex patterns for data extraction
@@ -108,6 +109,7 @@ export class ReceiptDataExtractor {
         subject,
         from,
         providerMessageId: metadata.providerMessageId,
+        mailboxProvider: metadata.mailboxProvider,
       });
       orderId = doorDash.orderId;
       merchant = doorDash.merchant;

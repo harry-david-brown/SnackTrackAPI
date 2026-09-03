@@ -161,6 +161,12 @@ test('authentication route factories validate once and delegate to narrow capabi
       loginWithGoogle: async (token) => ({ token }),
       loginWithApple: async (token, firstSignIn) => ({ token, firstSignIn }),
     },
+    microsoft: {
+      createAttempt: async () => ({ attemptToken: 'attempt', nonce: 'nonce', expiresIn: 600 }),
+      login: async () => ({ status: 'authenticated', session: { provider: 'microsoft' } }),
+      sendVerificationEmail: async () => ({ success: true, expiresIn: 900, resendAfter: 60 }),
+      confirmVerificationEmail: async () => ({ provider: 'microsoft-confirmed' }),
+    },
     sessions: {
       refresh: async (token) => ({ accessToken: token, refreshToken: 'new' }),
       revoke: async () => {},
@@ -168,6 +174,9 @@ test('authentication route factories validate once and delegate to narrow capabi
     accountDeletion: { deleteAccount: async () => ({ deleted: true }) },
     authenticate: pass,
     rateLimitRegistration: pass,
+    rateLimitMicrosoftAttempt: pass,
+    rateLimitMicrosoftEmail: pass,
+    rateLimitMicrosoftConfirmation: pass,
   });
   const google = await invoke(auth, '/google', 'post', { body: { idToken: 'provider-token' } });
   assert.deepEqual(google, { status: 200, body: { token: 'provider-token' } });
@@ -175,6 +184,10 @@ test('authentication route factories validate once and delegate to narrow capabi
     invoke(auth, '/google', 'post', { body: { idToken: 42 } }),
     (error) => error.code === 'VALIDATION_ERROR',
   );
+  const microsoft = await invoke(auth, '/microsoft', 'post', {
+    body: { identityToken: 'signed-token', attemptToken: 'private-attempt' },
+  });
+  assert.deepEqual(microsoft, { status: 200, body: { provider: 'microsoft' } });
 
   const passwords = createPasswordResetRouter({
     passwords: {

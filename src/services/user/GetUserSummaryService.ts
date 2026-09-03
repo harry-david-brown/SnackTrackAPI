@@ -8,6 +8,7 @@ import type {
   WrappedAnalyticsPort,
 } from '../ports/ProjectionPorts';
 import type { ReceiptReadPort } from '../ports/ReceiptPorts';
+import { SingleFlight } from '../core/SingleFlight';
 
 type UserSummaryUserPort = UserProfilePort;
 type UserSummaryReceiptPort = Pick<ReceiptReadPort, 'findByUserId'>;
@@ -23,6 +24,7 @@ const roundMoney = (amount: number): number => Math.round((amount + Number.EPSIL
 
 /** Owns user-summary reads, timezone repair, projection assembly, and cache policy. */
 export class GetUserSummaryService {
+  private readonly singleFlight = new SingleFlight();
   constructor(
     private readonly users: UserSummaryUserPort,
     private readonly receipts: UserSummaryReceiptPort,
@@ -47,6 +49,9 @@ export class GetUserSummaryService {
     const cached = await this.cache.getUserSummary(cacheKey);
     if (cached) return cached;
 
+    return this.singleFlight.run(cacheKey, async () => {
+    const cachedAfterWait = await this.cache.getUserSummary(cacheKey);
+    if (cachedAfterWait) return cachedAfterWait;
     const receipts = await this.receipts.findByUserId(input.userId);
     const totalSpent = roundMoney(receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0));
     const averageSpent = receipts.length > 0 ? roundMoney(totalSpent / receipts.length) : 0;
@@ -127,5 +132,6 @@ export class GetUserSummaryService {
 
     await this.cache.cacheUserSummary(cacheKey, summary);
     return summary;
+    });
   }
 }

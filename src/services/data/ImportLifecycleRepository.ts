@@ -3,6 +3,7 @@ import type {
   ExportReadySource,
   MonitoringConsentState,
   ProviderExportLifecycleStatus,
+  ProviderRelevance,
 } from '../import/ImportLifecycleTypes';
 import type { DatabaseQueryExecutor } from '../ports/DatabasePort';
 import type { ImportEventName, ImportEventRepository } from './ImportEventRepository';
@@ -32,6 +33,47 @@ export class ImportLifecycleRepository {
        ON CONFLICT (user_id, provider) DO NOTHING`,
       [userId],
     );
+  }
+
+  async setInitialSetupDeferral(userId: string, decision: 'defer' | 'resume'): Promise<void> {
+    await this.ensurePreferences(userId);
+    await this.database.query(
+      `UPDATE user_import_preferences
+       SET initial_setup_deferred_until = CASE
+             WHEN $2::VARCHAR(12) = 'defer' THEN NOW() + INTERVAL '7 days'
+             ELSE NULL
+           END,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId, decision],
+    );
+  }
+
+  async setProviderRelevance(
+    userId: string,
+    provider: ExportProvider,
+    relevance: ProviderRelevance,
+  ): Promise<boolean> {
+    await this.ensureProviderPreferences(userId);
+    const result = await this.database.query(
+      `UPDATE user_export_provider_preferences provider_preferences
+       SET relevance = $3::VARCHAR(16), updated_at = NOW()
+       WHERE user_id = $1 AND provider = $2::VARCHAR(24)
+         AND (
+           $3::VARCHAR(16) = 'unknown'
+           OR (
+             provider_preferences.status = 'not_started'
+             AND NOT EXISTS (
+               SELECT 1 FROM receipts
+               WHERE receipts.user_id = $1
+                 AND receipts.receipt_type = $2::VARCHAR(24)
+                 AND receipts.data_source IN ('email', 'csv')
+             )
+           )
+         )`,
+      [userId, provider, relevance],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async setMonitoringConsent(
@@ -71,7 +113,7 @@ export class ImportLifecycleRepository {
     const result = await this.database.query(
       `UPDATE user_export_provider_preferences provider_preferences
        SET status = 'requested', requested_at = NOW(), updated_at = NOW(),
-           error_code = NULL, ready_source = NULL
+           error_code = NULL, ready_source = NULL, relevance = 'unknown'
        WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
       [userId, provider],
     );
@@ -86,6 +128,7 @@ export class ImportLifecycleRepository {
     status: ProviderExportLifecycleStatus,
     errorCode?: string,
     readySource?: ExportReadySource,
+    eventMetadata: Readonly<Record<string, string | number | boolean | null>> = {},
   ): Promise<boolean> {
     await this.ensureProviderPreferences(userId);
     const result = await this.database.query(
@@ -95,6 +138,10 @@ export class ImportLifecycleRepository {
            ready_source = CASE
              WHEN $3::VARCHAR(32) = 'file_ready' THEN $5::VARCHAR(24)
              ELSE ready_source
+           END,
+           relevance = CASE
+             WHEN $3::VARCHAR(32) = 'not_started' THEN relevance
+             ELSE 'unknown'
            END,
            updated_at = NOW()
        WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
@@ -109,7 +156,11 @@ export class ImportLifecycleRepository {
     };
     const eventName = eventNameByStatus[status];
     if ((result.rowCount ?? 0) > 0 && eventName) {
-      await this.events.record(userId, eventName, { provider });
+      await this.events.record(userId, eventName, {
+        provider,
+        ...(errorCode ? { errorCode } : {}),
+        ...eventMetadata,
+      });
     }
     return (result.rowCount ?? 0) > 0;
   }
@@ -124,7 +175,8 @@ export class ImportLifecycleRepository {
              ELSE 'user_confirmed'
            END,
            updated_at = CASE WHEN status = 'file_ready' THEN updated_at ELSE NOW() END,
-           error_code = NULL
+           error_code = NULL,
+           relevance = 'unknown'
        WHERE user_id = $1 AND provider = $2::VARCHAR(24)
          AND status <> 'import_processing'`,
       [userId, provider],
@@ -173,6 +225,17 @@ export class ImportLifecycleRepository {
       `UPDATE user_import_preferences SET tracking_status = 'reconnect_required', updated_at = NOW()
        WHERE user_id = $1 AND ongoing_tracking_consent_state = 'granted'`,
       [userId],
+    );
+  }
+
+  async markTrackingError(userId: string, errorCode: string): Promise<void> {
+    await this.ensurePreferences(userId);
+    await this.database.query(
+      `UPDATE user_import_preferences
+       SET tracking_status = 'error', last_tracking_error_at = NOW(),
+           last_tracking_error_code = $2, updated_at = NOW()
+       WHERE user_id = $1 AND ongoing_tracking_consent_state = 'granted'`,
+      [userId, errorCode.substring(0, 80)],
     );
   }
 }

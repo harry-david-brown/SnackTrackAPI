@@ -2,7 +2,7 @@ import { AppError, AuthenticationError } from '../../core/errors';
 import { AuthProvider } from '../../models/OAuthAccount';
 import { AuthResponse } from '../../models/Token';
 import { User } from '../../models/User';
-import type { AuthTokenPort, AuthUserPort, OAuthIdentityPort } from '../ports/AuthPorts';
+import type { AuthenticationActivityPort, AuthTokenPort, AuthUserPort, OAuthIdentityPort } from '../ports/AuthPorts';
 import { StructuredLogger } from '../core/StructuredLogger';
 import { mapAuthResponse } from './AuthResponseMapper';
 import { IdentityTokenVerifier, VerifiedProviderIdentity } from './IdentityProvider';
@@ -21,6 +21,7 @@ export class ProviderAuthService {
     private readonly google: IdentityTokenVerifier,
     private readonly apple: IdentityTokenVerifier,
     private readonly logger: StructuredLogger,
+    private readonly activity?: AuthenticationActivityPort,
   ) {}
 
   loginWithGoogle(identityToken: string): Promise<AuthResponse> {
@@ -41,6 +42,7 @@ export class ProviderAuthService {
         identityToken,
       );
       const user = await this.resolveUser(provider, identity, fallbackEmail);
+      await this.activity?.recordSuccess(user.id, provider, 'signed_in');
       return mapAuthResponse(user, this.tokens.generateTokens(user));
     } catch (error) {
       const authenticationError =

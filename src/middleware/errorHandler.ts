@@ -68,6 +68,18 @@ export const statusForError = (error: AppError): number => {
     case 'INVALID_CSV_FORMAT':
     case 'UNKNOWN_EXPORT_PROVIDER':
     case 'NO_VALID_EXPORT_ORDERS':
+    case 'UPLOAD_PROVIDER_MISMATCH':
+    case 'UPLOAD_PROVIDER_REQUIRED':
+    case 'UPLOAD_INTEGRITY_FAILED':
+    case 'UNSUPPORTED_UPLOAD_TYPE':
+    case 'ZIP_INVALID':
+    case 'ZIP_UNSAFE_ENTRY':
+    case 'ZIP_ENCRYPTED':
+    case 'ZIP_AMBIGUOUS_EXPORT':
+    case 'ZIP_SIZE_MISMATCH':
+    case 'ZIP_INTEGRITY_FAILED':
+    case 'CSV_HEADER_TOO_LARGE':
+    case 'CSV_ROW_TOO_LARGE':
       return 400;
     case 'AUTHENTICATION_REQUIRED':
     case 'INVALID_CREDENTIALS':
@@ -77,30 +89,65 @@ export const statusForError = (error: AppError): number => {
     case 'REFRESH_TOKEN_INVALID':
     case 'REFRESH_TOKEN_REVOKED':
     case 'PROVIDER_AUTH_FAILED':
+    case 'MICROSOFT_TOKEN_INVALID':
     case 'VERIFICATION_CODE_INVALID':
       return 401;
     case 'AUTHORIZATION_DENIED':
       return 403;
     case 'RATE_LIMIT_EXCEEDED':
+    case 'IMPORT_RATE_LIMITED':
+    case 'MICROSOFT_VERIFICATION_COOLDOWN':
       return 429;
     case 'PAYLOAD_TOO_LARGE':
+    case 'UPLOAD_TOO_LARGE':
+    case 'ARCHIVE_TOO_LARGE':
+    case 'ARCHIVE_ENTRY_TOO_LARGE':
+    case 'ARCHIVE_EXPANSION_LIMIT':
+    case 'ZIP_TOO_MANY_ENTRIES':
+    case 'ZIP_TOO_LARGE':
+    case 'ZIP_OUTPUT_TOO_LARGE':
+    case 'ZIP_COMPRESSION_RATIO':
+    case 'MAILBOX_MESSAGE_TOO_LARGE':
       return 413;
     case 'NOT_FOUND':
     case 'VERIFICATION_CODE_NOT_PENDING':
       return 404;
     case 'CONFLICT':
+    case 'MICROSOFT_ATTEMPT_EXPIRED':
+    case 'MICROSOFT_EMAIL_VERIFICATION_REQUIRED':
+    case 'OAUTH_ACCOUNT_CONFLICT':
     case 'ACCOUNT_ALREADY_EXISTS':
     case 'EMAIL_ALREADY_VERIFIED':
     case 'IMPORT_IN_PROGRESS':
     case 'HISTORICAL_BASELINE_REQUIRED':
     case 'GMAIL_RECONNECT_REQUIRED':
+    case 'OUTLOOK_RECONNECT_REQUIRED':
+    case 'MAILBOX_RECONNECT_REQUIRED':
     case 'TRACKING_NOT_AVAILABLE':
     case 'EXPORT_ALREADY_PROCESSING':
+    case 'UPLOAD_NOT_SUBMITTABLE':
+    case 'IDEMPOTENCY_KEY_REUSED':
+    case 'UPLOAD_CHANGED':
+    case 'UPLOAD_SIZE_MISMATCH':
       return 409;
+    case 'UPLOAD_NOT_FOUND':
+      return 404;
     case 'GMAIL_IMPORT_FAILED':
+    case 'OUTLOOK_IMPORT_FAILED':
+    case 'OUTLOOK_FETCH_FAILED':
+    case 'OUTLOOK_RESPONSE_INVALID':
+    case 'OUTLOOK_RESULT_LIMIT':
+    case 'OUTLOOK_OAUTH_FAILED':
     case 'EXPORT_IMPORT_FAILED':
       return 502;
     case 'GMAIL_VALIDATION_UNAVAILABLE':
+    case 'OUTLOOK_VALIDATION_UNAVAILABLE':
+    case 'OUTLOOK_UNAVAILABLE':
+    case 'MAILBOX_VALIDATION_UNAVAILABLE':
+    case 'MICROSOFT_AUTH_UNAVAILABLE':
+    case 'IMPORT_QUEUE_FULL':
+    case 'SESSION_STORE_UNAVAILABLE':
+    case 'LOCK_BACKEND_UNAVAILABLE':
       return 503;
     case 'DATABASE_UNAVAILABLE':
       return 503;

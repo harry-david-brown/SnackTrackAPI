@@ -8,11 +8,19 @@ import type {
   MonitoringConsentState,
   ProviderExportLifecycleStatus,
   ProviderExportPreference,
+  ProviderRelevance,
+  ImportSetupGuidance,
   SyncRunCounts,
   TrackingBaseline,
 } from '../import/ImportLifecycleTypes';
 import type { GmailConnectionMode } from '../import/GmailConnectionContracts';
 import type { ImportLockHandle } from '../import/ImportLockService';
+import type {
+  MailboxImportState,
+  MicrosoftMailboxConnection,
+  MicrosoftMailboxConnectionStatus,
+} from '../mailbox/MailboxConnection';
+import type { MicrosoftMailboxHealthResult } from '../mailbox/MicrosoftMailboxConnectionHealthService';
 
 export interface MailboxUserPort {
   findById(userId: string): Promise<User | undefined>;
@@ -34,6 +42,12 @@ export interface MailboxUserPort {
 }
 
 export interface ImportLifecyclePort {
+  setInitialSetupDeferral(userId: string, decision: 'defer' | 'resume'): Promise<void>;
+  setProviderRelevance(
+    userId: string,
+    provider: ExportProvider,
+    relevance: ProviderRelevance,
+  ): Promise<boolean>;
   setMonitoringConsent(
     userId: string,
     decision: Exclude<MonitoringConsentState, 'not_offered'>,
@@ -51,14 +65,17 @@ export interface ImportLifecyclePort {
     status: ProviderExportLifecycleStatus,
     errorCode?: string,
     readySource?: ExportReadySource,
+    eventMetadata?: Readonly<Record<string, string | number | boolean | null>>,
   ): Promise<boolean>;
   confirmExportReady(userId: string, provider: ExportProvider): Promise<boolean>;
   markTrackingReconnectRequired(userId: string): Promise<void>;
+  markTrackingError(userId: string, errorCode: string): Promise<void>;
 }
 
 export interface ImportPreferencesQueryPort {
   get(userId: string): Promise<ImportPreferences>;
   getProviderExports(userId: string): Promise<Record<ExportProvider, ProviderExportPreference>>;
+  getSetupGuidance(userId: string): Promise<ImportSetupGuidance>;
   getOrdersAddedThisWeek(userId: string, timezone: string): Promise<number>;
   getTrackingBaseline(userId: string): Promise<TrackingBaseline>;
   getEligibleTrackingUserIds(limit?: number): Promise<string[]>;
@@ -90,4 +107,41 @@ export interface ReceiptWriterLockPort {
   acquireLock(userId: string): Promise<ImportLockHandle | null>;
   assertLockOwned(handle: ImportLockHandle): Promise<void>;
   releaseLock(handle: ImportLockHandle): Promise<boolean>;
+}
+
+export interface MicrosoftMailboxConnectionPort {
+  findMicrosoft(userId: string): Promise<MicrosoftMailboxConnection | undefined>;
+  getMicrosoftImportState(userId: string): Promise<MailboxImportState>;
+  markMicrosoftReconnectRequired(userId: string): Promise<void>;
+}
+
+export interface MicrosoftMailboxHealthPort {
+  validate(
+    userId: string,
+    force?: boolean,
+  ): Promise<{
+    connection: MicrosoftMailboxConnection | undefined;
+    health: MicrosoftMailboxHealthResult;
+  }>;
+  buildStatus(
+    connection: MicrosoftMailboxConnection | undefined,
+    health: MicrosoftMailboxHealthResult,
+  ): MicrosoftMailboxConnectionStatus;
+}
+
+export interface MicrosoftMailboxSyncRunPort {
+  startSyncRun(userId: string, trigger: 'manual' | 'background'): Promise<string>;
+  completeSyncRun(
+    runId: string,
+    userId: string,
+    outcome: 'success' | 'partial',
+    counts: SyncRunCounts,
+    trigger: 'manual' | 'background',
+  ): Promise<void>;
+  failSyncRun(
+    runId: string,
+    userId: string,
+    errorCode: string,
+    trigger: 'manual' | 'background',
+  ): Promise<void>;
 }

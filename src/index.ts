@@ -7,10 +7,13 @@ import { createPasswordResetRouter } from './routes/authPasswordReset';
 import { createEmailVerificationRouter } from './routes/authEmailVerification';
 import { createUsersRouter } from './routes/users';
 import { createReceiptsRouter } from './routes/receipts';
-import { createCsvRouter } from './routes/csv';
+import { createImportsRouter, createNotificationDeviceRouter } from './routes/imports';
 import { createDatabaseRouter } from './routes/database';
 import { createMonitoringRouter } from './routes/monitoring';
+import { createAdminRouter } from './routes/admin';
+import { createAnalyticsEventsRouter } from './routes/analyticsEvents';
 import { createGmailRouter } from './routes/gmail';
+import { createOutlookRouter } from './routes/outlook';
 import { config } from './config/AppConfig';
 import { asyncHandler, errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
@@ -30,18 +33,28 @@ import {
   progressiveSlowDown,
   userCreationRateLimit,
   validateApiKey,
+  validateSchedulerApiKey,
+  adminAuthenticationRateLimit,
   csvImportRateLimit,
   passwordResetIPRateLimit,
   passwordResetRequestRateLimit,
   emailVerificationSendRateLimit,
   otpVerificationRateLimit,
+  microsoftAuthAttemptRateLimit,
+  microsoftAuthEmailRateLimit,
+  importStartIpRateLimit,
 } from './middleware/security';
+import {
+  createAuthenticateAdmin,
+  createRequireAdminCsrf,
+  createRequireAdminRole,
+  requireAdminOrigin,
+} from './middleware/adminAuth';
 import { createRequestLogger } from './middleware/requestLogger';
 import { requestContext } from './middleware/requestContext';
 import { createAuthenticateToken, validateOwnership } from './middleware/auth';
 import { paginationMiddleware } from './middleware/pagination';
 import { validateUUIDParam } from './middleware/validation';
-import { concurrencyLimiter } from './middleware/concurrencyLimiter';
 
 const app = express();
 
@@ -50,6 +63,8 @@ const authenticateToken = createAuthenticateToken({
   observability: sentryConfig,
   logger,
 });
+const authenticateAdmin = createAuthenticateAdmin(container.adminAuthService);
+const requireAdminCsrf = createRequireAdminCsrf(container.adminAuthService);
 
 // Initialize Sentry (must be first, before any middleware)
 sentryConfig.initialize(app);
@@ -83,7 +98,6 @@ app.use(
     },
   }),
 );
-
 // Body parsing (with size limits)
 app.use(express.json({ limit: config.isProduction() ? '10mb' : '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: config.isProduction() ? '10mb' : '50mb' }));
@@ -190,16 +204,25 @@ app.get('/auth/callback', (req: Request, res: Response) => {
 // Setup Swagger documentation
 setupSwagger(app);
 
+app.use(
+  ['/gmail/import', '/outlook/import', '/gmail/tracking/check', '/imports/exports/uber-eats/upload-intent', '/imports/exports/doordash/upload-intent'],
+  importStartIpRateLimit,
+);
+
 // Mount API routes
 app.use(
   '/auth',
   createAuthRouter({
     credentials: container.credentialAuthService,
     providers: container.providerAuthService,
+    microsoft: container.microsoftLoginService,
     sessions: container.sessionService,
     accountDeletion: container.accountDeletionService,
     authenticate: authenticateToken,
     rateLimitRegistration: userCreationRateLimit,
+    rateLimitMicrosoftAttempt: microsoftAuthAttemptRateLimit,
+    rateLimitMicrosoftEmail: microsoftAuthEmailRateLimit,
+    rateLimitMicrosoftConfirmation: otpVerificationRateLimit,
   }),
 );
 app.use(
@@ -240,24 +263,52 @@ app.use(
     clearReceipts: container.receiptClearService,
   }),
 );
-app.use(
-  '/csv',
-  createCsvRouter({
-    authenticate: authenticateToken,
-    rateLimit: csvImportRateLimit,
-    limitConcurrency: concurrencyLimiter,
-    authorizeOwnership: validateOwnership,
-    zip: container.zipExtractor,
-    importCsv: container.csvImportUseCase,
-    logger,
-  }),
-);
+app.use('/imports', createImportsRouter({
+  authenticate: authenticateToken,
+  rateLimit: csvImportRateLimit,
+  operations: container.importJobRepository,
+  jobs: container.importJobService,
+}));
+app.use('/notifications', createNotificationDeviceRouter({
+  authenticate: authenticateToken,
+  devices: container.pushDeviceRepository,
+}));
 app.use(
   '/database',
   createDatabaseRouter({
     authorizeAdministrator: validateApiKey,
     administrator: container.administratorService,
     accountDeletion: container.accountDeletionService,
+  }),
+);
+app.use(
+  '/analytics/events',
+  createAnalyticsEventsRouter({
+    authenticate: authenticateToken,
+    events: container.analyticsEventService,
+  }),
+);
+app.use(
+  '/admin/v1',
+  requireAdminOrigin(config.getSecurityConfig().adminDashboardUrl),
+  (req, res, next) => {
+    if (req.path === '/auth/login' || req.path === '/auth/forgot-password' || req.path === '/auth/reset-password') {
+      return adminAuthenticationRateLimit(req, res, next);
+    }
+    next();
+  },
+  createAdminRouter({
+    auth: container.adminAuthService,
+    analytics: container.adminAnalyticsQueryService,
+    management: container.adminManagementService,
+    authenticate: authenticateAdmin,
+    requireCsrf: requireAdminCsrf,
+    requireOwner: createRequireAdminRole('owner'),
+    requireOperator: createRequireAdminRole('operator'),
+    databaseHealth: container.databaseHealthService,
+    cache: container.cacheService,
+    alerting: container.alertingService,
+    production: config.isProduction(),
   }),
 );
 app.use(
@@ -274,13 +325,25 @@ app.use(
   '/gmail',
   createGmailRouter({
     authenticate: authenticateToken,
-    validateScheduler: validateApiKey,
+    validateScheduler: validateSchedulerApiKey,
     connections: container.gmailConnectionService,
     preferences: container.importPreferencesService,
     manualCheck: container.manualTrackingCheckService,
-    scheduledTracking: container.ongoingTrackingService,
+    scheduledTracking: container.scheduledImportJobService,
+    importJobs: container.importJobService,
     status: container.importStatusService,
     historicalImport: container.historicalGmailImportService,
+    logger,
+  }),
+);
+app.use(
+  '/outlook',
+  createOutlookRouter({
+    authenticate: authenticateToken,
+    connections: container.microsoftMailboxConnectionService,
+    health: container.microsoftMailboxConnectionHealthService,
+    historicalImport: container.historicalOutlookImportService,
+    importJobs: container.importJobService,
     logger,
   }),
 );
@@ -295,15 +358,10 @@ const PORT = config.getServerPort();
 // Initialize database and start server
 async function startServer() {
   try {
-    const migrationResult = await container.migrationRunner.run();
-    logger.info('Database migrations ready', {
-      appliedVersions: migrationResult.applied,
-      existingVersions: migrationResult.alreadyApplied,
-    });
-
     // Initialize Redis cache (optional, won't fail if unavailable)
     await redisConfig.initialize();
     container.alertingService.start();
+    if (config.isAnalyticsMaintenanceEnabled()) container.analyticsMaintenanceService.start();
 
     // Start the server
     const server = app.listen(PORT, () => {
@@ -317,36 +375,9 @@ async function startServer() {
       }
     });
 
-    // In production, ongoing tracking runs hourly by default. Set
-    // TRACKING_SYNC_INTERVAL_MINUTES=0 when an external scheduler calls the
-    // protected batch endpoint instead.
-    const trackingIntervalMinutes = config.getTrackingIntervalMinutes();
-    const trackingTimer =
-      trackingIntervalMinutes > 0
-        ? setInterval(
-            () => {
-              void container.ongoingTrackingService
-                .runEligibleBatch(100)
-                .then((result) => logger.info('Ongoing Gmail tracking batch completed', result))
-                .catch((error) =>
-                  logger.error('Ongoing Gmail tracking batch failed', {
-                    error: error instanceof Error ? error.message : String(error),
-                  }),
-                );
-            },
-            trackingIntervalMinutes * 60 * 1000,
-          )
-        : null;
-    trackingTimer?.unref();
-
     const shutdown = new ShutdownCoordinator([
-      {
-        name: 'tracking timer',
-        close: () => {
-          if (trackingTimer) clearInterval(trackingTimer);
-        },
-      },
       { name: 'alert monitoring', close: () => container.alertingService.close() },
+      { name: 'analytics maintenance', close: () => container.analyticsMaintenanceService.close() },
       {
         name: 'HTTP server',
         close: () =>
@@ -355,6 +386,7 @@ async function startServer() {
           }),
       },
       { name: 'Redis connection', close: () => redisConfig.close() },
+      { name: 'Import object storage', close: () => container.importObjectStorage.close() },
       { name: 'PostgreSQL connection', close: () => postgresService.close() },
       { name: 'Sentry transport', close: () => Sentry.close(2000).then(() => undefined) },
     ]);
@@ -390,6 +422,7 @@ async function startServer() {
       stack: error instanceof Error ? error.stack : undefined,
     });
     container.alertingService.close();
+    container.analyticsMaintenanceService.close();
     await Promise.allSettled([redisConfig.close(), postgresService.close(), Sentry.close(2000)]);
     process.exitCode = 1;
   }

@@ -137,6 +137,12 @@ test('source coverage repository validates and maps aggregate database fields', 
         {
           email_count: '2',
           export_count: 1,
+          uber_eats_email_count: 1,
+          doordash_email_count: 1,
+          uber_eats_email_earliest: new Date('2025-01-01T00:00:00.000Z'),
+          uber_eats_email_latest: new Date('2025-01-02T00:00:00.000Z'),
+          doordash_email_earliest: new Date('2025-02-01T00:00:00.000Z'),
+          doordash_email_latest: new Date('2025-02-02T00:00:00.000Z'),
           uber_eats_export_count: 0,
           doordash_export_count: '1',
           uber_eats_export_earliest: null,
@@ -151,6 +157,8 @@ test('source coverage repository validates and maps aggregate database fields', 
   const result = await repository.getForUser('user-id');
 
   assert.equal(result.emailReceiptCount, 2);
+  assert.equal(result.emailProviders.uberEats.receiptCount, 1);
+  assert.equal(result.emailProviders.doorDash.receiptCount, 1);
   assert.equal(result.exportProviders.doorDash.receiptCount, 1);
   assert.equal(result.exportProviders.doorDash.earliestOrderDate, '2026-01-01T00:00:00.000Z');
 });
@@ -162,6 +170,12 @@ test('source coverage repository rejects malformed database rows', async () => {
         {
           email_count: '-1',
           export_count: 0,
+          uber_eats_email_count: 0,
+          doordash_email_count: 0,
+          uber_eats_email_earliest: null,
+          uber_eats_email_latest: null,
+          doordash_email_earliest: null,
+          doordash_email_latest: null,
           uber_eats_export_count: 0,
           doordash_export_count: 0,
           uber_eats_export_earliest: null,

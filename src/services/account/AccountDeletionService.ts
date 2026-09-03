@@ -25,6 +25,25 @@ interface AccountDeletionLogger {
   warn(message: string, metadata: Readonly<Record<string, unknown>>): void;
 }
 
+interface AccountDeletionAudit {
+  appendAudit(input: {
+    actorAdminId?: string;
+    action: string;
+    targetType: string;
+    targetId?: string;
+    reason?: string;
+    requestId?: string;
+    outcome: 'success' | 'failure';
+    metadata?: Record<string, unknown>;
+  }, executor: import('../ports/DatabasePort').DatabaseQueryExecutor): Promise<void>;
+}
+
+export interface AccountDeletionContext {
+  readonly actorAdminId: string;
+  readonly reason: string;
+  readonly requestId?: string;
+}
+
 const silentLogger: AccountDeletionLogger = { warn: () => undefined };
 
 export interface AccountDeletionResult {
@@ -40,9 +59,14 @@ export class AccountDeletionService {
     private readonly tokenRevoker: RefreshTokenRevoker,
     private readonly accountLock: AccountDeletionLock = ImportLockService,
     private readonly logger: AccountDeletionLogger = silentLogger,
+    private readonly audit?: AccountDeletionAudit,
   ) {}
 
-  async deleteAccount(userId: string, refreshToken?: string): Promise<AccountDeletionResult> {
+  async deleteAccount(
+    userId: string,
+    refreshToken?: string,
+    adminContext?: AccountDeletionContext,
+  ): Promise<AccountDeletionResult> {
     const lockHandle = await this.accountLock.acquireLockWithWait(userId, 300000);
     if (!lockHandle) {
       throw new ConflictError(
@@ -61,12 +85,30 @@ export class AccountDeletionService {
           ? databaseString(databaseRow(userResult.rows[0], 'account deletion user'), 'email')
           : undefined;
 
+        if (!email) throw new NotFoundError('User', userId);
+
         // Verification codes are keyed by email rather than user_id and are
         // therefore not covered by the users ON DELETE CASCADE graph.
-        if (email) {
-          await transaction.query('DELETE FROM verification_codes WHERE email = $1', [email]);
-          const deleteResult = await transaction.query('DELETE FROM users WHERE id = $1', [userId]);
-          if (!deleteResult.rowCount) throw new NotFoundError('User', userId);
+        await transaction.query(
+          `INSERT INTO analytics_events
+           (event_id,event_name,schema_version,occurred_at,user_id,source,platform,properties)
+           VALUES (gen_random_uuid(),'account_deleted',1,NOW(),$1,'server','server','{}'::jsonb)`,
+          [userId],
+        );
+        await transaction.query('DELETE FROM verification_codes WHERE email = $1', [email]);
+        const deleteResult = await transaction.query('DELETE FROM users WHERE id = $1', [userId]);
+        if (!deleteResult.rowCount) throw new NotFoundError('User', userId);
+
+        if (adminContext && this.audit) {
+          await this.audit.appendAudit({
+            actorAdminId: adminContext.actorAdminId,
+            action: 'user.delete',
+            targetType: 'user',
+            targetId: userId,
+            reason: adminContext.reason,
+            requestId: adminContext.requestId,
+            outcome: 'success',
+          }, transaction);
         }
 
         await this.accountLock.assertLockOwned(lockHandle);

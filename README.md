@@ -119,12 +119,20 @@ curl -X POST http://localhost:3000/auth/register \
 
 ### 4. Import Your Data
 ```bash
-# Upload Uber Eats CSV file
-curl -X POST http://localhost:3000/csv/import \
+# 1. Create a durable upload operation and signed object-storage URL.
+curl -X POST http://localhost:3000/imports/exports/uber-eats/upload-intent \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -F "csvFile=@path/to/your/uber-data.csv" \
-  -F "userId=YOUR_USER_ID"
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: export-EXAMPLE" \
+  -d '{"filename":"uber-data.csv","contentType":"text/csv","contentLength":12345}'
+
+# 2. PUT the file bytes to uploadUrl from that response using its headers.
+# 3. Queue processing after the upload succeeds.
+curl -X POST http://localhost:3000/imports/OPERATION_ID/submit \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
+
+Poll `GET /imports/OPERATION_ID`, or register an Expo push device, for the terminal result.
 
 ### 5. View Your Analytics
 ```bash
@@ -226,9 +234,14 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 
 ### Data Import
 #### CSV/ZIP Upload
-- `POST /csv/import` - Import Uber Eats CSV/ZIP file
+- `POST /imports/exports/uber-eats/upload-intent` - Create an Uber Eats upload operation and signed URL
+- `POST /imports/exports/doordash/upload-intent` - Create a DoorDash upload operation and signed URL
+- `POST /imports/:id/upload-url` - Refresh the signed URL before submission
+- `POST /imports/:id/submit` - Validate the uploaded object and queue processing
+- `GET /imports/:id` - Read durable progress and the terminal result
+- `GET /imports/active` - Read the account's active operation
   - **Requires:** `Authorization: Bearer {token}`
-  - Form data: `csvFile` (file), `userId` (string)
+  - CSV is limited to 10 MB and ZIP is limited to 50 MB
 
 #### Gmail Integration (NEW! 🎉)
 **Connection Flow:**
@@ -241,9 +254,9 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 - `GET /gmail/status` - Check Gmail connection status
   - **Requires:** `Authorization: Bearer {token}`
   - Returns connection mode and import readiness state
-- `GET /gmail/import/status` - Check whether an import is already in progress
+- `GET /imports/active` - Check whether any account import is active
   - **Requires:** `Authorization: Bearer {token}`
-- `POST /gmail/import` - Import Uber Eats receipts from Gmail
+- `POST /gmail/import` - Queue a historical Gmail receipt import (`202 { operation }`)
   - **Requires:** `Authorization: Bearer {token}`
 - `POST /gmail/disconnect` - Disconnect Gmail account
   - **Requires:** `Authorization: Bearer {token}`

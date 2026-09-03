@@ -160,3 +160,45 @@ test('export-ready detection records provider lifecycle before projecting state'
   assert.deepEqual(result, { detected: true, preferences: projection });
   assert.deepEqual(events, ['provider', 'write:uber_eats:file_ready:detected_email', 'projection']);
 });
+
+test('provider relevance rejects receipt-backed usage evidence', async () => {
+  const service = new ImportPreferencesService(
+    { setProviderRelevance: async () => false },
+    {},
+    { getPreferences: async () => projection },
+    {},
+    {
+      getForUser: async () => ({
+        emailProviders: { uberEats: { hasData: true }, doorDash: { hasData: false } },
+        exportProviders: { uberEats: { hasData: false }, doorDash: { hasData: false } },
+      }),
+    },
+    undefined,
+  );
+
+  await assert.rejects(
+    service.setProviderRelevance('user-id', 'uber_eats', 'not_used'),
+    (error) => error.code === 'PROVIDER_USAGE_EVIDENCE_EXISTS',
+  );
+});
+
+test('provider relevance distinguishes an active workflow from usage evidence', async () => {
+  const service = new ImportPreferencesService(
+    { setProviderRelevance: async () => false },
+    {},
+    { getPreferences: async () => projection },
+    {},
+    {
+      getForUser: async () => ({
+        emailProviders: { uberEats: { hasData: false }, doorDash: { hasData: false } },
+        exportProviders: { uberEats: { hasData: false }, doorDash: { hasData: false } },
+      }),
+    },
+    undefined,
+  );
+
+  await assert.rejects(
+    service.setProviderRelevance('user-id', 'uber_eats', 'not_used'),
+    (error) => error.code === 'PROVIDER_WORKFLOW_ACTIVE',
+  );
+});

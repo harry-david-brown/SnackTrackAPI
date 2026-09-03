@@ -7,6 +7,7 @@ import type {
   OngoingTrackingStatus,
   ProviderExportLifecycleStatus,
   ProviderExportPreference,
+  ImportSetupGuidance,
   TrackingBaseline,
 } from '../import/ImportLifecycleTypes';
 import {
@@ -16,6 +17,7 @@ import {
   MONITORING_CONSENT_STATES,
   ONGOING_TRACKING_STATUSES,
   PROVIDER_EXPORT_LIFECYCLE_STATUSES,
+  PROVIDER_RELEVANCE_VALUES,
   resolveTrackingBaseline,
 } from '../import/ImportLifecycleTypes';
 import type { DatabaseQueryExecutor } from '../ports/DatabasePort';
@@ -61,6 +63,7 @@ const mapPreferences = (value: unknown): ImportPreferences => {
     lastNewOrderAt: databaseTimestamp(row, 'last_new_order_at'),
     lastTrackingErrorAt: databaseTimestamp(row, 'last_tracking_error_at'),
     lastTrackingErrorCode: databaseNullableString(row, 'last_tracking_error_code'),
+    initialSetupDeferredUntil: databaseTimestamp(row, 'initial_setup_deferred_until'),
   };
 };
 
@@ -73,6 +76,7 @@ const mapProvider = (value: unknown): ProviderExportPreference => {
     updatedAt: databaseTimestamp(row, 'updated_at'),
     errorCode: databaseNullableString(row, 'error_code'),
     readySource: databaseNullableEnum(row, 'ready_source', EXPORT_READY_SOURCES),
+    relevance: databaseEnum(row, 'relevance', PROVIDER_RELEVANCE_VALUES),
   };
 };
 
@@ -96,7 +100,8 @@ export class ImportPreferencesQueryRepository {
               COALESCE(preferences.tracking_status, 'inactive') AS tracking_status,
               preferences.last_check_attempt_at, preferences.last_successful_check_at,
               preferences.last_stats_updated_at, preferences.last_new_order_at,
-              preferences.last_tracking_error_at, preferences.last_tracking_error_code
+              preferences.last_tracking_error_at, preferences.last_tracking_error_code,
+              preferences.initial_setup_deferred_until
        FROM (SELECT $1::UUID AS user_id) input
        LEFT JOIN user_import_preferences preferences ON preferences.user_id = input.user_id`,
       [userId],
@@ -130,6 +135,14 @@ export class ImportPreferencesQueryRepository {
                 ELSE preferences.updated_at
               END AS updated_at,
               preferences.error_code, preferences.ready_source
+              , CASE WHEN EXISTS (
+                  SELECT 1 FROM receipts usage_receipt
+                  WHERE usage_receipt.user_id = $1
+                    AND usage_receipt.receipt_type = providers.provider
+                    AND usage_receipt.data_source IN ('email', 'csv')
+                ) THEN 'unknown'
+                ELSE COALESCE(preferences.relevance, 'unknown')
+                END AS relevance
        FROM (VALUES ('uber_eats'::VARCHAR(24)), ('doordash'::VARCHAR(24))) providers(provider)
        LEFT JOIN user_export_provider_preferences preferences
          ON preferences.user_id = $1 AND preferences.provider = providers.provider`,
@@ -142,6 +155,19 @@ export class ImportPreferencesQueryRepository {
       throw new Error('Invalid database result: both export providers are required');
     }
     return { uber_eats: uberEats, doordash: doorDash };
+  }
+
+  async getSetupGuidance(userId: string): Promise<ImportSetupGuidance> {
+    const result = await this.database.query(
+      `SELECT preferences.initial_setup_deferred_until
+       FROM (SELECT $1::UUID AS user_id) input
+       LEFT JOIN user_import_preferences preferences ON preferences.user_id = input.user_id`,
+      [userId],
+    );
+    const row = databaseRow(result.rows[0], 'import setup guidance');
+    return {
+      initialSetupDeferredUntil: databaseTimestamp(row, 'initial_setup_deferred_until'),
+    };
   }
 
   async getOrdersAddedThisWeek(userId: string, timezone: string): Promise<number> {
@@ -159,6 +185,7 @@ export class ImportPreferencesQueryRepository {
   async getTrackingBaseline(userId: string): Promise<TrackingBaseline> {
     const result = await this.database.query(
       `SELECT preferences.gmail_baseline_completed_at,
+              outlook.baseline_completed_at AS outlook_baseline_completed_at,
               COUNT(*) FILTER (
                 WHERE receipts.data_source = 'csv' AND receipts.receipt_type = 'uber_eats'
               )::int AS uber_eats_export_count,
@@ -167,13 +194,16 @@ export class ImportPreferencesQueryRepository {
               )::int AS doordash_export_count
        FROM (SELECT $1::UUID AS user_id) input
        LEFT JOIN user_import_preferences preferences ON preferences.user_id = input.user_id
+       LEFT JOIN mailbox_import_states outlook
+         ON outlook.user_id = input.user_id AND outlook.provider = 'microsoft'
        LEFT JOIN receipts ON receipts.user_id = input.user_id
-       GROUP BY preferences.gmail_baseline_completed_at`,
+       GROUP BY preferences.gmail_baseline_completed_at, outlook.baseline_completed_at`,
       [userId],
     );
     const row = databaseRow(result.rows[0], 'tracking baseline');
     return resolveTrackingBaseline({
       gmailBaselineCompletedAt: databaseTimestamp(row, 'gmail_baseline_completed_at'),
+      outlookBaselineCompletedAt: databaseTimestamp(row, 'outlook_baseline_completed_at'),
       uberEatsExportCount: databaseNonNegativeInteger(row, 'uber_eats_export_count'),
       doorDashExportCount: databaseNonNegativeInteger(row, 'doordash_export_count'),
     });
@@ -188,6 +218,12 @@ export class ImportPreferencesQueryRepository {
          AND (
            preferences.gmail_baseline_completed_at IS NOT NULL
            OR EXISTS (
+               SELECT 1 FROM mailbox_import_states mailbox_state
+               WHERE mailbox_state.user_id = preferences.user_id
+                 AND mailbox_state.provider = 'microsoft'
+                 AND mailbox_state.baseline_completed_at IS NOT NULL
+             )
+           OR EXISTS (
                SELECT 1 FROM receipts uber_receipt
                WHERE uber_receipt.user_id = preferences.user_id
                  AND uber_receipt.data_source = 'csv'
@@ -200,9 +236,20 @@ export class ImportPreferencesQueryRepository {
                  AND doordash_receipt.receipt_type = 'doordash'
              )
          )
-         AND users.gmail_connected = TRUE
-         AND users.gmail_connection_mode = 'offline'
-         AND users.gmail_refresh_token IS NOT NULL
+         AND (
+           (
+             users.gmail_connected = TRUE
+             AND users.gmail_connection_mode = 'offline'
+             AND users.gmail_refresh_token IS NOT NULL
+           )
+           OR EXISTS (
+             SELECT 1 FROM mailbox_connections mailbox
+             WHERE mailbox.user_id = preferences.user_id
+               AND mailbox.provider = 'microsoft'
+               AND mailbox.status = 'connected'
+               AND mailbox.connection_mode = 'offline'
+           )
+         )
          AND (preferences.last_check_attempt_at IS NULL OR preferences.last_check_attempt_at <= NOW() - INTERVAL '15 minutes')
        ORDER BY preferences.last_check_attempt_at ASC NULLS FIRST
        LIMIT $1`,

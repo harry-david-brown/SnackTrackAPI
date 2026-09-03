@@ -92,6 +92,7 @@ export class ReceiptEmailBatchExtractor {
       subject: email.subject,
       providerMessageId: email.providerMessageId,
       receivedAt: email.receivedAt,
+      mailboxProvider: email.provider,
     };
   }
 

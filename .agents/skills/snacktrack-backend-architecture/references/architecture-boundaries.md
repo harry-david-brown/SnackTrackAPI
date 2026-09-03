@@ -59,13 +59,13 @@ Avoid:
 
 ## Composition and dependency injection
 
-`src/services/core/ServiceContainer.ts` is the current composition root. New dependencies should be explicit and typed.
+`src/services/core/ServiceContainer.ts` is the typed process-wide composition root. Application-facing capability contracts live in `src/services/ports/`.
 
 - Prefer constructor injection for stateful services and parameter injection for small pure operations.
 - Depend on the narrow capability needed, not an oversized service.
 - Create interfaces/types at volatile or test-substitutable boundaries: persistence, clock, ID generation, cache, provider, mail, and external filesystem/network access.
 - Do not create an interface that has one implementation and no boundary value solely to satisfy a pattern.
-- Do not add new string keys or `Map<string, any>` lookups. Move touched registrations toward typed properties/factories without requiring an all-at-once container rewrite.
+- Do not reintroduce string-keyed lookup, `getInstance`, `Map<string, any>`, or application imports of concrete data/cache/provider adapters.
 - Construct long-lived clients once when their lifecycle is application-wide; clean them up through the application shutdown path.
 
 ## Module cohesion

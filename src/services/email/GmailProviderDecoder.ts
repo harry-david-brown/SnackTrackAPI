@@ -37,17 +37,24 @@ export interface DecodedGmailMessage {
   readonly internalDate?: string;
   readonly snippet?: string;
   readonly payload?: DecodedGmailPart;
+  readonly sizeEstimate?: number;
 }
 
-const decodeHeader = (value: unknown, field: string): DecodedGmailHeader => {
+const decodeHeader = (value: unknown, field: string, state: { headerBytes: number }): DecodedGmailHeader => {
   const header = record(value, field);
   const name = optionalString(header.name, `${field}.name`);
   const headerValue = optionalString(header.value, `${field}.value`);
   if (name === undefined || headerValue === undefined) return invalid(field);
+  const bytes = Buffer.byteLength(name) + Buffer.byteLength(headerValue);
+  state.headerBytes += bytes;
+  if (bytes > 16 * 1024 || state.headerBytes > 256 * 1024) return invalid(field);
   return { name, value: headerValue };
 };
 
-const decodePart = (value: unknown, field: string): DecodedGmailPart => {
+const decodePart = (value: unknown, field: string, state: { parts: number; headers: number; headerBytes: number }, depth: number): DecodedGmailPart => {
+  if (depth > 20) return invalid(`${field}.depth`);
+  state.parts += 1;
+  if (state.parts > 250) return invalid(`${field}.parts`);
   const part = record(value, field);
   const rawHeaders: unknown[] = Array.isArray(part.headers ?? [])
     ? ((part.headers as unknown[] | undefined) ?? [])
@@ -55,13 +62,16 @@ const decodePart = (value: unknown, field: string): DecodedGmailPart => {
   const rawParts: unknown[] = Array.isArray(part.parts ?? [])
     ? ((part.parts as unknown[] | undefined) ?? [])
     : invalid(`${field}.parts`);
+  state.headers += rawHeaders.length;
+  if (state.headers > 250) return invalid(`${field}.headers`);
   const body =
     part.body === undefined || part.body === null ? undefined : record(part.body, `${field}.body`);
+  if (typeof body?.data === 'string' && body.data.length > 1_500_000) return invalid(`${field}.body.data`);
   return {
     mimeType: optionalString(part.mimeType, `${field}.mimeType`),
     bodyData: optionalString(body?.data, `${field}.body.data`),
-    headers: rawHeaders.map((entry, index) => decodeHeader(entry, `${field}.headers.${index}`)),
-    parts: rawParts.map((entry, index) => decodePart(entry, `${field}.parts.${index}`)),
+    headers: rawHeaders.map((entry, index) => decodeHeader(entry, `${field}.headers.${index}`, state)),
+    parts: rawParts.map((entry, index) => decodePart(entry, `${field}.parts.${index}`, state, depth + 1)),
   };
 };
 
@@ -75,7 +85,8 @@ export const decodeGmailMessage = (value: unknown): DecodedGmailMessage => {
     payload:
       data.payload === undefined || data.payload === null
         ? undefined
-        : decodePart(data.payload, 'messageResponse.data.payload'),
+        : decodePart(data.payload, 'messageResponse.data.payload', { parts: 0, headers: 0, headerBytes: 0 }, 0),
+    sizeEstimate: typeof data.sizeEstimate === 'number' && Number.isFinite(data.sizeEstimate) ? data.sizeEstimate : undefined,
   };
 };
 

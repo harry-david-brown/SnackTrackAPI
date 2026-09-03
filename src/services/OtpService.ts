@@ -79,6 +79,33 @@ export class OtpService {
     return code; // Return plain code to send via email
   }
 
+  async storeScopedOTP(
+    scopeId: string,
+    email: string,
+    codeType: 'provider_login',
+  ): Promise<string> {
+    const code = this.generateOTP();
+    const codeHash = await bcrypt.hash(code, authConfig.getSaltRounds());
+    const expiresAt = this.now();
+    expiresAt.setMinutes(expiresAt.getMinutes() + this.CODE_EXPIRY_MINUTES);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    await this.postgres.withTransaction(async (transaction) => {
+      await transaction.query(
+        `UPDATE verification_codes SET used_at = NOW()
+         WHERE scope_id = $1 AND code_type = $2 AND used_at IS NULL`,
+        [scopeId, codeType],
+      );
+      await transaction.query(
+        `INSERT INTO verification_codes
+           (email, code_hash, code_type, scope_id, expires_at, max_attempts)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [normalizedEmail, codeHash, codeType, scopeId, expiresAt, this.MAX_ATTEMPTS],
+      );
+    });
+    return code;
+  }
+
   /**
    * Verify an OTP code
    * Returns true if valid, false otherwise
@@ -190,6 +217,48 @@ export class OtpService {
         await transaction.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [
           id,
         ]);
+        return 'invalid';
+      }
+      if (!(await bcrypt.compare(code, databaseString(row, 'code_hash')))) {
+        await transaction.query(
+          'UPDATE verification_codes SET attempts = attempts + 1 WHERE id = $1',
+          [id],
+        );
+        return 'invalid';
+      }
+
+      await onVerified(transaction);
+      await transaction.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [id]);
+      return 'consumed';
+    });
+  }
+
+  async consumeScopedOTP(
+    scopeId: string,
+    email: string,
+    code: string,
+    codeType: 'provider_login',
+    onVerified: (transaction: DatabaseQueryExecutor) => Promise<void>,
+  ): Promise<ConsumeCodeResult> {
+    return this.postgres.withTransaction(async (transaction) => {
+      const result = await transaction.query(
+        `SELECT id, code_hash, attempts, max_attempts
+         FROM verification_codes
+         WHERE scope_id = $1 AND email = $2 AND code_type = $3
+           AND expires_at > NOW() AND used_at IS NULL
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [scopeId, email.toLowerCase().trim(), codeType],
+      );
+      if (!result.rows[0]) return 'not_pending';
+
+      const row = databaseRow(result.rows[0], 'scoped verification code');
+      const id = databaseUuid(row, 'id');
+      const attempts = databaseNonNegativeInteger(row, 'attempts');
+      const maximumAttempts = databaseNonNegativeInteger(row, 'max_attempts');
+      if (attempts >= maximumAttempts) {
+        await transaction.query('UPDATE verification_codes SET used_at = NOW() WHERE id = $1', [id]);
         return 'invalid';
       }
       if (!(await bcrypt.compare(code, databaseString(row, 'code_hash')))) {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "SnackTrack Authentication"
+  short_description: "Build and diagnose SnackTrack auth flows"
+  default_prompt: "Use $snacktrack-authentication to implement or diagnose this SnackTrack identity and session change."

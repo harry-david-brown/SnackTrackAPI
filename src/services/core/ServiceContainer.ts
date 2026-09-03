@@ -6,17 +6,24 @@ import { EmailVerificationService } from '../auth/EmailVerificationService';
 import { AppleIdentityTokenVerifier, GoogleIdentityTokenVerifier } from '../auth/IdentityProvider';
 import { PasswordResetService } from '../auth/PasswordResetService';
 import { ProviderAuthService } from '../auth/ProviderAuthService';
+import { MicrosoftLoginService } from '../auth/MicrosoftLoginService';
+import { MicrosoftIdentityVerifier } from '../auth/MicrosoftIdentityVerifier';
+import { MicrosoftJwksClient } from '../auth/MicrosoftJwksClient';
 import { SessionService } from '../auth/SessionService';
 import { TokenService } from '../auth/TokenService';
+import { AuthenticationActivityService } from '../auth/AuthenticationActivityService';
 import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
 import { WrappedAnalyticsQueryRepository } from '../analytics/WrappedAnalyticsQueryRepository';
 import { AccountResetService } from '../data/AccountResetService';
 import { GmailSyncRunRepository } from '../data/GmailSyncRunRepository';
+import { MailboxConnectionRepository } from '../data/MailboxConnectionRepository';
+import { MailboxSyncRunRepository } from '../data/MailboxSyncRunRepository';
 import { ImportEventRepository } from '../data/ImportEventRepository';
 import { ImportLifecycleRepository } from '../data/ImportLifecycleRepository';
 import { ImportPreferencesQueryRepository } from '../data/ImportPreferencesQueryRepository';
 import { ImportSourceCoverageRepository } from '../data/ImportSourceCoverageRepository';
 import { OAuthRepository } from '../data/OAuthRepository';
+import { MicrosoftLoginAttemptRepository } from '../data/MicrosoftLoginAttemptRepository';
 import { PostgresService } from '../data/PostgresService';
 import { ReceiptRepository } from '../data/ReceiptRepository';
 import { UserRepository } from '../data/UserRepository';
@@ -24,6 +31,13 @@ import { EmailSenderService } from '../email/EmailSender';
 import { GmailConnectionHealthService } from '../email/GmailConnectionHealthService';
 import { GmailClient } from '../email/GmailClient';
 import { GmailOAuthProvider } from '../email/GmailOAuthProvider';
+import { MailboxSecretCipher } from '../mailbox/MailboxSecretCipher';
+import { MicrosoftMailboxOAuthProvider } from '../mailbox/MicrosoftMailboxOAuthProvider';
+import { MicrosoftMailboxTokenService } from '../mailbox/MicrosoftMailboxTokenService';
+import { MicrosoftGraphMailboxClient } from '../mailbox/MicrosoftGraphMailboxClient';
+import { MicrosoftMailboxConnectionHealthService } from '../mailbox/MicrosoftMailboxConnectionHealthService';
+import { MicrosoftMailboxConnectionService } from '../mailbox/MicrosoftMailboxConnectionService';
+import { OutlookExportReadyDetector } from '../mailbox/OutlookExportReadyDetector';
 import { RedactingFileEmailDebugCapture } from '../email/EmailDebugCapture';
 import type { EmailDebugCapturePort } from '../ports/MailboxPorts';
 import { ReceiptExtractor } from '../extraction';
@@ -36,6 +50,9 @@ import { ReceiptEmailBatchExtractor } from '../import/ReceiptEmailBatchExtractor
 import { ReceiptImportPersistenceService } from '../import/ReceiptImportPersistenceService';
 import { GmailConnectionService } from '../import/GmailConnectionService';
 import { HistoricalGmailImportService } from '../import/HistoricalGmailImportService';
+import { HistoricalOutlookImportService } from '../import/HistoricalOutlookImportService';
+import { OutlookImportAcquisitionService } from '../import/OutlookImportAcquisitionService';
+import { OutlookImportService } from '../import/OutlookImportService';
 import { OngoingTrackingService } from '../import/OngoingTrackingService';
 import { ManualTrackingCheckService } from '../import/ManualTrackingCheckService';
 import { OtpService } from '../OtpService';
@@ -46,7 +63,7 @@ import { CacheService } from './CacheService';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/AppConfig';
 import logger from '../../config/logger';
-import { redisConfig } from '../../config/redis';
+import { refreshTokenStore } from '../../config/redis';
 import appleSignin from 'apple-signin-auth';
 import { ZipExtractor } from '../import/ZipExtractor';
 import { ImportLockService } from '../import/ImportLockService';
@@ -56,25 +73,40 @@ import { AdministratorQueryRepository } from '../admin/AdministratorQueryReposit
 import { AdministratorService } from '../admin/AdministratorService';
 import { MonitoringQueryRepository } from '../monitoring/MonitoringQueryRepository';
 import { MonitoringService } from '../monitoring/MonitoringService';
+import { AdminRepository } from '../admin/AdminRepository';
+import { AdminAuthService } from '../admin/AdminAuthService';
+import { AdminManagementService } from '../admin/AdminManagementService';
+import { AdminAnalyticsQueryService, AnalyticsEventService } from '../analytics/AdminAnalyticsService';
+import { AnalyticsMaintenanceService } from '../analytics/AnalyticsMaintenanceService';
 import { DatabaseHealthService } from '../data/DatabaseHealthService';
 import { MigrationRunner } from '../data/MigrationRunner';
 import { migrations } from '../data/migrations';
+import { ImportJobRepository } from '../data/ImportJobRepository';
+import { ImportJobService } from '../import/ImportJobService';
+import { ScheduledImportJobService } from '../import/ScheduledImportJobService';
+import { ImportObjectStorage } from '../storage/ImportObjectStorage';
+import { PushDeviceRepository } from '../notifications/PushDeviceRepository';
+import { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
 
 /** The process-wide, typed composition root and resource owner. */
 export class ServiceContainer {
   readonly postgres: PostgresService;
   readonly userRepository: UserRepository;
   readonly oauthRepository: OAuthRepository;
+  readonly microsoftLoginAttemptRepository: MicrosoftLoginAttemptRepository;
   readonly receiptRepository: ReceiptRepository;
   readonly importEventRepository: ImportEventRepository;
   readonly importLifecycleRepository: ImportLifecycleRepository;
   readonly gmailSyncRunRepository: GmailSyncRunRepository;
+  readonly mailboxConnectionRepository: MailboxConnectionRepository;
+  readonly mailboxSyncRunRepository: MailboxSyncRunRepository;
   readonly importPreferencesQueryRepository: ImportPreferencesQueryRepository;
   readonly importSourceCoverageRepository: ImportSourceCoverageRepository;
   readonly cacheService: CacheService;
   readonly tokenService: TokenService;
   readonly credentialAuthService: CredentialAuthService;
   readonly providerAuthService: ProviderAuthService;
+  readonly microsoftLoginService: MicrosoftLoginService;
   readonly sessionService: SessionService;
   readonly passwordResetService: PasswordResetService;
   readonly emailVerificationService: EmailVerificationService;
@@ -96,6 +128,15 @@ export class ServiceContainer {
   readonly ongoingTrackingService: OngoingTrackingService;
   readonly manualTrackingCheckService: ManualTrackingCheckService;
   readonly gmailConnectionHealthService: GmailConnectionHealthService;
+  readonly microsoftMailboxOAuthProvider: MicrosoftMailboxOAuthProvider;
+  readonly microsoftMailboxTokenService: MicrosoftMailboxTokenService;
+  readonly microsoftGraphMailboxClient: MicrosoftGraphMailboxClient;
+  readonly microsoftMailboxConnectionHealthService: MicrosoftMailboxConnectionHealthService;
+  readonly microsoftMailboxConnectionService: MicrosoftMailboxConnectionService;
+  readonly outlookImportAcquisitionService: OutlookImportAcquisitionService;
+  readonly outlookImportService: OutlookImportService;
+  readonly historicalOutlookImportService: HistoricalOutlookImportService;
+  readonly outlookExportReadyDetector: OutlookExportReadyDetector;
   readonly accountResetService: AccountResetService;
   readonly receiptClearService: ReceiptClearService;
   readonly listReceiptsService: ListReceiptsService;
@@ -111,17 +152,31 @@ export class ServiceContainer {
   readonly administratorService: AdministratorService;
   readonly monitoringQueryRepository: MonitoringQueryRepository;
   readonly monitoringService: MonitoringService;
+  readonly adminRepository: AdminRepository;
+  readonly adminAuthService: AdminAuthService;
+  readonly adminManagementService: AdminManagementService;
+  readonly adminAnalyticsQueryService: AdminAnalyticsQueryService;
+  readonly analyticsEventService: AnalyticsEventService;
+  readonly authenticationActivityService: AuthenticationActivityService;
+  readonly analyticsMaintenanceService: AnalyticsMaintenanceService;
   readonly databaseHealthService: DatabaseHealthService;
   readonly migrationRunner: MigrationRunner;
+  readonly importJobRepository: ImportJobRepository;
+  readonly importJobService: ImportJobService;
+  readonly scheduledImportJobService: ScheduledImportJobService;
+  readonly importObjectStorage: ImportObjectStorage;
+  readonly pushDeviceRepository: PushDeviceRepository;
+  readonly mailboxSecurityPolicyRepository: MailboxSecurityPolicyRepository;
 
   constructor() {
     this.postgres = new PostgresService({
       connectionString: config.getDatabaseConnectionString(),
       useSsl: config.shouldUseDatabaseSSL(),
-      maxConnections: config.isProduction() ? 20 : 10,
+      maxConnections: config.getDatabaseMaxConnections(),
     });
     this.userRepository = new UserRepository(this.postgres);
     this.oauthRepository = new OAuthRepository(this.postgres);
+    this.microsoftLoginAttemptRepository = new MicrosoftLoginAttemptRepository(this.postgres);
     this.receiptRepository = new ReceiptRepository(this.postgres);
     this.importEventRepository = new ImportEventRepository(this.postgres);
     this.importLifecycleRepository = new ImportLifecycleRepository(
@@ -132,9 +187,29 @@ export class ServiceContainer {
       this.postgres,
       this.importEventRepository,
     );
+    const microsoftMailboxConfig = config.getMicrosoftMailboxConfig();
+    const mailboxCipher = new MailboxSecretCipher(microsoftMailboxConfig.tokenEncryptionKey);
+    this.mailboxConnectionRepository = new MailboxConnectionRepository(
+      this.postgres,
+      mailboxCipher,
+    );
+    this.mailboxSyncRunRepository = new MailboxSyncRunRepository(this.postgres);
     this.importPreferencesQueryRepository = new ImportPreferencesQueryRepository(this.postgres);
     this.importSourceCoverageRepository = new ImportSourceCoverageRepository(this.postgres);
+    this.importJobRepository = new ImportJobRepository(
+      this.postgres,
+      config.getQueueConfig().maximumWaitingJobs,
+    );
+    this.mailboxSecurityPolicyRepository = new MailboxSecurityPolicyRepository(this.postgres);
+    this.importObjectStorage = new ImportObjectStorage(config.getObjectStorageConfig());
+    this.importJobService = new ImportJobService(this.importJobRepository, this.importObjectStorage);
+    this.pushDeviceRepository = new PushDeviceRepository(this.postgres);
     this.cacheService = new CacheService();
+    this.emailSender = new EmailSenderService();
+    this.adminRepository = new AdminRepository(this.postgres);
+    this.analyticsEventService = new AnalyticsEventService(this.postgres);
+    this.authenticationActivityService = new AuthenticationActivityService(this.analyticsEventService, logger);
+    this.analyticsMaintenanceService = new AnalyticsMaintenanceService(this.postgres);
     const gmailConfig = config.getGmailConfig();
     const googleAudiences = [
       gmailConfig.clientId,
@@ -149,10 +224,10 @@ export class ServiceContainer {
         accessTokenExpiry: auth.accessTokenExpiry,
         refreshTokenExpiry: auth.refreshTokenExpiry,
       },
-      redisConfig,
+      refreshTokenStore,
       logger,
     );
-    this.credentialAuthService = new CredentialAuthService(this.userRepository, this.tokenService);
+    this.credentialAuthService = new CredentialAuthService(this.userRepository, this.tokenService, this.authenticationActivityService);
     this.providerAuthService = new ProviderAuthService(
       this.userRepository,
       this.oauthRepository,
@@ -160,7 +235,18 @@ export class ServiceContainer {
       new GoogleIdentityTokenVerifier(new OAuth2Client(googleAudiences[0]), googleAudiences),
       new AppleIdentityTokenVerifier(appleSignin, config.getAppleConfig().clientIds),
       logger,
+      this.authenticationActivityService,
     );
+    const microsoftLoginConfig = config.getMicrosoftLoginConfig();
+    const microsoftIdentityVerifier =
+      microsoftLoginConfig.enabled && microsoftLoginConfig.clientId
+        ? new MicrosoftIdentityVerifier(
+            microsoftLoginConfig.clientId,
+            new MicrosoftJwksClient(microsoftLoginConfig.jwksUri, (url) =>
+              fetch(url, { signal: AbortSignal.timeout(5_000) }),
+            ),
+          )
+        : null;
     this.sessionService = new SessionService(this.userRepository, this.tokenService);
     this.csvImportService = new CsvImportService(logger);
     this.csvImportUseCase = new CsvImportUseCase(
@@ -187,6 +273,7 @@ export class ServiceContainer {
       this.gmailClient,
       this.receiptRepository,
       this.importPreferencesQueryRepository,
+      this.mailboxSecurityPolicyRepository,
     );
     this.receiptEmailBatchExtractor = new ReceiptEmailBatchExtractor(
       new ReceiptExtractor(),
@@ -209,17 +296,77 @@ export class ServiceContainer {
       this.gmailImportLifecycleService,
       logger,
     );
+    this.gmailConnectionHealthService = new GmailConnectionHealthService(
+      this.gmailClient,
+      this.userRepository,
+      this.importLifecycleRepository,
+    );
+    this.microsoftMailboxOAuthProvider = new MicrosoftMailboxOAuthProvider(
+      {
+        clientId: microsoftMailboxConfig.clientId,
+        clientSecret: microsoftMailboxConfig.clientSecret,
+        callbackRedirectUri: microsoftMailboxConfig.redirectUri,
+        authority: microsoftMailboxConfig.authority,
+      },
+      mailboxCipher,
+    );
+    this.microsoftMailboxTokenService = new MicrosoftMailboxTokenService(
+      this.microsoftMailboxOAuthProvider,
+      this.mailboxConnectionRepository,
+    );
+    this.microsoftGraphMailboxClient = new MicrosoftGraphMailboxClient(
+      this.microsoftMailboxTokenService,
+      fetch,
+      logger,
+    );
+    this.microsoftMailboxConnectionHealthService = new MicrosoftMailboxConnectionHealthService(
+      this.microsoftGraphMailboxClient,
+      this.mailboxConnectionRepository,
+      this.importLifecycleRepository,
+    );
+    this.microsoftMailboxConnectionService = new MicrosoftMailboxConnectionService(
+      this.microsoftMailboxOAuthProvider,
+      this.mailboxConnectionRepository,
+      this.userRepository,
+      this.importPreferencesQueryRepository,
+      this.importLifecycleRepository,
+      this.mailboxSyncRunRepository,
+      this.microsoftMailboxConnectionHealthService,
+    );
+    this.outlookImportAcquisitionService = new OutlookImportAcquisitionService(
+      this.mailboxConnectionRepository,
+      this.microsoftGraphMailboxClient,
+      this.receiptRepository,
+      this.importPreferencesQueryRepository,
+      this.mailboxSecurityPolicyRepository,
+    );
+    this.outlookImportService = new OutlookImportService(
+      this.outlookImportAcquisitionService,
+      this.receiptEmailBatchExtractor,
+      this.receiptImportPersistenceService,
+      this.mailboxSyncRunRepository,
+      this.mailboxConnectionRepository,
+      this.importLifecycleRepository,
+      logger,
+    );
     this.ongoingTrackingService = new OngoingTrackingService(
       this.userRepository,
       this.importPreferencesQueryRepository,
       this.importLifecycleRepository,
       this.gmailImportService,
       ImportLockService,
+      this.mailboxConnectionRepository,
+      this.outlookImportService,
     );
-    this.gmailConnectionHealthService = new GmailConnectionHealthService(
-      this.gmailClient,
+    this.historicalOutlookImportService = new HistoricalOutlookImportService(
       this.userRepository,
-      this.importLifecycleRepository,
+      this.microsoftMailboxConnectionHealthService,
+      this.outlookImportService,
+      ImportLockService,
+    );
+    this.outlookExportReadyDetector = new OutlookExportReadyDetector(
+      this.mailboxConnectionRepository,
+      this.microsoftGraphMailboxClient,
     );
     this.gmailConnectionService = new GmailConnectionService(
       this.gmailOAuthProvider,
@@ -228,12 +375,15 @@ export class ServiceContainer {
       this.importLifecycleRepository,
       this.gmailSyncRunRepository,
       this.gmailConnectionHealthService,
+      this.mailboxConnectionRepository,
     );
     this.importStatusService = new ImportStatusService(
       this.userRepository,
       this.gmailConnectionHealthService,
       this.importPreferencesQueryRepository,
       this.importSourceCoverageRepository,
+      this.microsoftMailboxConnectionHealthService,
+      this.mailboxConnectionRepository,
     );
     this.historicalGmailImportService = new HistoricalGmailImportService(
       this.importStatusService,
@@ -246,25 +396,38 @@ export class ServiceContainer {
       this.importPreferencesQueryRepository,
       this.importStatusService,
       this.gmailClient,
+      this.importSourceCoverageRepository,
+      this.outlookExportReadyDetector,
     );
     this.manualTrackingCheckService = new ManualTrackingCheckService(
       this.ongoingTrackingService,
       this.importPreferencesService,
     );
+    this.scheduledImportJobService = new ScheduledImportJobService(
+      this.importPreferencesQueryRepository,
+      this.importJobRepository,
+    );
+    const mailboxHealth = {
+      invalidate: (userId: string) => {
+        this.gmailConnectionHealthService.invalidate(userId);
+        this.microsoftMailboxConnectionHealthService.invalidate(userId);
+      },
+    };
     this.accountResetService = new AccountResetService(
       this.postgres,
       this.cacheService,
-      this.gmailConnectionHealthService,
+      mailboxHealth,
     );
     this.receiptClearService = new ReceiptClearService(this.postgres, this.cacheService);
     this.listReceiptsService = new ListReceiptsService(this.receiptRepository);
     this.accountDeletionService = new AccountDeletionService(
       this.postgres,
       this.cacheService,
-      this.gmailConnectionHealthService,
+      mailboxHealth,
       this.tokenService,
       ImportLockService,
       logger,
+      this.adminRepository,
     );
     this.wrappedAnalyticsQueryRepository = new WrappedAnalyticsQueryRepository(this.postgres);
     this.wrappedAnalyticsService = new WrappedAnalyticsService(
@@ -286,10 +449,30 @@ export class ServiceContainer {
     this.administratorService = new AdministratorService(this.administratorQueryRepository);
     this.monitoringQueryRepository = new MonitoringQueryRepository(this.postgres);
     this.monitoringService = new MonitoringService(this.monitoringQueryRepository);
+    this.adminManagementService = new AdminManagementService(
+      this.postgres,
+      this.accountDeletionService,
+      this.mailboxSecurityPolicyRepository,
+    );
+    this.adminAnalyticsQueryService = new AdminAnalyticsQueryService(this.postgres);
+    this.adminAuthService = new AdminAuthService(this.adminRepository, this.emailSender, {
+      dashboardUrl: config.getSecurityConfig().adminDashboardUrl,
+    });
     this.databaseHealthService = new DatabaseHealthService(this.postgres);
     this.migrationRunner = new MigrationRunner(this.postgres, migrations);
     this.otpService = new OtpService(this.postgres);
-    this.emailSender = new EmailSenderService();
+    this.microsoftLoginService = new MicrosoftLoginService(
+      microsoftLoginConfig.enabled,
+      this.microsoftLoginAttemptRepository,
+      microsoftIdentityVerifier,
+      this.oauthRepository,
+      this.otpService,
+      this.emailSender,
+      this.tokenService,
+      logger,
+      undefined,
+      this.authenticationActivityService,
+    );
     this.passwordResetService = new PasswordResetService(
       this.userRepository,
       this.otpService,

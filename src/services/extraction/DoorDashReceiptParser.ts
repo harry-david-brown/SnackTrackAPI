@@ -23,6 +23,7 @@ interface DoorDashEmailSignals {
 interface DoorDashParseInput extends DoorDashEmailSignals {
   html: string;
   providerMessageId?: string;
+  mailboxProvider?: 'gmail' | 'microsoft';
 }
 
 const MAX_AMOUNT = 1_000_000;
@@ -132,7 +133,7 @@ const validProviderId = (value: string | undefined): string | null => {
   return /^[A-Za-z0-9_-]+$/.test(normalized) ? normalized : null;
 };
 
-const extractOrderId = (html: string, text: string, providerMessageId?: string): string | null => {
+const extractOrderId = (html: string, text: string, providerMessageId?: string, mailboxProvider: 'gmail' | 'microsoft' = 'gmail'): string | null => {
   const labeled = text.match(
     /(?:doordash\s+)?order\s*(?:id|number|no\.?|#)\s*[:#]?\s*([A-Za-z0-9_-]{6,128})/i,
   )?.[1];
@@ -146,7 +147,7 @@ const extractOrderId = (html: string, text: string, providerMessageId?: string):
   if (fromUrl) return `doordash:${fromUrl}`;
 
   const messageId = validProviderId(providerMessageId);
-  return messageId ? `doordash:gmail:${messageId}` : null;
+  return messageId ? `doordash:${mailboxProvider}:${messageId}` : null;
 };
 
 const resolveCurrency = (text: string, amounts: readonly (MonetaryAmount | null)[]): Currency => {
@@ -172,6 +173,7 @@ export const parseDoorDashReceipt = ({
   text,
   subject,
   providerMessageId,
+  mailboxProvider,
 }: DoorDashParseInput): DoorDashReceiptFields => {
   const warnings: string[] = [];
   const total = extractLabeledAmount(text, ['Total Charged', 'Total']);
@@ -187,7 +189,7 @@ export const parseDoorDashReceipt = ({
     'Promotion',
   ]);
   const merchant = extractMerchant(subject, text);
-  const orderId = extractOrderId(html, text, providerMessageId);
+  const orderId = extractOrderId(html, text, providerMessageId, mailboxProvider);
   const amounts = [total, subtotal, tax, tip, deliveryFee, serviceFee, savingsAmount];
 
   if (!total) warnings.push('DoorDash receipt did not contain a valid total charged');

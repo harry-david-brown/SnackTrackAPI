@@ -5,7 +5,7 @@
  * Wraps Redis with domain-specific logic
  */
 
-import { redisConfig } from '../../config/redis';
+import { redisCacheStore } from '../../config/redis';
 import logger from '../../config/logger';
 import type { DashboardInsightEdition } from '../analytics/dashboard';
 import {
@@ -36,7 +36,7 @@ export class CacheService {
     edition: DashboardInsightEdition,
     ttlSeconds: number,
   ): Promise<void> {
-    await redisConfig.set(
+    await redisCacheStore.set(
       `${this.DASHBOARD_INSIGHTS_PREFIX}${cacheKey}`,
       dashboardInsightEditionCacheCodec.encode(edition),
       Math.max(60, Math.ceil(ttlSeconds)),
@@ -57,7 +57,7 @@ export class CacheService {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
     const value = userSummaryCacheCodec.encode(summary);
 
-    const cached = await redisConfig.set(key, value, this.USER_SUMMARY_TTL);
+    const cached = await redisCacheStore.set(key, value, this.USER_SUMMARY_TTL);
 
     if (cached) logger.debug('User summary cached', { ttlSeconds: this.USER_SUMMARY_TTL });
   }
@@ -75,7 +75,7 @@ export class CacheService {
    */
   async invalidateUserSummary(userId: string): Promise<void> {
     const key = `${this.USER_SUMMARY_PREFIX}${userId}`;
-    const deleted = await redisConfig.del(key);
+    const deleted = await redisCacheStore.del(key);
 
     if (deleted) logger.debug('User summary cache invalidated');
   }
@@ -95,7 +95,7 @@ export class CacheService {
 
     let totalDeleted = 0;
     for (const pattern of patterns) {
-      const deleted = await redisConfig.delPattern(pattern);
+      const deleted = await redisCacheStore.delPattern(pattern);
       totalDeleted += deleted;
     }
 
@@ -106,32 +106,28 @@ export class CacheService {
    * Get cache statistics
    */
   async getStats(): Promise<CacheStats> {
-    if (!redisConfig.isAvailable()) {
-      return { enabled: false, stats: null };
-    }
-
-    const stats = await redisConfig.getStats();
-    return { enabled: true, stats };
+    const stats = await redisCacheStore.getStats();
+    return { enabled: redisCacheStore.isAvailable(), stats };
   }
 
   /**
    * Check if caching is available
    */
   isAvailable(): boolean {
-    return redisConfig.isAvailable();
+    return redisCacheStore.isAvailable();
   }
 
   private async readProjection<Value>(
     key: string,
     codec: CacheCodec<Value>,
   ): Promise<Value | null> {
-    const cached = await redisConfig.get(key);
+    const cached = await redisCacheStore.get(key);
     if (!cached) return null;
 
     const value = codec.decode(cached);
     if (value !== null) return value;
 
-    await redisConfig.del(key);
+    await redisCacheStore.del(key);
     logger.warn('Invalid cached projection evicted');
     return null;
   }

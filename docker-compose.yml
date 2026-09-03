@@ -1,42 +1,114 @@
-services:
-  snack-track-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
-    ports:
-      - "3000:3000"
-    volumes:
-      - .:/usr/src/app
-      - /usr/src/app/node_modules
-    environment:
-      - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_dev
-      - REDIS_URL=redis://redis:6379
-    env_file:
-      - .env
-    command: npm run dev
-    depends_on:
-      - postgres
-      - redis
+x-api-environment: &api-environment
+  NODE_ENV: development
+  HOST: 0.0.0.0
+  DATABASE_URL: postgresql://snacktrack:password@postgres:5432/snacktrack_dev
+  REDIS_URL: redis://redis:6379
+  QUEUE_REDIS_URL: redis://redis:6379
+  OBJECT_STORAGE_ENDPOINT: http://minio:9000
+  OBJECT_STORAGE_PUBLIC_ENDPOINT: ${OBJECT_STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+  OBJECT_STORAGE_REGION: us-east-1
+  OBJECT_STORAGE_BUCKET: snacktrack-imports
+  OBJECT_STORAGE_ACCESS_KEY_ID: snacktrack
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: snacktrack-local-secret
+  OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+  PUSH_DELIVERY_MODE: log
+  USE_MOCK_DATA: ${USE_MOCK_DATA:-true}
+  TRACKING_SYNC_INTERVAL_MINUTES: "0"
 
+x-app-service: &app-service
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  working_dir: /usr/src/app
+  volumes:
+    - .:/usr/src/app
+    - api_node_modules:/usr/src/app/node_modules
+  environment: *api-environment
+  env_file:
+    - path: .env
+      required: false
+
+services:
   postgres:
     image: postgres:15-alpine
-    ports:
-      - "5432:5432"
+    ports: ["5432:5432"]
     environment:
-      - POSTGRES_DB=snacktrack_dev
-      - POSTGRES_USER=snacktrack
-      - POSTGRES_PASSWORD=password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_DB: snacktrack_dev
+      POSTGRES_USER: snacktrack
+      POSTGRES_PASSWORD: password
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snacktrack -d snacktrack_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: snacktrack
+      MINIO_ROOT_PASSWORD: snacktrack-local-secret
+    command: server /data --console-address :9001
+    volumes: [minio_data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - mc alias set local http://minio:9000 snacktrack snacktrack-local-secret && mc mb --ignore-existing local/snacktrack-imports && mc anonymous set none local/snacktrack-imports
+
+  migrate:
+    <<: *app-service
+    command: npm run migrate
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app-service
+    ports: ["3000:3000"]
+    command: npm run dev
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+
+  worker:
+    <<: *app-service
+    command: npm run dev:worker
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+
+  scheduler:
+    <<: *app-service
+    command: npm run dev:scheduler
+    profiles: ["tools"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
 
 volumes:
   postgres_data:
-  redis_data: 
+  redis_data:
+  minio_data:
+  api_node_modules:

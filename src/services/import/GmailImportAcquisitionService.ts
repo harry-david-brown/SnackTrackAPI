@@ -1,6 +1,6 @@
 import type { User } from '../../models/User';
 import type { ReceiptType } from '../../models/Receipt';
-import type { MailboxClient, MailboxMessage } from '../ports/MailboxPorts';
+import type { MailboxClient, MailboxMessagePage } from '../ports/MailboxPorts';
 import type { ImportPreferences } from './ImportLifecycleTypes';
 
 export type ExportCutoffsByReceiptType = Partial<Record<ReceiptType, Date>>;
@@ -13,8 +13,12 @@ interface ImportPreferencesPort {
   get(userId: string): Promise<ImportPreferences>;
 }
 
+interface MailboxSecurityPolicyPort {
+  get(userId: string): Promise<{ readonly allowForwardedReceipts: boolean }>;
+}
+
 export interface GmailAcquisitionResult {
-  readonly emails: MailboxMessage[];
+  readonly pages: AsyncIterable<MailboxMessagePage>;
   readonly exportCutoffs: ExportCutoffsByReceiptType;
   readonly searchAfter: Date | undefined;
 }
@@ -50,18 +54,23 @@ export class GmailImportAcquisitionService {
     private readonly mailbox: MailboxClient,
     private readonly receipts: ReceiptCutoffPort,
     private readonly preferences: ImportPreferencesPort,
+    private readonly securityPolicies: MailboxSecurityPolicyPort,
     private readonly now: () => number = Date.now,
   ) {}
 
-  async acquire(user: User, trigger: 'manual' | 'background'): Promise<GmailAcquisitionResult> {
+  async acquire(user: User, trigger: 'manual' | 'background', cursor?: string): Promise<GmailAcquisitionResult> {
     this.requireUsableConnection(user);
     const exportCutoffs = await this.receipts.getLatestCsvReceiptDates(user.id);
     const searchAfter =
       trigger === 'background'
         ? await this.incrementalSearchAfter(user.id, exportCutoffs)
         : undefined;
-    const emails = await this.mailbox.getEmails(user, { after: searchAfter });
-    return { emails, exportCutoffs, searchAfter };
+    const safety = await this.securityPolicies.get(user.id);
+    return {
+      pages: this.mailbox.getEmailPages(user, { after: searchAfter, cursor, safety }),
+      exportCutoffs,
+      searchAfter,
+    };
   }
 
   private requireUsableConnection(user: User): void {

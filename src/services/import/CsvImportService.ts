@@ -2,8 +2,11 @@ import { Receipt, ReceiptType, ReceiptItem, DataSource } from '../../models/Rece
 import { v4 as uuidv4 } from 'uuid';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
+import { createReadStream } from 'fs';
+import { open } from 'fs/promises';
 import { getDefaultTimezone, zonedDateTimeToUtc } from '../../utils/timezone';
 import { silentStructuredLogger, StructuredLogger } from '../core/StructuredLogger';
+import { ValidationError } from '../../core/errors';
 
 export interface UberCsvRow {
   City_Name: string;
@@ -31,6 +34,18 @@ export interface DoorDashCsvRow {
   CREATED_AT: string;
   DELIVERY_TIME: string;
   DELIVERY_ADDRESS: string;
+}
+
+interface UberOrderGroup {
+  readonly first: UberCsvRow;
+  readonly items: ReceiptItem[];
+  maxOrderPrice: number | null;
+}
+
+interface DoorDashOrderGroup {
+  readonly first: DoorDashCsvRow;
+  readonly items: ReceiptItem[];
+  subtotal: number;
 }
 
 type CsvRecord = Record<string, unknown>;
@@ -76,6 +91,45 @@ const DOORDASH_FIELDS: readonly (keyof DoorDashCsvRow)[] = [
   'DELIVERY_TIME',
   'DELIVERY_ADDRESS',
 ];
+const MAX_CSV_ROWS = 100_000;
+const MAX_CSV_ORDERS = 25_000;
+const MAX_CSV_COLUMNS = 64;
+const MAX_CSV_ROW_BYTES = 1024 * 1024;
+const MAX_HEADER_BYTES = 64 * 1024;
+const MAX_ITEMS_PER_ORDER = 500;
+const MAX_INVALID_ROWS = 1_000;
+const MAX_INVALID_ROW_RATIO = 0.10;
+const MAX_AMOUNT = 1_000_000;
+const MIN_ORDER_DATE = Date.UTC(2009, 0, 1);
+const MAX_TEXT = { merchant: 255, item: 500, customization: 2_000, category: 100, address: 500 } as const;
+
+const parserOptions = {
+  strict: true,
+  maxRowBytes: MAX_CSV_ROW_BYTES,
+  mapHeaders: ({ header }: { header: string }) => header.replace(/^\uFEFF/, '').trim(),
+};
+
+const boundedText = (value: string, maximum: number): string => {
+  const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (normalized.length > maximum) throw new ValidationError('CSV field exceeds the safe length limit', 'file');
+  return normalized;
+};
+
+const finiteAmount = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > MAX_AMOUNT) throw new ValidationError('CSV contains an invalid monetary amount', 'file');
+  return parsed;
+};
+
+const finiteQuantity = (value: string): number => {
+  const parsed = Number(value || '1');
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) throw new ValidationError('CSV contains an invalid quantity', 'file');
+  return parsed;
+};
+
+const safeDate = (value: Date): boolean => value.getTime() >= MIN_ORDER_DATE && value.getTime() <= Date.now() + 86_400_000;
+const exceedsInvalidRowBudget = (invalidRows: number, rowCount: number): boolean =>
+  invalidRows > MAX_INVALID_ROWS || (rowCount > 0 && invalidRows / rowCount > MAX_INVALID_ROW_RATIO);
 
 export const decodeUberCsvRow = (value: unknown): UberCsvRow =>
   decodeCsvRow<UberCsvRow>(value, UBER_FIELDS);
@@ -100,40 +154,60 @@ export class CsvImportService {
    */
   detectCsvFormat(csvBuffer: Buffer): 'uber' | 'doordash' | 'unknown' {
     const content = csvBuffer.toString();
-    const firstLine = content.split('\n')[0].toLowerCase();
+    const headers = new Set(content.split(/\r?\n/, 1)[0].replace(/^\uFEFF/, '').split(',').map((header) => header.trim().toLowerCase()));
 
     // Check for DoorDash order headers
     if (
-      firstLine.includes('item') &&
-      firstLine.includes('store_name') &&
-      firstLine.includes('created_at') &&
-      firstLine.includes('subtotal')
-    ) {
-      return 'doordash';
-    }
-
-    // Check for DoorDash profile headers (consumer_profile_details.csv)
-    // This file is sent when account has no orders yet
-    if (
-      firstLine.includes('first_name') &&
-      firstLine.includes('last_name') &&
-      firstLine.includes('email') &&
-      firstLine.includes('phone_number')
+      headers.has('item') &&
+      headers.has('store_name') &&
+      headers.has('created_at') &&
+      headers.has('subtotal')
     ) {
       return 'doordash';
     }
 
     // Check for Uber Eats headers
     if (
-      firstLine.includes('restaurant_name') &&
-      firstLine.includes('request_time_local') &&
-      firstLine.includes('order_price') &&
-      firstLine.includes('item_name')
+      headers.has('restaurant_name') &&
+      headers.has('request_time_local') &&
+      headers.has('order_price') &&
+      headers.has('item_name')
     ) {
       return 'uber';
     }
 
     return 'unknown';
+  }
+
+  async detectCsvFormatFromFile(filePath: string): Promise<'uber' | 'doordash' | 'unknown'> {
+    return this.detectCsvFormat(await this.readHeaderSample(filePath));
+  }
+
+  async validateCsvPath(filePath: string): Promise<{ valid: boolean; errors: string[] }> {
+    return this.validateCsvFormat(await this.readHeaderSample(filePath));
+  }
+
+  async validateCsvPathForProvider(filePath: string, provider: 'uber_eats' | 'doordash'): Promise<{ valid: boolean; errors: string[] }> {
+    const sample = await this.readHeaderSample(filePath);
+    const validation = this.validateCsvFormat(sample);
+    const format = this.detectCsvFormat(sample);
+    const expected = provider === 'uber_eats' ? 'uber' : 'doordash';
+    return format === expected ? validation : { valid: false, errors: ['The CSV belongs to a different or unsupported export provider.'] };
+  }
+
+  async parseCsvPath(filePath: string, userId: string, timezone?: string): Promise<ImportResult> {
+    const format = await this.detectCsvFormatFromFile(filePath);
+    if (format === 'doordash') return this.parseDoorDashCsv(createReadStream(filePath), userId);
+    if (format === 'uber') {
+      return this.parseUberEatsCsv(createReadStream(filePath), userId, timezone || getDefaultTimezone());
+    }
+    throw new Error('Unknown CSV format. Expected Uber Eats or DoorDash format.');
+  }
+
+  async parseCsvPathForProvider(filePath: string, provider: 'uber_eats' | 'doordash', userId: string, timezone?: string): Promise<ImportResult> {
+    return provider === 'uber_eats'
+      ? this.parseUberEatsCsv(createReadStream(filePath), userId, timezone || getDefaultTimezone())
+      : this.parseDoorDashCsv(createReadStream(filePath), userId);
   }
 
   /**
@@ -157,26 +231,35 @@ export class CsvImportService {
    * Parse Uber Eats CSV file and convert to Receipt objects
    */
   async parseUberEatsCsv(
-    csvBuffer: Buffer,
+    csvBuffer: Buffer | Readable,
     userId: string,
     timezone: string = getDefaultTimezone(),
   ): Promise<ImportResult> {
-    const results: UberCsvRow[] = [];
+    const results = new Map<string, UberOrderGroup>();
     const errors: string[] = [];
     let rowCount = 0;
+    let invalidRows = 0;
 
     return new Promise((resolve, reject) => {
-      const stream = Readable.from(csvBuffer.toString());
+      const stream = Buffer.isBuffer(csvBuffer) ? Readable.from(csvBuffer.toString()) : csvBuffer;
 
       stream
-        .pipe(csv())
+        .pipe(csv(parserOptions))
         .on('data', (value: unknown) => {
           rowCount++;
+          if (rowCount > MAX_CSV_ROWS) {
+            stream.destroy();
+            reject(new ValidationError('CSV exceeds the maximum row count', 'file'));
+            return;
+          }
           try {
             const row = decodeUberCsvRow(value);
             // Validate required fields (Order_Price can be empty for refunded orders)
+            row.Restaurant_Name = boundedText(row.Restaurant_Name, MAX_TEXT.merchant);
+            row.Item_Name = boundedText(row.Item_Name, MAX_TEXT.item);
+            row.Customizations = boundedText(row.Customizations, MAX_TEXT.customization);
             if (!row.Restaurant_Name || !row.Request_Time_Local) {
-              // Skip rows with missing required fields (likely empty/invalid rows)
+              invalidRows += 1;
               return;
             }
 
@@ -190,14 +273,42 @@ export class CsvImportService {
               return;
             }
 
-            results.push(row);
+            const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}`;
+            const quantity = finiteQuantity(row.Item_quantity);
+            const linePrice = finiteAmount(row.Item_Price || '0');
+            const orderPrice = finiteAmount(row.Order_Price);
+            const item: ReceiptItem = {
+              name: row.Item_Name,
+              quantity,
+              price: linePrice / quantity,
+              customizations: row.Customizations
+                ? row.Customizations.split(',').map((value) => value.trim()).filter(Boolean)
+                : [],
+            };
+            const group = results.get(orderKey);
+            if (group) {
+              if (group.items.length >= MAX_ITEMS_PER_ORDER) throw new ValidationError('An order contains too many items', 'file');
+              group.items.push(item);
+              if (!Number.isNaN(orderPrice)) group.maxOrderPrice = Math.max(group.maxOrderPrice ?? orderPrice, orderPrice);
+            } else {
+              if (results.size >= MAX_CSV_ORDERS) {
+                stream.destroy();
+                reject(new ValidationError('CSV exceeds the maximum order count', 'file'));
+                return;
+              }
+              results.set(orderKey, { first: row, items: [item], maxOrderPrice: orderPrice });
+            }
           } catch (error) {
-            // Skip rows that cause parsing errors
+            invalidRows += 1;
             return;
           }
         })
         .on('end', () => {
           try {
+            if (exceedsInvalidRowBudget(invalidRows, rowCount)) {
+              reject(new ValidationError('CSV contains too many malformed rows', 'file'));
+              return;
+            }
             // Check if we have any valid data rows
             if (rowCount === 0) {
               // File only has headers, no data rows (account with no orders)
@@ -214,7 +325,7 @@ export class CsvImportService {
               return;
             }
 
-            if (results.length === 0) {
+            if (results.size === 0) {
               // File has rows but none are valid (all incomplete/refunded or missing required fields)
               resolve({
                 success: false,
@@ -234,7 +345,7 @@ export class CsvImportService {
 
             resolve({
               success: errors.length === 0,
-              totalOrders: this.getUniqueUberEatsOrderCount(results),
+              totalOrders: results.size,
               totalReceipts: receipts.length,
               totalAmount,
               errors,
@@ -253,50 +364,75 @@ export class CsvImportService {
   /**
    * Parse DoorDash CSV file and convert to Receipt objects
    */
-  async parseDoorDashCsv(csvBuffer: Buffer, userId: string): Promise<ImportResult> {
-    const results: DoorDashCsvRow[] = [];
+  async parseDoorDashCsv(csvBuffer: Buffer | Readable, userId: string): Promise<ImportResult> {
+    const results = new Map<string, DoorDashOrderGroup>();
     const errors: string[] = [];
     let rowCount = 0;
+    let invalidRows = 0;
 
     return new Promise((resolve, reject) => {
-      const stream = Readable.from(csvBuffer.toString());
+      const stream = Buffer.isBuffer(csvBuffer) ? Readable.from(csvBuffer.toString()) : csvBuffer;
 
       stream
-        .pipe(csv())
+        .pipe(csv(parserOptions))
         .on('data', (value: unknown) => {
           rowCount++;
+          if (rowCount > MAX_CSV_ROWS) {
+            stream.destroy();
+            reject(new ValidationError('CSV exceeds the maximum row count', 'file'));
+            return;
+          }
           try {
             const row = decodeDoorDashCsvRow(value);
             // Validate required fields (check for empty strings after trimming)
+            row.STORE_NAME = boundedText(row.STORE_NAME, MAX_TEXT.merchant);
+            row.ITEM = boundedText(row.ITEM, MAX_TEXT.item);
+            row.CATEGORY = boundedText(row.CATEGORY, MAX_TEXT.category);
+            row.DELIVERY_ADDRESS = boundedText(row.DELIVERY_ADDRESS, MAX_TEXT.address);
             const storeName = row.STORE_NAME?.trim();
             const createdAt = row.CREATED_AT?.trim();
             if (!storeName || !createdAt) {
-              // Skip rows with missing required fields (likely empty/invalid rows)
+              invalidRows += 1;
               return;
             }
 
             // Validate subtotal
-            const subtotal = parseFloat(row.SUBTOTAL);
-            if (isNaN(subtotal) || subtotal < 0) {
-              // Skip rows with invalid subtotals
-              return;
-            }
+            const subtotal = finiteAmount(row.SUBTOTAL);
 
             // Validate UNIT_PRICE is a valid number (catches malformed CSV rows)
-            const unitPrice = parseFloat(row.UNIT_PRICE);
-            if (isNaN(unitPrice) || unitPrice < 0) {
-              // Skip rows with invalid unit prices (likely malformed CSV)
-              return;
-            }
+            const unitPrice = finiteAmount(row.UNIT_PRICE);
 
-            results.push(row);
+            const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
+            const item: ReceiptItem = {
+              name: row.ITEM,
+              quantity: finiteQuantity(row.QUANTITY),
+              price: unitPrice,
+              category: row.CATEGORY,
+            };
+            const group = results.get(orderKey);
+            if (group) {
+              if (group.items.length >= MAX_ITEMS_PER_ORDER) throw new ValidationError('An order contains too many items', 'file');
+              group.items.push(item);
+              group.subtotal += subtotal;
+            } else {
+              if (results.size >= MAX_CSV_ORDERS) {
+                stream.destroy();
+                reject(new ValidationError('CSV exceeds the maximum order count', 'file'));
+                return;
+              }
+              results.set(orderKey, { first: row, items: [item], subtotal });
+            }
           } catch (error) {
-            // Skip rows that cause parsing errors
+            invalidRows += 1;
             return;
           }
         })
         .on('end', () => {
           try {
+            if (exceedsInvalidRowBudget(invalidRows, rowCount)) {
+              reject(new ValidationError('CSV contains too many malformed rows', 'file'));
+              return;
+            }
             // Check if we have any valid data rows
             if (rowCount === 0) {
               // File only has headers, no data rows
@@ -313,7 +449,7 @@ export class CsvImportService {
               return;
             }
 
-            if (results.length === 0) {
+            if (results.size === 0) {
               // File has rows but none are valid
               resolve({
                 success: false,
@@ -333,7 +469,7 @@ export class CsvImportService {
 
             resolve({
               success: errors.length === 0,
-              totalOrders: this.getUniqueDoorDashOrderCount(results),
+              totalOrders: results.size,
               totalReceipts: receipts.length,
               totalAmount,
               errors,
@@ -353,30 +489,18 @@ export class CsvImportService {
    * Convert DoorDash CSV rows to Receipt objects
    * Groups items by order (same store, same created_at, same delivery_time)
    */
-  private convertDoorDashRowsToReceipts(rows: DoorDashCsvRow[], userId: string): Receipt[] {
-    // Group rows by order (store + created_at + delivery_time)
-    const orderGroups = new Map<string, DoorDashCsvRow[]>();
-
-    for (const row of rows) {
-      const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
-
-      if (!orderGroups.has(orderKey)) {
-        orderGroups.set(orderKey, []);
-      }
-      orderGroups.get(orderKey)!.push(row);
-    }
-
+  private convertDoorDashRowsToReceipts(orderGroups: Map<string, DoorDashOrderGroup>, userId: string): Receipt[] {
     const receipts: Receipt[] = [];
 
-    for (const [orderKey, orderRows] of orderGroups) {
-      const firstRow = orderRows[0];
+    for (const group of orderGroups.values()) {
+      const firstRow = group.first;
 
       // Parse order date (CREATED_AT is when order was placed)
       let orderDate: Date | undefined;
       if (firstRow.CREATED_AT) {
         try {
           const parsedDate = new Date(firstRow.CREATED_AT);
-          if (!isNaN(parsedDate.getTime())) {
+          if (!isNaN(parsedDate.getTime()) && safeDate(parsedDate)) {
             orderDate = parsedDate;
           } else {
             this.logRejectedOrder('doordash', 'invalid_order_date');
@@ -391,7 +515,7 @@ export class CsvImportService {
       if (firstRow.DELIVERY_TIME) {
         try {
           const parsedTime = new Date(firstRow.DELIVERY_TIME);
-          if (!isNaN(parsedTime.getTime())) {
+          if (!isNaN(parsedTime.getTime()) && safeDate(parsedTime)) {
             deliveryTime = parsedTime;
           } else {
             this.logRejectedOrder('doordash', 'invalid_delivery_time');
@@ -402,10 +526,7 @@ export class CsvImportService {
       }
 
       // Calculate order total by summing SUBTOTAL
-      const orderTotal = orderRows.reduce((sum, row) => {
-        const subtotal = parseFloat(row.SUBTOTAL) || 0;
-        return sum + subtotal;
-      }, 0);
+      const orderTotal = group.subtotal;
 
       if (isNaN(orderTotal) || orderTotal <= 0) {
         this.logRejectedOrder('doordash', 'invalid_order_total');
@@ -425,17 +546,10 @@ export class CsvImportService {
       }
 
       // Convert items
-      const items: ReceiptItem[] = orderRows.map((row) => ({
-        name: row.ITEM,
-        quantity: parseInt(row.QUANTITY) || 1,
-        price: parseFloat(row.UNIT_PRICE) || 0,
-        category: row.CATEGORY, // Store category for potential analytics
-      }));
-
       // Create receipt
       const receipt = new Receipt(
         userId,
-        items,
+        group.items,
         orderTotal,
         ReceiptType.DOORDASH, // Set receipt_type to DOORDASH
         firstRow.STORE_NAME,
@@ -451,52 +565,25 @@ export class CsvImportService {
   }
 
   /**
-   * Get count of unique DoorDash orders
-   */
-  private getUniqueDoorDashOrderCount(rows: DoorDashCsvRow[]): number {
-    const uniqueOrders = new Set<string>();
-
-    for (const row of rows) {
-      const orderKey = `${row.STORE_NAME}-${row.CREATED_AT}-${row.DELIVERY_TIME}`;
-      uniqueOrders.add(orderKey);
-    }
-
-    return uniqueOrders.size;
-  }
-
-  /**
    * Convert Uber Eats CSV rows to Receipt objects
    * Groups items by order (same restaurant, same time)
    * Note: All items in the same order should have the same Order_Price, but we group by restaurant + time
    * to handle any data inconsistencies where Order_Price might vary
    */
   private convertUberEatsRowsToReceipts(
-    rows: UberCsvRow[],
+    orderGroups: Map<string, UberOrderGroup>,
     userId: string,
     timezone: string,
   ): Receipt[] {
-    // Group rows by order (restaurant + time only)
-    // All items in the same order should be grouped together regardless of Order_Price value
-    const orderGroups = new Map<string, UberCsvRow[]>();
-
-    for (const row of rows) {
-      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}`;
-
-      if (!orderGroups.has(orderKey)) {
-        orderGroups.set(orderKey, []);
-      }
-      orderGroups.get(orderKey)!.push(row);
-    }
-
     const receipts: Receipt[] = [];
 
-    for (const [orderKey, orderRows] of orderGroups) {
-      const firstRow = orderRows[0];
+    for (const group of orderGroups.values()) {
+      const firstRow = group.first;
 
       // Parse order date
       let orderDate: Date | undefined;
       const parsedOrderDate = this.parseUberLocalTimestamp(firstRow.Request_Time_Local, timezone);
-      if (parsedOrderDate) {
+      if (parsedOrderDate && safeDate(parsedOrderDate)) {
         orderDate = parsedOrderDate;
       } else {
         this.logRejectedOrder('uber_eats', 'invalid_order_date');
@@ -509,7 +596,7 @@ export class CsvImportService {
           firstRow.Final_Delivery_Time_Local,
           timezone,
         );
-        if (parsedDeliveryTime) {
+        if (parsedDeliveryTime && safeDate(parsedDeliveryTime)) {
           deliveryTime = parsedDeliveryTime;
         } else {
           this.logRejectedOrder('uber_eats', 'invalid_delivery_time');
@@ -518,38 +605,15 @@ export class CsvImportService {
 
       // Parse order price - use the maximum Order_Price from all rows in case of inconsistencies
       // All rows should have the same Order_Price, but we take max to handle any data issues
-      const orderPrices = orderRows
-        .map((row) => parseFloat(row.Order_Price))
-        .filter((p) => !isNaN(p));
-      if (orderPrices.length === 0) {
+      if (group.maxOrderPrice === null) {
         this.logRejectedOrder('uber_eats', 'invalid_order_total');
         continue;
       }
-      const orderPrice = Math.max(...orderPrices); // Use max price as order total
-
-      // Convert items
-      const items: ReceiptItem[] = orderRows.map((row) => {
-        const quantity = Math.max(1, parseInt(row.Item_quantity, 10) || 1);
-        const linePrice = parseFloat(row.Item_Price) || 0;
-        return {
-          name: row.Item_Name,
-          quantity,
-          // Uber's Item_Price is the full line price (for example quantity 2
-          // at $16.99 is exported as $33.98). ReceiptItem.price is per unit.
-          price: linePrice / quantity,
-          customizations: row.Customizations
-            ? row.Customizations.split(',')
-                .map((value) => value.trim())
-                .filter(Boolean)
-            : [],
-        };
-      });
-
       // Create receipt
       const receipt = new Receipt(
         userId,
-        items,
-        orderPrice,
+        group.items,
+        group.maxOrderPrice,
         ReceiptType.UBER_EATS, // Set receipt_type to UBER_EATS
         firstRow.Restaurant_Name,
         orderDate,
@@ -585,22 +649,6 @@ export class CsvImportService {
     );
   }
 
-  /**
-   * Get count of unique Uber Eats orders
-   * Counts by restaurant + time (not price) to match receipt grouping
-   */
-  private getUniqueUberEatsOrderCount(rows: UberCsvRow[]): number {
-    const uniqueOrders = new Set<string>();
-
-    for (const row of rows) {
-      // Count unique orders by restaurant + time (matching receipt grouping)
-      const orderKey = `${row.Restaurant_Name}-${row.Request_Time_Local}`;
-      uniqueOrders.add(orderKey);
-    }
-
-    return uniqueOrders.size;
-  }
-
   private logRejectedOrder(
     provider: 'uber_eats' | 'doordash',
     reason: string,
@@ -620,7 +668,9 @@ export class CsvImportService {
    */
   validateCsvFormat(csvBuffer: Buffer): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
-    const content = csvBuffer.toString();
+    if (csvBuffer.length >= MAX_HEADER_BYTES && !csvBuffer.includes(0x0a)) return { valid: false, errors: ['CSV header exceeds the safe size limit'] };
+    const content = csvBuffer.toString('utf8').replace(/^\uFEFF/, '');
+    if (content.includes('\u0000')) return { valid: false, errors: ['CSV contains invalid binary data'] };
 
     // Check if it's a valid CSV
     if (!content.includes(',')) {
@@ -628,22 +678,13 @@ export class CsvImportService {
       return { valid: false, errors };
     }
 
-    const format = this.detectCsvFormat(csvBuffer);
-    const firstLine = content.split('\n')[0].toLowerCase();
+    const firstLine = content.split(/\r?\n/, 1)[0].toLowerCase();
+    const headers = firstLine.split(',').map((header) => header.trim());
+    if (headers.length > MAX_CSV_COLUMNS) return { valid: false, errors: ['CSV contains too many columns'] };
+    if (new Set(headers).size !== headers.length) return { valid: false, errors: ['CSV contains duplicate headers'] };
+    const format = this.detectCsvFormat(Buffer.from(firstLine));
 
     if (format === 'doordash') {
-      // Check if it's a profile file (no order data) or order file
-      const isProfileFile =
-        firstLine.includes('first_name') &&
-        firstLine.includes('last_name') &&
-        firstLine.includes('email');
-
-      if (isProfileFile) {
-        // Profile file is valid DoorDash format, but will have no orders
-        // Let it through validation - parser will handle "no orders" case
-        return { valid: true, errors: [] };
-      }
-
       // Check for DoorDash order required headers
       const requiredHeaders = [
         'item',
@@ -655,7 +696,7 @@ export class CsvImportService {
       ];
 
       for (const header of requiredHeaders) {
-        if (!firstLine.includes(header)) {
+        if (!headers.includes(header)) {
           errors.push(`Missing required DoorDash header: ${header}`);
         }
       }
@@ -672,7 +713,7 @@ export class CsvImportService {
       ];
 
       for (const header of requiredHeaders) {
-        if (!firstLine.includes(header)) {
+        if (!headers.includes(header)) {
           errors.push(`Missing required Uber Eats header: ${header}`);
         }
       }
@@ -684,5 +725,16 @@ export class CsvImportService {
       valid: errors.length === 0,
       errors,
     };
+  }
+
+  private async readHeaderSample(filePath: string): Promise<Buffer> {
+    const handle = await open(filePath, 'r');
+    try {
+      const sample = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
+      return sample.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 }

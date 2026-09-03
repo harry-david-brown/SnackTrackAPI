@@ -30,7 +30,7 @@ Use responsibilities rather than folder names as the governing rule:
 
 `application service/use case → repository or external-provider port`
 
-The composition root constructs concrete PostgreSQL, cache, email, OAuth, and provider adapters. Pure domain logic remains independent of infrastructure ports. Inner business logic must not depend on Express request/response objects, global singletons, environment variables, or vendor response shapes.
+The composition root constructs concrete PostgreSQL, cache, email, OAuth, and provider adapters. Application services depend on the narrow capabilities in `src/services/ports/`; pure domain logic remains independent of infrastructure. Inner business logic must not depend on Express request/response objects, global singletons, environment variables, database drivers, or vendor response shapes.
 
 ## Core rules
 
@@ -46,16 +46,16 @@ The composition root constructs concrete PostgreSQL, cache, email, OAuth, and pr
 - Comments explain invariants, tradeoffs, or external constraints. Names and structure explain what the code does.
 - Do not create interfaces, factories, base classes, or wrappers without a real substitution point, boundary, or repeated use case.
 
-## Transition policy
+## Established architecture policy
 
-The API contains legacy direct database access, broad services, string-keyed dependency lookup, and mixed transport/domain concerns. Treat this skill as the target for new and touched code, not authorization for a repository-wide rewrite.
+The typed composition root, application ports, route factories, versioned migrations, canonical error envelope, and structured telemetry are established production boundaries. Preserve them rather than treating them as aspirational migration targets.
 
-- New behavior follows the target dependency model.
-- A meaningful change should repair the complete touched boundary when safe and covered.
-- A small fix may preserve a legacy owner, but must not add a second source of truth or deepen hidden coupling.
-- Introduce compatibility adapters only when active callers require them, and make the direction toward the target architecture explicit.
-- Delete old paths only after all callers, scheduled writers, tests, and runtime registration have been checked.
+- New behavior follows the dependency model and extends an existing port or adds a narrow new one at a real volatile/test boundary.
+- A meaningful change repairs the complete touched boundary when safe and covered; do not recreate route SQL, concrete adapter imports in application services, or resource singletons.
+- Compatibility adapters require an active caller, a named rollout gate, and one-way ownership toward the canonical contract.
+- Delete old paths only after all callers, scheduled writers, tests, runtime registration, and app normalizers have been checked.
+- Run `npm run check:architecture` only when the user requests architectural verification; its forbidden-import and cycle rules are the executable backstop.
 
 ## Handoff
 
-Report the use-case owner, dependency path, contract/error effects, test seam and regression coverage, TypeScript check result, and any intentionally retained legacy boundary. For cleanup work, distinguish completed structural improvements from remaining risks rather than claiming the whole area is clean.
+Report the use-case owner, dependency path, contract/error effects, test seam and regression coverage, TypeScript check result, and any intentionally retained compatibility gate. For cleanup work, distinguish completed structural improvements from remaining risks rather than claiming unrelated areas are clean.

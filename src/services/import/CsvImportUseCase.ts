@@ -7,12 +7,14 @@ import type {
 import type { ReceiptWritePort, UserCacheInvalidationPort } from '../ports/ReceiptPorts';
 import type { ExportProvider } from './ImportLifecycleTypes';
 import { CsvImportService } from './CsvImportService';
+import type { ImportLockHandle } from './ImportLockService';
 
-export interface CsvImportCommand {
+export type CsvImportCommand = {
   userId: string;
-  csvBuffer: Buffer;
+  provider: ExportProvider;
   fileType: 'csv' | 'zip';
-}
+  jobId?: string;
+} & ({ csvBuffer: Buffer; csvPath?: never } | { csvPath: string; csvBuffer?: never });
 
 export interface CsvImportOperationResult {
   message: string;
@@ -32,7 +34,7 @@ const invalidImport = (
 export class CsvImportUseCase {
   constructor(
     private readonly csv: CsvImportService,
-    private readonly receipts: Pick<ReceiptWritePort, 'replaceProviderExport'>,
+    private readonly receipts: Pick<ReceiptWritePort, 'replaceProviderExport' | 'stageProviderExport' | 'replaceStagedProviderExport'>,
     private readonly users: Pick<MailboxUserPort, 'findById'>,
     private readonly preferences: Pick<ImportLifecyclePort, 'setExportStatus'>,
     private readonly cache: UserCacheInvalidationPort,
@@ -48,18 +50,30 @@ export class CsvImportUseCase {
       );
     }
 
+    try {
+      return await this.executeWithLock(command, lock);
+    } finally {
+      await this.locks.releaseLock(lock);
+    }
+  }
+
+  async executeWithLock(command: CsvImportCommand, lock: ImportLockHandle): Promise<CsvImportOperationResult> {
     let lifecycleStarted = false;
     let completed = false;
     let provider: ExportProvider | undefined;
     try {
-      const validation = this.csv.validateCsvFormat(command.csvBuffer);
+      const validation = command.csvPath
+        ? await this.csv.validateCsvPathForProvider(command.csvPath, command.provider)
+        : this.csv.validateCsvFormat(command.csvBuffer!);
       if (!validation.valid) {
         throw invalidImport('INVALID_CSV_FORMAT', 'Invalid CSV format', {
           errors: validation.errors,
         });
       }
 
-      const format = this.csv.detectCsvFormat(command.csvBuffer);
+      const format = command.csvPath
+        ? await this.csv.detectCsvFormatFromFile(command.csvPath)
+        : this.csv.detectCsvFormat(command.csvBuffer!);
       if (format === 'unknown') {
         throw invalidImport(
           'UNKNOWN_EXPORT_PROVIDER',
@@ -67,6 +81,9 @@ export class CsvImportUseCase {
         );
       }
       provider = format === 'uber' ? 'uber_eats' : 'doordash';
+      if (provider !== command.provider) {
+        throw invalidImport('UPLOAD_PROVIDER_MISMATCH', 'The selected file belongs to a different delivery provider.');
+      }
       lifecycleStarted = await this.preferences.setExportStatus(
         command.userId,
         provider,
@@ -74,17 +91,29 @@ export class CsvImportUseCase {
       );
 
       const user = await this.users.findById(command.userId);
-      const parsed = await this.csv.parseCsvFile(command.csvBuffer, command.userId, user?.timezone);
+      const parsed = command.csvPath
+        ? await this.csv.parseCsvPathForProvider(command.csvPath, command.provider, command.userId, user?.timezone)
+        : await this.csv.parseCsvFile(command.csvBuffer!, command.userId, user?.timezone);
       if (parsed.receipts.length === 0) {
         throw invalidImport('NO_VALID_EXPORT_ORDERS', 'No valid orders found in file', {
           errors: parsed.errors.length > 0 ? parsed.errors : ['File contains no valid order data'],
         });
       }
 
-      await this.receipts.replaceProviderExport(command.userId, parsed.receipts, () =>
-        this.locks.assertLockOwned(lock),
+      if (command.jobId) {
+        await this.receipts.stageProviderExport(command.jobId, parsed.receipts);
+        await this.receipts.replaceStagedProviderExport(command.jobId, command.userId, () => this.locks.assertLockOwned(lock));
+      } else {
+        await this.receipts.replaceProviderExport(command.userId, parsed.receipts, () => this.locks.assertLockOwned(lock));
+      }
+      await this.preferences.setExportStatus(
+        command.userId,
+        provider,
+        'completed',
+        undefined,
+        undefined,
+        { importedCount: parsed.totalReceipts, totalAmount: parsed.totalAmount, fileType: command.fileType },
       );
-      await this.preferences.setExportStatus(command.userId, provider, 'completed');
       completed = true;
       await this.cache.invalidateAllUserCaches(command.userId);
 
@@ -115,8 +144,6 @@ export class CsvImportUseCase {
           .catch(() => undefined);
       }
       throw failure;
-    } finally {
-      await this.locks.releaseLock(lock);
     }
   }
 }

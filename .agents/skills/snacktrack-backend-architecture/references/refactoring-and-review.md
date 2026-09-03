@@ -41,7 +41,7 @@ Common transformations:
 - inject a clock, cache, repository, or client instead of importing a singleton;
 - replace boolean combinations or magic strings with a discriminated union;
 - split one application operation from a broad service; and
-- replace string-keyed lookup with typed composition for the touched dependency path.
+- extend the typed composition root and narrow port for the touched dependency path.
 
 ## Preserve behavior deliberately
 

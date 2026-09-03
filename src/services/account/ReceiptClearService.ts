@@ -36,6 +36,12 @@ export class ReceiptClearService {
     let deletedReceipts = 0;
     try {
       await this.postgres.withTransaction(async (transaction) => {
+        await transaction.query('UPDATE users SET import_generation=import_generation+1,updated_at=NOW() WHERE id=$1', [userId]);
+        await transaction.query(
+          `UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW()
+           WHERE user_id=$1 AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')`,
+          [userId],
+        );
         const receiptResult = await transaction.query('DELETE FROM receipts WHERE user_id = $1', [
           userId,
         ]);
@@ -58,13 +64,14 @@ export class ReceiptClearService {
                last_tracking_error_at = NULL,
                last_tracking_error_code = NULL,
                tracking_status = 'inactive',
+               initial_setup_deferred_until = NULL,
                updated_at = NOW()
            WHERE user_id = $1`,
           [userId],
         );
         await transaction.query(
           `UPDATE user_export_provider_preferences
-           SET status = 'not_started', error_code = NULL, updated_at = NOW()
+           SET status = 'not_started', relevance = 'unknown', error_code = NULL, updated_at = NOW()
            WHERE user_id = $1`,
           [userId],
         );

@@ -2,6 +2,7 @@ import { AppError, ConflictError, ValidationError } from '../../core/errors';
 import type { GmailImportResult, GmailImportService } from './GmailImportService';
 import type { ImportLockHandle, ImportLockService } from './ImportLockService';
 import type { ImportStatusService } from './ImportStatusService';
+import type { ImportExecutionCheckpoint } from './ImportJobTypes';
 
 type StatusPort = Pick<ImportStatusService, 'getConnection'>;
 type ImportPort = Pick<GmailImportService, 'importFromGmail'>;
@@ -24,6 +25,21 @@ export class HistoricalGmailImportService {
   }
 
   async execute(userId: string): Promise<GmailImportResult> {
+    const lock = await this.locks.acquireLock(userId);
+    if (!lock) {
+      throw new ConflictError(
+        'IMPORT_IN_PROGRESS',
+        'A receipt import is already running for your account. Please wait for it to complete.',
+      );
+    }
+    try {
+      return await this.executeWithLock(userId, lock);
+    } finally {
+      await this.locks.releaseLock(lock);
+    }
+  }
+
+  async executeWithLock(userId: string, lock: ImportLockHandle, execution?: ImportExecutionCheckpoint): Promise<GmailImportResult> {
     const { user, health, status } = await this.status.getConnection(userId, true);
     if (health.status === 'reconnect_required' || status.needsReconnect) {
       throw new ConflictError(
@@ -41,28 +57,21 @@ export class HistoricalGmailImportService {
       throw new ValidationError('Gmail account is not connected for receipt imports.');
     }
 
-    const lock = await this.locks.acquireLock(userId);
-    if (!lock) {
-      throw new ConflictError(
-        'IMPORT_IN_PROGRESS',
-        'A receipt import is already running for your account. Please wait for it to complete.',
-      );
-    }
-    return this.runLocked(userId, lock, user);
+    return this.runLocked(userId, lock, user, execution);
   }
 
   private async runLocked(
     userId: string,
     lock: ImportLockHandle,
     user: Parameters<ImportPort['importFromGmail']>[0],
+    execution?: ImportExecutionCheckpoint,
   ): Promise<GmailImportResult> {
-    try {
-      this.logger.info('Gmail import started', {
+    this.logger.info('Gmail import started', {
         userId,
         operation: 'gmail_historical_import',
         outcome: 'started',
       });
-      const result = await this.gmailImport.importFromGmail(user, lock);
+      const result = await this.gmailImport.importFromGmail(user, lock, 'manual', execution);
       this.logger.info('Gmail import finished', {
         userId,
         operation: 'gmail_historical_import',
@@ -80,15 +89,12 @@ export class HistoricalGmailImportService {
           );
         }
         throw new AppError({
-          code: 'GMAIL_IMPORT_FAILED',
+          code: result.errorCode ?? 'GMAIL_IMPORT_FAILED',
           message: 'Gmail import failed',
           publicMessage: 'Gmail import failed. Please try again.',
           details: result.errorCode ? { providerCode: result.errorCode } : undefined,
         });
       }
-      return result;
-    } finally {
-      await this.locks.releaseLock(lock);
-    }
+    return result;
   }
 }
