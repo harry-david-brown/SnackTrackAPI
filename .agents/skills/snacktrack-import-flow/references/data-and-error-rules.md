@@ -1,12 +1,12 @@
 # Data, consent, and error rules
 
-## Gmail health
+## Mailbox health
 
 - Validate token health before enabling an import CTA when practical.
 - Cache health briefly to avoid excessive provider calls, but invalidate it after reconnect/token changes.
 - `invalid_grant` is a durable reconnect-required condition. Clear or disable unusable credentials while preserving the known account identity and already imported receipt history.
 - A timeout/provider outage is temporary unavailability, not revocation. Do not destroy credentials or mark import complete.
-- Preserve a machine-readable API error such as `GMAIL_RECONNECT_REQUIRED` so every UI surface chooses the same recovery.
+- Preserve a provider-specific machine-readable reconnect error so every UI surface chooses the same recovery.
 - A successful OAuth callback means credential persistence completed before the redirect. The app may still observe an in-flight pre-callback preference response; refresh with a bounded retry instead of showing a false connection failure from the first stale `disconnected`/null projection.
 
 ## Consent
@@ -20,9 +20,9 @@
 
 ## Receipt identity and merging
 
-- Gmail incremental imports should upsert by stable provider/message identity rather than create duplicates.
+- Gmail and Outlook incremental imports should upsert by stable provider/mailbox/message identity rather than create duplicates.
 - Track new, updated, and unchanged counts accurately; zero new orders can still be a successful incremental sync.
-- Export imports may contain richer historical data and line items. Apply documented overlap/cutoff replacement consistently and preserve Gmail receipts newer than the export coverage.
+- Export imports may contain richer historical data and line items. Apply documented overlap/cutoff replacement consistently and preserve mailbox receipts newer than the export coverage.
 - Derive source coverage from durable receipt source metadata, not only from onboarding preferences.
 - Recompute or invalidate dashboard, summary, recent-activity, and receipt-list caches after writes.
 
@@ -34,12 +34,13 @@
 
 ## Import/reset concurrency
 
-- Build the complete writer set: manual Gmail import, app-triggered tracking, scheduled batch tracking, export upload, reset, clear, and deletion.
+- Build the complete writer set: manual Gmail/Outlook import, app-triggered tracking, scheduled batch tracking, queued workers, export upload, reset, clear, and deletion.
 - Make every conflicting writer use the same per-user lock protocol.
 - Acquire a destructive-operation lock before its transaction and release it in `finally`.
 - Use ownership-token/fenced distributed locks so an expired owner cannot release a newer lock.
 - Bound reset waits and return a retryable conflict when the current writer does not finish in time.
 - Invalidate derived caches after commit; destructive client operations must remove stale cache values rather than leave them renderable.
+- Advance/check the user's import generation and terminate or supersede durable jobs so queued work cannot reinsert reset data.
 
 ## Error contract
 

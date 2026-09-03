@@ -17,10 +17,21 @@ List every derived resource before implementation:
 - dashboard insights;
 - receipt lists/details;
 - import preferences/source coverage;
-- Gmail connection-health cache and the canonical import-preferences projection;
+- Gmail/Outlook connection-health caches and the canonical import-preferences projection;
 - any device or query cache owned by the app.
 
 Invalidate server caches only after commit. A destructive client mutation should remove cached values immediately after success; ordinary updates may write authoritative responses and invalidate dependents.
+
+Cache Redis is an optimization: reads degrade to misses and writes/invalidation may fail soft. Distributed locks and refresh-token consume/revocation are correctness boundaries and fail closed when unavailable. Keep these capabilities separate even when they share a Redis URL.
+
+After initial Redis connection or reconnection, clear only SnackTrack projection-cache prefixes before enabling cache reads. Never clear BullMQ or refresh-token keys. Use per-process, per-key single flight around expensive projections so an outage or cold cache does not stampede PostgreSQL.
+
+## Durable operation and outbox mutations
+
+- Insert an accepted import operation and its dispatch outbox event in one transaction.
+- State transitions, idempotency, active-job limits, cancellation, generation checks, and outbox suppression belong in the durable repository/service boundary.
+- Queue publication marks the durable record queued only after BullMQ accepts it; failed publication remains retryable from the outbox.
+- Administrative cancellation must exclude running and awaiting-upload work when that is the stated contract, suppress future dispatch atomically, and audit the mutation in the same transaction. Redis cleanup is best effort because recovered workers must still honor durable cancellation.
 
 ## Migrations
 

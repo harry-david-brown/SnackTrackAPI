@@ -30,7 +30,7 @@ Use responsibilities rather than folder names as the governing rule:
 
 `application service/use case → repository or external-provider port`
 
-The composition root constructs concrete PostgreSQL, cache, email, OAuth, and provider adapters. Application services depend on the narrow capabilities in `src/services/ports/`; pure domain logic remains independent of infrastructure. Inner business logic must not depend on Express request/response objects, global singletons, environment variables, database drivers, or vendor response shapes.
+The composition root constructs concrete PostgreSQL, Redis capability, queue, object-storage, email, OAuth, and provider adapters. The API, worker, and scheduler entrypoints own process lifecycle. Application services depend on the narrow capabilities in `src/services/ports/`; pure domain logic remains independent of infrastructure. Inner business logic must not depend on Express request/response objects, global singletons, environment variables, database drivers, BullMQ jobs, or vendor response shapes.
 
 ## Core rules
 
@@ -48,7 +48,7 @@ The composition root constructs concrete PostgreSQL, cache, email, OAuth, and pr
 
 ## Established architecture policy
 
-The typed composition root, application ports, route factories, versioned migrations, canonical error envelope, and structured telemetry are established production boundaries. Preserve them rather than treating them as aspirational migration targets.
+The typed composition root, application ports, route factories, versioned migrations, durable import jobs/outbox, canonical error envelope, and structured telemetry are established production boundaries. Preserve them rather than treating them as aspirational migration targets.
 
 - New behavior follows the dependency model and extends an existing port or adds a narrow new one at a real volatile/test boundary.
 - A meaningful change repairs the complete touched boundary when safe and covered; do not recreate route SQL, concrete adapter imports in application services, or resource singletons.

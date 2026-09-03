@@ -1,6 +1,6 @@
 ---
 name: snacktrack-account-data-lifecycle
-description: Define and implement SnackTrack account-data retention, clearing, onboarding reset, fresh-account restoration, account deletion, privacy deletion, and source-data cleanup. Use when a request asks to reset onboarding or imported data, clear receipts or stats, disconnect providers as part of a reset, remove Gmail/Uber/DoorDash history, diagnose data that returned after deletion, or decide exactly what account identity and preferences must be preserved.
+description: Define and implement SnackTrack account-data retention, clearing, onboarding reset, fresh-account restoration, account deletion, privacy deletion, and source-data cleanup. Use when a request asks to reset onboarding or imported data, clear receipts or stats, disconnect mailbox providers as part of a reset, remove Gmail/Outlook/Uber/DoorDash history, neutralize durable import jobs, diagnose data that returned after deletion, or decide exactly what account identity and preferences must be preserved.
 ---
 
 # SnackTrack Account Data Lifecycle
@@ -23,7 +23,8 @@ Treat destructive account-data operations as explicit product contracts, not col
 - “Reset onboarding,” “clear receipts,” “fresh account,” and “delete account” are different contracts until product intent explicitly makes them equivalent.
 - A fresh-account reset normally preserves authentication identity and profile essentials while deleting all imported content and provider access.
 - Disconnect credentials and revoke background permissions in the same server operation that clears imported data.
-- Serialize the reset with every writer that could repopulate deleted data, including Gmail sync and export upload.
+- Serialize the reset with every writer that could repopulate deleted data, including Gmail/Outlook sync, queued workers, and export upload.
+- Advance the import generation and supersede active durable operations in the reset transaction so delayed/outage-recovered workers cannot commit old work.
 - Perform related database mutations in one transaction; invalidate API and app caches only after commit.
 - Remove rather than merely invalidate client caches after destructive resets so stale data cannot remain renderable.
 - Verify durable source rows, not only lifecycle booleans or success messages.

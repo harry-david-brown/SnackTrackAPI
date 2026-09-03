@@ -14,6 +14,7 @@ import { asyncImportJobsMigration } from './012_async_import_jobs';
 import { importJobCheckpointsMigration } from './013_import_job_checkpoints';
 import { importInputSecurityMigration } from './014_import_input_security';
 import { adminQueryIndexesMigration } from './015_admin_query_indexes';
+import { redisQueueResilienceMigration } from './016_redis_queue_resilience';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -31,4 +32,5 @@ export const migrations: readonly Migration[] = [
   importJobCheckpointsMigration,
   importInputSecurityMigration,
   adminQueryIndexesMigration,
+  redisQueueResilienceMigration,
 ];

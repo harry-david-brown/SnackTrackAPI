@@ -12,6 +12,7 @@ import type {
   AdminUserIssue,
   AdminUserSort,
 } from '../services/admin/AdminManagementService';
+import type { AdminQueueOperationsService } from '../services/admin/AdminQueueOperationsService';
 
 interface AdminRouterDependencies {
   auth: AdminAuthService;
@@ -24,6 +25,7 @@ interface AdminRouterDependencies {
   databaseHealth: { check(): Promise<{ status: string; latencyMs: number | null; errorCode?: string }> };
   cache: { getStats(): Promise<unknown> };
   alerting: { getHealthStatus(): unknown };
+  queues: Pick<AdminQueueOperationsService, 'status' | 'cancelPending'>;
   production: boolean;
 }
 
@@ -102,6 +104,17 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
     const now = new Date();
     const recentImports = await d.management.imports(new Date(now.getTime() - 24 * 60 * 60 * 1000), now);
     res.json({ timestamp: now.toISOString(), database, cache: await d.cache.getStats(), instance: { scope: 'current_process', uptimeSeconds: process.uptime(), alerting: d.alerting.getHealthStatus() }, recentImports });
+  }));
+  router.get('/operations/queues', d.requireOperator, asyncHandler(async (_req, res) => {
+    res.json(await d.queues.status());
+  }));
+  router.post('/operations/queues/cancel-pending', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
+    const reason = string(req.body, 'reason');
+    if (reason.length < 10 || reason.length > 500) throw new ValidationError('Must be 10–500 characters', 'reason');
+    if (string(req.body, 'confirmation') !== 'CANCEL PENDING IMPORTS') {
+      throw new ValidationError('Must exactly match CANCEL PENDING IMPORTS', 'confirmation');
+    }
+    res.json(await d.queues.cancelPending({ actorAdminId: req.admin!.id, reason, requestId: req.requestId }));
   }));
   router.get('/operations/attention', d.requireOperator, asyncHandler(async (req, res) => {
     const range = dateRange(req.query as Record<string, unknown>);

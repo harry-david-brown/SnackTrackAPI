@@ -23,6 +23,9 @@ import { getLogLevel, getRecentLogs, logger, logRequest, setLogLevel } from './c
 import * as Sentry from '@sentry/node';
 import { container } from './services/core/ServiceContainer';
 import { ShutdownCoordinator } from './services/core/ShutdownCoordinator';
+import { ImportQueueOperations } from './services/queue/ImportQueues';
+import { AdminQueueOperationsService } from './services/admin/AdminQueueOperationsService';
+import { redisLockStore } from './config/redis';
 
 import {
   securityHeaders,
@@ -57,6 +60,12 @@ import { paginationMiddleware } from './middleware/pagination';
 import { validateUUIDParam } from './middleware/validation';
 
 const app = express();
+const queueOperations = new ImportQueueOperations(config.getQueueConfig());
+const adminQueueOperations = new AdminQueueOperationsService(
+  container.importJobRepository,
+  queueOperations,
+  redisLockStore,
+);
 
 const authenticateToken = createAuthenticateToken({
   tokens: container.tokenService,
@@ -150,14 +159,20 @@ app.get(
     const responseTime = Date.now() - startTime;
 
     if (readiness.status === 'connected') {
+      const redis = redisLockStore.snapshot();
+      const degraded = redis.enabled && redis.state !== 'ready';
       logRequest(req, res, responseTime);
       return res.status(200).json({
-        status: 'ok',
+        status: degraded ? 'degraded' : 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         database: {
           status: 'connected',
           latency: readiness.latencyMs,
+        },
+        redis: {
+          cache: redis,
+          locks: redis,
         },
       });
     }
@@ -308,6 +323,7 @@ app.use(
     databaseHealth: container.databaseHealthService,
     cache: container.cacheService,
     alerting: container.alertingService,
+    queues: adminQueueOperations,
     production: config.isProduction(),
   }),
 );
@@ -386,6 +402,7 @@ async function startServer() {
           }),
       },
       { name: 'Redis connection', close: () => redisConfig.close() },
+      { name: 'Queue monitoring connection', close: () => adminQueueOperations.close() },
       { name: 'Import object storage', close: () => container.importObjectStorage.close() },
       { name: 'PostgreSQL connection', close: () => postgresService.close() },
       { name: 'Sentry transport', close: () => Sentry.close(2000).then(() => undefined) },
@@ -423,7 +440,7 @@ async function startServer() {
     });
     container.alertingService.close();
     container.analyticsMaintenanceService.close();
-    await Promise.allSettled([redisConfig.close(), postgresService.close(), Sentry.close(2000)]);
+    await Promise.allSettled([redisConfig.close(), adminQueueOperations.close(), postgresService.close(), Sentry.close(2000)]);
     process.exitCode = 1;
   }
 }

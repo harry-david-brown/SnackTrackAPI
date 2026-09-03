@@ -88,7 +88,6 @@ services:
     command: npm run dev
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
 
   worker:
@@ -96,7 +95,6 @@ services:
     command: npm run dev:worker
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
 
   scheduler:
@@ -105,7 +103,6 @@ services:
     profiles: ["tools"]
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
 
 volumes:
   postgres_data:

@@ -31,6 +31,12 @@ const createCacheFake = () => {
       calls.push(['set', key, value, ttl]);
       values.set(key, value);
     },
+    setIfAbsent: async (key, value, ttl) => {
+      calls.push(['setIfAbsent', key, value, ttl]);
+      if (values.has(key)) return false;
+      values.set(key, value);
+      return true;
+    },
     del: async (key) => {
       calls.push(['del', key]);
       values.delete(key);

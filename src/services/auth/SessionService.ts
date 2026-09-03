@@ -10,7 +10,7 @@ export class SessionService {
   ) {}
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
-    const payload = await this.tokens.consumeRefreshToken(refreshToken);
+    const payload = await this.tokens.verifyRefreshTokenWithBlacklist(refreshToken);
     const user = await this.users.findById(payload.userId);
     if (!user) {
       throw new AuthenticationError(
@@ -18,6 +18,7 @@ export class SessionService {
         'REFRESH_TOKEN_INVALID',
       );
     }
+    await this.tokens.consumeRefreshToken(refreshToken);
     return this.tokens.generateTokens(user);
   }
 

@@ -9,17 +9,22 @@ export const EXPORT_IMPORT_QUEUE = 'export-imports';
 export const NOTIFICATION_QUEUE = 'notifications';
 export interface QueuePayload { readonly jobId: string }
 
-const consumerConnection = (url: string): IORedis => new IORedis(url, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
-});
-const producerConnection = (url: string): IORedis => new IORedis(url, {
-  maxRetriesPerRequest: 1,
-  enableReadyCheck: true,
-  enableOfflineQueue: false,
-  connectTimeout: 5_000,
-  retryStrategy: (attempt) => Math.min(30_000, Math.max(250, 250 * 2 ** Math.min(attempt, 7))),
-});
+const consumerConnection = (url: string): IORedis => {
+  const connection = new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: true });
+  connection.on('error', () => undefined);
+  return connection;
+};
+const producerConnection = (url: string): IORedis => {
+  const connection = new IORedis(url, {
+    maxRetriesPerRequest: 1,
+    enableReadyCheck: true,
+    enableOfflineQueue: false,
+    connectTimeout: 5_000,
+    retryStrategy: (attempt) => Math.min(30_000, Math.max(250, 250 * 2 ** Math.min(attempt, 7))),
+  });
+  connection.on('error', () => undefined);
+  return connection;
+};
 
 type QueueSet = {
   readonly mailbox: Queue<QueuePayload>;
@@ -64,7 +69,8 @@ export class ImportQueuePublisher {
   }
   async close(): Promise<void> {
     await Promise.all([this.queues.mailbox.close(), this.queues.exports.close(), this.queues.notifications.close()]);
-    if (this.connection.status !== 'end') await this.connection.quit().catch(() => this.connection.disconnect());
+    if (this.connection.status === 'ready') await this.connection.quit().catch(() => this.connection.disconnect());
+    else this.connection.disconnect();
   }
 }
 
@@ -129,7 +135,7 @@ export class ImportQueueOperations {
     }
     return removed;
   }
-  async close(): Promise<void> { await Promise.all(Object.values(this.queues).map((queue) => queue.close())); if (this.connection.status !== 'end') await this.connection.quit().catch(() => this.connection.disconnect()); }
+  async close(): Promise<void> { await Promise.all(Object.values(this.queues).map((queue) => queue.close())); if (this.connection.status === 'ready') await this.connection.quit().catch(() => this.connection.disconnect()); else this.connection.disconnect(); }
 }
 
 export const createQueueWorker = (queueName: string, queueUrl: string, concurrency: number, processor: (job: Job<QueuePayload>) => Promise<void>): Worker<QueuePayload> => new Worker(queueName, processor, { connection: consumerConnection(queueUrl), concurrency, lockDuration: 10 * 60 * 1000, stalledInterval: 30_000, maxStalledCount: 1 });

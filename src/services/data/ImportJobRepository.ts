@@ -106,6 +106,17 @@ export interface ImportObjectCleanupCandidate {
   readonly objectKey: string;
 }
 
+export interface DurableQueueSnapshot {
+  readonly statuses: Readonly<Record<string, number>>;
+  readonly unpublishedOutboxCount: number;
+  readonly oldestUnpublishedOutboxAgeSeconds: number | null;
+}
+
+export interface CancelledImportJob {
+  readonly id: string;
+  readonly kind: ImportJobKind;
+}
+
 export class ImportJobRepository {
   constructor(
     private readonly database: DatabaseTransactionRunner & DatabaseQueryExecutor,
@@ -174,7 +185,7 @@ export class ImportJobRepository {
          (user_id,kind,trigger_type,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at)
          VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $4='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
          RETURNING ${selectColumns}`,
-        [input.userId,input.kind,input.trigger,status,input.awaitingUpload ? 'awaiting_upload' : 'waiting',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
+        [input.userId,input.kind,input.trigger,status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
       );
       const job = decode(inserted.rows[0]);
       if (!input.awaitingUpload) await this.insertOutbox(transaction, job.id, 'dispatch');
@@ -185,7 +196,7 @@ export class ImportJobRepository {
   async submitUpload(userId: string, jobId: string, input: { contentLength: number; contentType: string | null; etag: string }): Promise<ImportJob> {
     return this.database.withTransaction(async (transaction) => {
       const result = await transaction.query<Row>(
-        `UPDATE import_jobs SET status='pending_dispatch',phase='waiting',progress=0,content_length=$3,
+        `UPDATE import_jobs SET status='pending_dispatch',phase='waiting_for_queue',progress=0,content_length=$3,
            submitted_content_length=$3,submitted_content_type=$4,object_etag=$5,
            queued_at=NULL,expires_at=NULL,updated_at=NOW()
          WHERE id=$1 AND user_id=$2 AND status='awaiting_upload' AND expires_at>NOW()
@@ -276,6 +287,15 @@ export class ImportJobRepository {
     await this.database.query(`UPDATE import_jobs SET status='retrying',phase='retrying',error_code=$2,error_message=$3,heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [jobId,code,message.slice(0,500)]);
   }
 
+  async delayForInfrastructure(jobId: string, code: string, message: string): Promise<void> {
+    await this.database.query(
+      `UPDATE import_jobs SET status='retrying',phase='waiting_for_infrastructure',
+         attempts=GREATEST(0,attempts-1),error_code=$2,error_message=$3,heartbeat_at=NULL,updated_at=NOW()
+       WHERE id=$1 AND status='running'`,
+      [jobId, code, message.slice(0, 500)],
+    );
+  }
+
   private async finish(job: ImportJob, status: 'succeeded'|'failed', phase: string, result: Readonly<Record<string, unknown>>|null, code: string|null, message: string|null): Promise<void> {
     await this.database.withTransaction(async (transaction) => {
       const updated = await transaction.query(
@@ -315,7 +335,19 @@ export class ImportJobRepository {
   }
 
   async markOutboxFailed(id: number, error: string): Promise<void> {
-    await this.database.query(`UPDATE import_job_outbox SET last_error=$2,available_at=NOW()+(LEAST(attempts,10)*INTERVAL '15 seconds') WHERE id=$1`, [id,error.slice(0,500)]);
+    await this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(
+        `UPDATE import_job_outbox SET last_error=$2,available_at=NOW()+(LEAST(attempts,10)*INTERVAL '15 seconds')
+         WHERE id=$1 RETURNING job_id,event_type`, [id,error.slice(0,500)],
+      );
+      const event = result.rows[0];
+      if (event && event.event_type === 'dispatch') {
+        await transaction.query(
+          `UPDATE import_jobs SET phase='waiting_for_queue',updated_at=NOW()
+           WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying')`, [text(event, 'job_id')],
+        );
+      }
+    });
   }
 
   async supersedeActive(userId: string, executor: DatabaseQueryExecutor = this.database): Promise<void> {
@@ -331,7 +363,7 @@ export class ImportJobRepository {
     const result = await this.database.query<Row>(
       `SELECT id,object_key FROM import_jobs
        WHERE object_key IS NOT NULL
-         AND status IN ('succeeded','failed','expired','superseded')
+         AND status IN ('succeeded','failed','expired','superseded','cancelled')
          AND updated_at < NOW()-INTERVAL '1 hour'
        ORDER BY updated_at LIMIT $1`,
       [Math.max(1, Math.min(limit, 500))],
@@ -342,9 +374,52 @@ export class ImportJobRepository {
   async markObjectDeleted(jobId: string, objectKey: string): Promise<void> {
     await this.database.query(
       `UPDATE import_jobs SET object_key=NULL,object_etag=NULL,updated_at=NOW()
-       WHERE id=$1 AND object_key=$2 AND status IN ('succeeded','failed','expired','superseded')`,
+       WHERE id=$1 AND object_key=$2 AND status IN ('succeeded','failed','expired','superseded','cancelled')`,
       [jobId, objectKey],
     );
+  }
+
+  async operationalSnapshot(): Promise<DurableQueueSnapshot> {
+    const [statuses, outbox] = await Promise.all([
+      this.database.query<Row>(`SELECT status,COUNT(*)::int AS count FROM import_jobs GROUP BY status`),
+      this.database.query<Row>(`SELECT COUNT(*)::int AS count,
+        EXTRACT(EPOCH FROM (NOW()-MIN(created_at)))::float AS oldest_age_seconds
+        FROM import_job_outbox WHERE published_at IS NULL`),
+    ]);
+    return {
+      statuses: Object.fromEntries(statuses.rows.map((row) => [text(row, 'status'), number(row, 'count')])),
+      unpublishedOutboxCount: number(outbox.rows[0] ?? { count: 0 }, 'count'),
+      oldestUnpublishedOutboxAgeSeconds: outbox.rows[0]?.oldest_age_seconds === null || outbox.rows[0]?.oldest_age_seconds === undefined
+        ? null : Math.max(0, number(outbox.rows[0], 'oldest_age_seconds')),
+    };
+  }
+
+  async cancelPending(input: { actorAdminId: string; reason: string; requestId?: string }): Promise<CancelledImportJob[]> {
+    return this.database.withTransaction(async (transaction) => {
+      const selected = await transaction.query<Row>(
+        `SELECT id,kind FROM import_jobs
+         WHERE status IN ('pending_dispatch','queued','retrying') FOR UPDATE`,
+      );
+      const jobs = selected.rows.map((row) => ({ id: text(row, 'id'), kind: enumValue(row, 'kind', IMPORT_JOB_KINDS) }));
+      if (jobs.length > 0) {
+        const ids = jobs.map((job) => job.id);
+        await transaction.query(
+          `UPDATE import_jobs SET status='cancelled',phase='cancelled',completed_at=NOW(),heartbeat_at=NULL,updated_at=NOW()
+           WHERE id=ANY($1::uuid[]) AND status IN ('pending_dispatch','queued','retrying')`, [ids],
+        );
+        await transaction.query(
+          `UPDATE import_job_outbox SET published_at=COALESCE(published_at,NOW()),last_error='cancelled by administrator'
+           WHERE event_type='dispatch' AND job_id=ANY($1::uuid[])`, [ids],
+        );
+      }
+      await transaction.query(
+        `INSERT INTO admin_audit_events
+         (actor_admin_id,action,target_type,target_id,reason,request_id,outcome,metadata)
+         VALUES($1,'cancel_pending_imports','import_queue',NULL,$2,$3,'success',$4::jsonb)`,
+        [input.actorAdminId, input.reason, input.requestId ?? null, JSON.stringify({ cancelledCount: jobs.length })],
+      );
+      return jobs;
+    });
   }
 
   /** Re-publish work whose Redis record was lost or whose worker disappeared. */

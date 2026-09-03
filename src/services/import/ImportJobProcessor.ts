@@ -1,4 +1,4 @@
-import type { Job } from 'bullmq';
+import { DelayedError, type Job } from 'bullmq';
 import { AppError } from '../../core/errors';
 import type { ImportJobRepository } from '../data/ImportJobRepository';
 import type { ImportObjectStorage } from '../storage/ImportObjectStorage';
@@ -39,8 +39,17 @@ export class ImportJobProcessor {
 
   async process(queueJob: Job<QueuePayload>): Promise<void> {
     const pending = await this.jobs.findById(queueJob.data.jobId);
-    if (!pending) return;
-    const lock = await ImportLockService.acquireLockWithWait(pending.userId, 300_000);
+    if (!pending || pending.status === 'cancelled') return;
+    let lock: ImportLockHandle | null;
+    try {
+      lock = await ImportLockService.acquireLockWithWait(pending.userId, 300_000);
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'LOCK_BACKEND_UNAVAILABLE') {
+        await queueJob.moveToDelayed(Date.now() + 30_000, queueJob.token);
+        throw new DelayedError();
+      }
+      throw error;
+    }
     if (!lock) throw new AppError({ code: 'IMPORT_IN_PROGRESS', message: 'Receipt writer remained busy.' });
     let operation: ImportJob | null = null;
     let heartbeat: NodeJS.Timeout | null = null;
@@ -71,6 +80,11 @@ export class ImportJobProcessor {
       if (!operation) throw error;
       const code = error instanceof AppError ? error.code : 'IMPORT_WORKER_FAILED';
       const message = error instanceof AppError ? error.publicMessage : 'The import could not be completed.';
+      if (code === 'LOCK_BACKEND_UNAVAILABLE' || code === 'LOCK_OWNERSHIP_LOST') {
+        await this.jobs.delayForInfrastructure(operation.id, code, message);
+        await queueJob.moveToDelayed(Date.now() + 30_000, queueJob.token);
+        throw new DelayedError();
+      }
       const canRetry = !permanentCodes.has(code) && queueJob.attemptsMade + 1 < (queueJob.opts.attempts ?? 1);
       if (canRetry) {
         await this.jobs.retry(operation.id, code, message);

@@ -82,6 +82,8 @@ class RedisConnectionManager {
       } catch (error) {
         this.markUnavailable();
         logger.warn('Redis cache reconciliation failed', { operation: 'redis_recovery', error: error instanceof Error ? error.message : String(error) });
+        const retry = setTimeout(() => void this.recoverProjectionCaches(), 1_000);
+        retry.unref();
       } finally {
         this.recovery = null;
       }
@@ -122,7 +124,8 @@ class RedisConnectionManager {
     this.readyWaiters.clear();
     const client = this.client;
     this.client = null;
-    if (client?.isOpen) await client.quit().catch(() => client.disconnect());
+    if (client?.isReady) await client.quit().catch(() => client.disconnect());
+    else if (client?.isOpen) client.disconnect();
   }
 }
 

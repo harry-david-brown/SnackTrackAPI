@@ -16,9 +16,9 @@ provider OAuth + provider SDK payloads
 
 Only the first layer should know Gmail API or Microsoft Graph response types. `MailboxMessage` contains the provider-neutral fields the extraction pipeline needs. Extend it only for a proven shared requirement; keep provider-only metadata private to the adapter.
 
-## Adding Outlook or another provider
+## Extending a shipped provider or adding another provider
 
-Before coding, inventory every Gmail-shaped boundary:
+Gmail and Outlook/Graph are already implemented. Before changing either or adding another provider, inventory every provider-shaped boundary:
 
 - credential columns and connection identity in `users`;
 - OAuth state, connection purpose/mode, callback query names, and routes;
@@ -29,7 +29,7 @@ Before coding, inventory every Gmail-shaped boundary:
 - receipt source/message identity uniqueness;
 - app transport names, query keys, controllers, route parameters, and copy.
 
-Choose a provider-aware model for shared concepts rather than parallel booleans that can disagree. Use an additive migration and coordinated API/app contract change when released clients still read Gmail-specific fields.
+Preserve provider-aware shared concepts in `MailboxConnectionRepository`, `MailboxSyncRunRepository`, mailbox ports, import projections, and source identity. Some released contracts retain Gmail-specific compatibility fields, so use an additive migration and coordinated API/app change rather than silently repurposing them.
 
 ## Message and receipt identity
 

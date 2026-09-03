@@ -67,18 +67,37 @@ test('token capability distinguishes malformed, expired, and revoked credentials
   );
 });
 
-test('session refresh revokes the presented refresh token before rotating it', async () => {
+test('refresh-token consumption allows exactly one concurrent rotation', async () => {
+  const tokens = new TokenService(
+    options,
+    createCacheFake(),
+    silentLogger,
+    Date.now,
+    createIdSequence('single-use-jti'),
+  );
+  const pair = tokens.generateTokens(user);
+  const results = await Promise.allSettled([
+    tokens.consumeRefreshToken(pair.refreshToken),
+    tokens.consumeRefreshToken(pair.refreshToken),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected');
+  assert.equal(rejected.reason.code, 'REFRESH_TOKEN_REVOKED');
+});
+
+test('session refresh atomically consumes the presented refresh token before rotating it', async () => {
   const events = [];
   const service = new SessionService(
     { findById: async (id) => (events.push(['find', id]), user) },
     {
-      verifyRefreshTokenWithBlacklist: async () => ({ userId: user.id }),
+      consumeRefreshToken: async () => (events.push(['consume']), { userId: user.id }),
+      verifyRefreshTokenWithBlacklist: async () => (events.push(['verify']), { userId: user.id }),
       revokeRefreshToken: async () => events.push(['revoke']),
       generateTokens: () => (events.push(['generate']), { accessToken: 'a', refreshToken: 'r' }),
     },
   );
   assert.deepEqual(await service.refresh('old'), { accessToken: 'a', refreshToken: 'r' });
-  assert.deepEqual(events, [['find', user.id], ['revoke'], ['generate']]);
+  assert.deepEqual(events, [['verify'], ['find', user.id], ['consume'], ['generate']]);
 });
 
 const runMiddleware = (middleware, request) =>

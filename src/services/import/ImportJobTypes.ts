@@ -17,6 +17,7 @@ export const IMPORT_JOB_STATUSES = [
   'failed',
   'expired',
   'superseded',
+  'cancelled',
 ] as const;
 export type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 export type ImportJobTrigger = 'user' | 'scheduler';

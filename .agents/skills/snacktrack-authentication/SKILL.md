@@ -24,8 +24,8 @@ Preserve one coherent identity and session contract across SnackTrackAPI and Sna
 - The canonical auth session requires `userId`, `email`, access/refresh tokens, and `user.id`, `user.email`, `user.createdAt`, and `user.emailVerified`.
 - Validate JWT claims and provider identity payloads from `unknown`; never trust client-supplied provider email or subject data without verifier evidence.
 - Link external identities by stable `(provider, providerUserId)` ownership. Handle verified-email account linking and uniqueness races deliberately.
-- Refresh rotates/revokes the presented refresh token. Distinguish absent, expired, malformed, and revoked credentials with stable codes.
-- Only terminal session failures clear credentials and query state. Temporary network/provider failures preserve the last locally valid authenticated identity and expose retry.
+- Refresh atomically consumes the presented refresh token before issuing its replacement. Distinguish absent, expired, malformed, revoked/replayed, and session-store-unavailable outcomes with stable codes.
+- Refresh-token consumption and logout revocation fail closed when the Redis-backed session store is unavailable. `SESSION_STORE_UNAVAILABLE` is retryable and must preserve local credentials; only terminal session failures clear credentials and query state.
 - Authentication identity belongs in `UserContext`; receipts, analytics, import preferences, and other server resources remain in TanStack Query.
 - Verification-code consumption and the protected mutation share one transaction. Do not verify a code in one operation and mutate the account later.
 - Account deletion clears local auth state only after the authoritative server deletion commits.
@@ -34,7 +34,7 @@ Preserve one coherent identity and session contract across SnackTrackAPI and Sna
 ## Canonical ownership
 
 - API ports: `SnackTrackAPI/src/services/ports/AuthPorts.ts`.
-- API capabilities: `SnackTrackAPI/src/services/auth/`, `OtpService.ts`, and focused auth route factories.
+- API capabilities: `SnackTrackAPI/src/services/auth/`, including `SessionService.ts`, `TokenService.ts`, and `AuthenticationActivityService.ts`, plus `OtpService.ts` and focused auth route factories.
 - Persistence adapters: `UserRepository.ts`, `OAuthRepository.ts`, and migration `002_auth_and_provider_identity.ts`.
 - App boundary: `services/authApi.ts`, `services/normalizers/authNormalizers.ts`, `features/auth/contracts.ts`, `contexts/UserContext.tsx`, `services/authSessionCoordinator.ts`, and `utils/tokenManager.ts`.
 

@@ -23,11 +23,13 @@ interface RenewalState {
   lostOwnership: boolean;
 }
 
-export class ImportLockOwnershipLostError extends Error {
-  readonly code = 'LOCK_OWNERSHIP_LOST';
-
+export class ImportLockOwnershipLostError extends AppError {
   constructor() {
-    super('The user receipt writer lock lease was lost.');
+    super({
+      code: 'LOCK_OWNERSHIP_LOST',
+      message: 'The user receipt writer lock lease was lost.',
+      publicMessage: 'The import was safely delayed while coordination recovers.',
+    });
     this.name = 'ImportLockOwnershipLostError';
   }
 }
@@ -132,10 +134,18 @@ export class ImportLockService {
     this.stopRenewal(handle.ownerToken);
     let released = false;
     if (handle.backend === 'redis') {
-      released = await redisLockStore.deleteIfValueMatches(
-        this.lockKey(handle.userId),
-        handle.ownerToken,
-      );
+      try {
+        released = await redisLockStore.deleteIfValueMatches(
+          this.lockKey(handle.userId),
+          handle.ownerToken,
+        );
+      } catch (error) {
+        logger.warn('Distributed lock release deferred to lease expiry', {
+          userId: handle.userId,
+          backend: handle.backend,
+          errorCode: error instanceof AppError ? error.code : 'LOCK_RELEASE_FAILED',
+        });
+      }
     } else {
       const current = this.inMemoryLocks.get(handle.userId);
       if (current?.ownerToken === handle.ownerToken) {
@@ -220,6 +230,14 @@ export class ImportLockService {
             userId: handle.userId,
             backend: handle.backend,
             errorCode: 'LOCK_OWNERSHIP_LOST',
+          });
+        }).catch((error) => {
+          state.lostOwnership = true;
+          clearInterval(state.timer);
+          logger.error('User receipt writer lock renewal unavailable', {
+            userId: handle.userId,
+            backend: handle.backend,
+            errorCode: error instanceof AppError ? error.code : 'LOCK_RENEWAL_FAILED',
           });
         });
       }, this.RENEWAL_INTERVAL_MS),

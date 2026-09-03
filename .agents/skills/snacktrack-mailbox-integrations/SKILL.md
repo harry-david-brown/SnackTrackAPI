@@ -28,15 +28,17 @@ Add mailbox providers without leaking vendor models into receipt extraction or c
 - One-time import access, export-alert monitoring, and ongoing tracking consent are distinct. Provider scopes do not replace SnackTrack's explicit server-side consent state.
 - Source identity must include enough provider context to avoid cross-provider message-ID collisions and must remain stable across re-reads/updates.
 - Do not log raw message bodies, addresses, subjects, OAuth codes, access/refresh tokens, or provider response dumps.
-- Adding Outlook/Graph should generalize connection persistence, lifecycle projections, API contracts, and app state deliberately; do not copy every Gmail field into a parallel unsynchronized state machine.
+- Gmail and Outlook are both shipped mailbox providers. Preserve their shared provider-aware connection, sync, lifecycle, source-identity, and app contracts; do not add a third parallel state machine for shared behavior.
 
 ## Canonical ownership
 
 - Provider-neutral API boundary: `SnackTrackAPI/src/services/ports/MailboxPorts.ts` and relevant capabilities in `ImportPorts.ts`.
-- Current Gmail adapters: `GmailOAuthProvider.ts`, `GmailProviderDecoder.ts`, `GmailClient.ts`, and `GmailConnectionHealthService.ts`.
-- Connection application layer: `GmailConnectionContracts.ts`, `GmailConnectionService.ts`, and `ImportStatusService.ts` pending provider-aware generalization.
-- Shared receipt pipeline: `GmailImportAcquisitionService.ts` pending neutral naming, `ReceiptEmailBatchExtractor.ts`, `ReceiptDeduplicator.ts`, `ReceiptImportPersistenceService.ts`, and lifecycle services.
-- App owner: canonical import preferences via `services/gmailApi.ts`, `gmailNormalizers.ts`, `useImportPreferences.ts`, `useGmailImport.ts`, and `useImportFlowController.ts`, pending provider-aware naming where a second mailbox ships.
+- Gmail adapters: `services/email/GmailOAuthProvider.ts`, `GmailProviderDecoder.ts`, `GmailClient.ts`, and `GmailConnectionHealthService.ts`.
+- Microsoft adapters: `services/mailbox/MicrosoftMailboxOAuthProvider.ts`, `MicrosoftMailboxTokenService.ts`, `MicrosoftGraphMailboxClient.ts`, and `MicrosoftMailboxConnectionHealthService.ts`.
+- Provider-aware persistence: `MailboxConnectionRepository.ts`, `MailboxSyncRunRepository.ts`, and `MailboxSecurityPolicyRepository.ts`.
+- Connection/import application layer: Gmail connection/import services, `MicrosoftMailboxConnectionService.ts`, `OutlookImportAcquisitionService.ts`, `OutlookImportService.ts`, `HistoricalOutlookImportService.ts`, and `ImportStatusService.ts`.
+- Shared receipt pipeline: provider acquisition -> `ReceiptEmailBatchExtractor.ts` -> `ReceiptDeduplicator.ts` -> `ReceiptImportPersistenceService.ts` -> lifecycle/sync repositories.
+- App owner: the canonical import-preferences query plus `services/gmailApi.ts`, `services/outlookApi.ts`, `useGmailImport.ts`, `useOutlookImport.ts`, and `useImportFlowController.ts`.
 
 ## Handoff
 

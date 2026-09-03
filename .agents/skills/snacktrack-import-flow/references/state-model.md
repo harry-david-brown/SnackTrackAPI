@@ -6,10 +6,12 @@ Do not collapse these axes. Similar-looking UI states often have different recov
 
 | Axis | Meaning | Examples |
 | --- | --- | --- |
-| Gmail identity | Which account the user connected | absent, known email |
-| Credential health | Whether current tokens can access Gmail | healthy, unavailable, reconnect required |
+| Mailbox identity | Which Gmail and/or Outlook accounts the user connected | absent, known email per provider |
+| Credential health | Whether current tokens can access each mailbox | healthy, unavailable, reconnect required |
 | Gmail baseline | Whether an explicit one-time/catch-up scan has ever succeeded | never completed, completed at timestamp |
 | Latest Gmail attempt | The most recent explicit scan, independent of the baseline | never started, importing, completed, failed |
+| Outlook baseline and latest attempt | The same historical-import distinction for Outlook | never completed/completed; never started/importing/completed/failed |
+| Durable operation | Accepted asynchronous work and its delivery/execution state | awaiting upload, pending dispatch, queued, running, retrying, succeeded, failed, expired, superseded, cancelled |
 | Provider export lifecycle | Independent Uber Eats/DoorDash request and upload progress | not started, requested, ready, processing, completed, failed |
 | Receipt source coverage | What data actually exists | Gmail-only, export-only, both, neither |
 | Export-alert consent | Permission to inspect mail for Uber’s ready message | not offered, declined, granted, revoked |
@@ -28,6 +30,8 @@ Verify current declarations in `SnackTrackApp/features/import-flow/contracts.ts`
 - provider export lifecycle: `not_started`, `requested`, `file_ready`, `import_processing`, `completed`, `failed`;
 - Gmail baseline: sticky `hasCompleted` plus `completedAt`;
 - latest Gmail attempt: `never_started`, `importing`, `completed`, `failed`;
+- Outlook baseline and latest attempt use the corresponding fields in the canonical import-preferences contract;
+- durable operation status: `awaiting_upload`, `pending_dispatch`, `queued`, `running`, `retrying`, `succeeded`, `failed`, `expired`, `superseded`, `cancelled`;
 - effective ongoing tracking: `not_offered`, `declined`, `setting_up`, `active`, `paused`, `reconnect_required`, `error`.
 
 If the source has evolved, update this reference in the same change.
@@ -37,7 +41,7 @@ If the source has evolved, update this reference in the same change.
 Use persisted lifecycle fields to retain user progress, but reconcile them with operational truth:
 
 1. Actual receipt sources establish whether Gmail or export data exists.
-2. Credential health establishes whether Gmail actions can run now.
+2. Per-provider credential health establishes which mailbox actions can run now.
 3. Explicit consent establishes whether background email access is permitted.
 4. Each provider's lifecycle status establishes which request/upload step is in progress.
 5. Runtime tracking status establishes whether ongoing monitoring is operating.
@@ -46,23 +50,25 @@ For example, Uber Eats CSV receipts make Uber Eats complete even if its preferen
 
 ## Canonical action boundaries
 
-1. Connecting Gmail stores and validates provider access only.
-2. The user explicitly starts the one-time Gmail history import.
+1. Connecting Gmail or Outlook stores and validates access for that mailbox only.
+2. The user explicitly starts the provider-specific history import.
 3. Uber Eats and DoorDash exports can be requested or uploaded independently in any order.
 4. Uber export-ready alerts authorize only the Uber data-ready email check while the app is active.
-5. Ongoing tracking requires either a completed Gmail baseline or receipt-backed coverage from a provider export, healthy durable Gmail access, and explicit tracking consent.
-6. Export-backed tracking setup starts from each provider's latest exported order without completing the explicit Gmail-history lifecycle.
+5. Ongoing tracking requires a safe baseline, healthy durable access to at least one supported mailbox, and explicit tracking consent.
+6. Export-backed tracking setup starts from each provider's latest exported order without completing either provider's explicit history lifecycle.
+7. Starting an import creates a durable operation. Lifecycle/source coverage changes only when the worker reaches the corresponding durable write; queued state alone is not imported data.
 
 ## Fresh-account reset state
 
 When product intent says “as if this login were a brand-new account,” the post-reset import state is:
 
-- Gmail identity absent; credentials/scopes absent; connection mode `none`;
-- Gmail import `never_started` with zero imported/source receipts;
+- Gmail and Outlook identities absent; credentials/scopes absent; connection mode `none`;
+- Gmail and Outlook imports `never_started` with zero imported/source receipts;
 - export `not_started` with zero export receipts;
 - monitoring and ongoing tracking `not_offered`;
 - tracking runtime `inactive` with no activity/error timestamps;
 - no sync history, import audit history, summary readiness, or cached analytics/import completion;
+- pre-reset durable operations are superseded and cannot commit after the account's import generation advances;
 - authentication identity and profile essentials preserved.
 
 Do not derive a different state from pre-reset receipt rows: the authoritative reset must delete those rows while holding the shared writer lock.

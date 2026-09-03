@@ -1,17 +1,18 @@
 # Import workflows
 
-## Gmail baseline and catch-up check
+## Mailbox baseline and catch-up check
 
-1. User connects or reconnects Gmail through OAuth.
+1. User connects or reconnects Gmail or Outlook through its mailbox OAuth flow.
 2. The OAuth callback persists validated credentials before redirecting to the signed app URI.
 3. The app refreshes the canonical import-preferences projection. A pre-OAuth query may already be in flight, so tolerate a bounded stale `disconnected` result before reporting that authorization failed.
-4. API validates credentials before presenting/running an import action.
+4. API validates that provider's credentials before presenting/running an import action.
 5. User explicitly starts the baseline or catch-up check.
-6. API acquires the per-user import lock.
-7. Mailbox messages are fetched through the provider adapter and parsed by the shared receipt pipeline.
-8. Receipts are upserted using stable source identity and reported as new, updated, or unchanged.
-9. Preferences and user caches are updated/invalidated consistently.
-10. App refetches preferences and receipt/summary state.
+6. API creates a PostgreSQL import job and transactional dispatch outbox record, returning the durable operation immediately.
+7. The outbox publishes to BullMQ when queue Redis is available; the app polls the operation rather than treating acceptance as completion.
+8. A worker acquires the per-user distributed lock, verifies durable status/import generation, and fetches messages through the provider adapter.
+9. The shared receipt pipeline upserts using stable provider/source identity and reports new, updated, and unchanged counts.
+10. The worker commits lifecycle/result state, invalidates projections, and publishes terminal notification state.
+11. App terminal handling refetches preferences and receipt/summary data.
 
 If OAuth returns `invalid_grant`, stop and return a reconnect-required error. Do not log “completed,” write a completed preference, or return HTTP success with zero receipts.
 
@@ -31,26 +32,35 @@ The ready email links to Uber’s download page; it does not attach the archive.
 
 ## Export upload
 
-1. Native file picker returns the selected archive/file.
-2. App uploads once; do not insert a redundant second “choose file” screen.
-3. API parses supported Uber/DoorDash export shapes and validates usable records.
-4. Mark only the detected provider's lifecycle `import_processing` while work is active.
-5. Replace historical overlapping CSV/email receipts according to cutoff rules while preserving newer Gmail receipts.
-6. Mark only that provider completed after durable receipt writes succeed.
-7. Invalidate API caches and refetch app state.
+1. Native file picker returns the selected archive/file and the app requests a provider-specific upload intent with size/type metadata and an idempotency key.
+2. The app uploads directly to the signed object-storage URL, then submits the durable operation once; do not proxy the file through the API or add a redundant second picker.
+3. Submission verifies stored size, type, integrity metadata, and provider before creating dispatch work.
+4. The worker streams/parses supported Uber/DoorDash export shapes and validates usable records.
+5. Mark only the selected/detected provider's lifecycle `import_processing` while work is active.
+6. Replace historical overlapping export/email receipts according to cutoff rules while preserving newer mailbox receipts.
+7. Mark only that provider completed and the operation succeeded after durable receipt writes commit.
+8. Clean up staged/object data according to terminal operation policy, invalidate API caches, and refetch app state.
+
+## Queue outage and cancellation
+
+- `pending_dispatch`/waiting-for-queue is a valid degraded state when PostgreSQL accepted work but BullMQ is unavailable.
+- Queue recovery republishes unpublished outbox work. Do not ask the user to duplicate a still-active operation.
+- A lock-backend outage delays worker execution without consuming the normal processing-attempt budget.
+- `cancelled`, `superseded`, `expired`, `failed`, and `succeeded` are terminal. The app stops polling and uses the status/error code for the recovery message.
+- Administrative cancellation is durable first and Redis cleanup is best effort; a recovered worker must no-op cancelled work.
 
 ## Ongoing tracking
 
 1. A completed Gmail baseline or receipt-backed coverage from a provider export makes tracking eligible, but not automatically authorized.
 2. Ask explicit permission for ongoing future receipt monitoring.
-3. Validate Gmail health before enabling or invoking tracking.
+3. Validate supported mailbox health before enabling or invoking tracking.
 4. For export-backed setup, enter `setting_up` and run the first consented check from the provider-specific export cutoffs without marking the Gmail baseline complete.
 5. Scheduled/import-on-open work processes new receipts incrementally using the prior successful check with a bounded lookback.
 6. A successful zero-result first check activates tracking; a failure preserves imported history and exposes retry/reconnect.
 7. Dashboard shows active monitoring without asking the user to manually scan Gmail.
-8. On `invalid_grant`, transition to reconnect required and show a reconnect action.
+8. On provider invalid/revoked credentials, transition that provider to reconnect required and show the matching reconnect action.
 
-Background tracking runs update tracking activity and runtime errors only. They must never start, complete, or fail the one-time Gmail history lifecycle.
+Background tracking runs update tracking activity and runtime errors only. They must never start, complete, or fail a provider's one-time history lifecycle.
 
 ## Clearing receipts and onboarding
 

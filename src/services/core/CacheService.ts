@@ -8,6 +8,7 @@
 import { redisCacheStore } from '../../config/redis';
 import logger from '../../config/logger';
 import type { DashboardInsightEdition } from '../analytics/dashboard';
+import type { RedisLifecycleSnapshot } from '../../config/redis';
 import {
   CacheCodec,
   dashboardInsightEditionCacheCodec,
@@ -20,6 +21,7 @@ export type { UserSummaryProjection } from './cacheProjections';
 export interface CacheStats {
   enabled: boolean;
   stats: { keys: number; memory: string } | null;
+  redis: RedisLifecycleSnapshot;
 }
 
 export class CacheService {
@@ -107,7 +109,7 @@ export class CacheService {
    */
   async getStats(): Promise<CacheStats> {
     const stats = await redisCacheStore.getStats();
-    return { enabled: redisCacheStore.isAvailable(), stats };
+    return { enabled: redisCacheStore.isAvailable(), stats, redis: redisCacheStore.snapshot() };
   }
 
   /**

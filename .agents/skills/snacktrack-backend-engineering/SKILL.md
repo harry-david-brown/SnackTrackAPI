@@ -1,6 +1,6 @@
 ---
 name: snacktrack-backend-engineering
-description: Build and diagnose SnackTrack Express/PostgreSQL backend changes with correct service ownership, transactions, migrations, cache invalidation, concurrency control, error contracts, and regression tests. Use for SnackTrackAPI routes, repositories, services, schema changes, destructive mutations, distributed locks, background jobs, production data inconsistencies, or read-only database diagnosis. Load snacktrack-import-flow as well for Gmail/export domains and snacktrack-account-data-lifecycle for resets or deletion.
+description: Build and diagnose SnackTrack Express/PostgreSQL backend and worker changes with correct service ownership, transactions, migrations, Redis capability boundaries, cache invalidation, concurrency control, durable jobs/outbox, error contracts, and regression tests. Use for SnackTrackAPI routes, repositories, services, schema changes, destructive mutations, distributed locks, queues/background jobs, production data inconsistencies, or read-only diagnosis. Load snacktrack-import-flow as well for mailbox/export domains and snacktrack-account-data-lifecycle for resets or deletion.
 ---
 
 # SnackTrack Backend Engineering
@@ -29,6 +29,8 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 - Prefer ownership-token/fenced distributed locks; never let an expired owner delete a newer owner’s lock.
 - Add immutable ordered migrations through `MigrationRunner`; preserve applied checksums and make each migration safe for its documented fresh/existing-schema inputs.
 - Invalidate every derived cache only after durable writes commit.
+- Treat PostgreSQL import jobs and their transactional outbox as the durable queue authority. Redis/BullMQ loss may delay publication or processing but must not lose an accepted operation.
+- Keep cache Redis fail-soft, but make distributed-lock and refresh-token correctness capabilities fail closed with stable dependency errors.
 - Preserve stable machine-readable error codes and distinguish conflict, validation, provider, and server failures.
 - Use read-only, narrowly scoped SQL for diagnosis; never expose credentials or unrelated user data.
 - Tests must verify postconditions, rollback/release behavior, cache invalidation, and realistic races—not only that queries were called.

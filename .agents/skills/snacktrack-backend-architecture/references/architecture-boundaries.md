@@ -30,7 +30,7 @@ Keep policy close to the domain noun it governs. Do not move meaningful rules in
 
 ### Repositories and infrastructure adapters
 
-Repositories express persistence operations in domain language and isolate SQL/row mapping. Provider adapters isolate Gmail, OAuth, email, cache, filesystem, and other vendor details.
+Repositories express persistence operations in domain language and isolate SQL/row mapping. Infrastructure adapters isolate mailbox providers, OAuth, email, Redis capabilities, BullMQ delivery, object storage, filesystem, and other vendor details.
 
 - Parameterize SQL and map database rows deliberately.
 - Do not return raw `QueryResult`, database clients, or vendor SDK objects to routes.
@@ -46,7 +46,7 @@ Allowed direction:
 1. routes/middleware depend on application services and transport schemas;
 2. application services depend on domain logic and narrow ports;
 3. infrastructure adapters implement ports and depend on SDK/database libraries;
-4. the composition root depends on every concrete implementation and wires them together.
+4. the composition root and process entrypoints depend on concrete implementations, wire them together, and own startup/shutdown.
 
 Avoid:
 
@@ -59,7 +59,7 @@ Avoid:
 
 ## Composition and dependency injection
 
-`src/services/core/ServiceContainer.ts` is the typed process-wide composition root. Application-facing capability contracts live in `src/services/ports/`.
+`src/services/core/ServiceContainer.ts` is the typed process-wide composition root. `src/index.ts`, `src/worker.ts`, and `src/scheduler.ts` own the lifecycle of their respective processes. Application-facing capability contracts live in `src/services/ports/`.
 
 - Prefer constructor injection for stateful services and parameter injection for small pure operations.
 - Depend on the narrow capability needed, not an oversized service.

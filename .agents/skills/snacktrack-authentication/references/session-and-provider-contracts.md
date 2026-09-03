@@ -8,8 +8,9 @@ Read this reference for credential login, an external identity provider, JWT/ses
 - `services/auth/CredentialAuthService.ts` owns registration and password login.
 - `services/auth/ProviderAuthService.ts` owns verified provider identity lookup/linking and session issuance.
 - `services/auth/IdentityProvider.ts` isolates provider-token verification and maps vendor claims to `VerifiedProviderIdentity`.
-- `services/auth/TokenService.ts` owns JWT creation, runtime claim decoding, expiry classification, and refresh-token revocation.
+- `services/auth/TokenService.ts` owns JWT creation, runtime claim decoding, expiry classification, atomic refresh-token consumption, and revocation through the session-store capability.
 - `services/auth/SessionService.ts` owns refresh rotation, logout revocation, and session validation.
+- `services/auth/AuthenticationActivityService.ts` records successful sign-in provenance as a best-effort analytics side effect; analytics failure must not block authentication.
 - `services/ports/AuthPorts.ts` is the application-facing persistence/token/email capability boundary.
 - `services/data/UserRepository.ts` and `OAuthRepository.ts` implement identity persistence; do not import them directly from application services.
 
@@ -22,7 +23,7 @@ Auth success returns one required shape:
   user: { id, email, emailVerified, createdAt } }
 ```
 
-Use the version-1 operational error envelope. Preserve distinctions including invalid credentials, provider authentication failure, account conflict, access-token expired/invalid, and refresh-token expired/invalid/revoked. HTTP status mapping belongs to the central transport mapper.
+Use the version-1 operational error envelope. Preserve distinctions including invalid credentials, provider authentication failure, account conflict, access-token expired/invalid, refresh-token expired/invalid/revoked or replayed, and retryable `SESSION_STORE_UNAVAILABLE`. HTTP status mapping belongs to the central transport mapper.
 
 ## Provider identity rules
 
@@ -40,4 +41,10 @@ Use the version-1 operational error envelope. Preserve distinctions including in
 - `services/api/client.ts` coordinates refresh; `services/authSessionCoordinator.ts` broadcasts only terminal session expiry.
 - `features/auth/contracts.ts` maps stable error codes into retry, verification, or terminal behavior.
 
-Temporary connectivity failure during restoration or refresh must retain a locally valid session. Clear auth storage, user-bound query data, and Sentry identity only for confirmed logout, committed deletion, or a terminal refresh/session code.
+Temporary connectivity or `SESSION_STORE_UNAVAILABLE` during restoration or refresh must retain a locally valid session and must not consume the terminal refresh-attempt budget. Clear auth storage, user-bound query data, and Sentry identity only for confirmed logout, committed deletion, or a terminal refresh/session code.
+
+## Session-store safety
+
+- A refresh token is single-use: consume it atomically with set-if-absent semantics before returning a rotated pair so concurrent replay cannot produce two sessions.
+- Refresh rotation and server-side logout revocation fail closed if the Redis-backed session store is unavailable. Never turn inability to check or record revocation into success.
+- Existing access tokens remain usable until their normal expiry; do not broaden a session-store outage into global authentication failure.
