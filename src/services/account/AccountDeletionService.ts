@@ -85,7 +85,7 @@ export class AccountDeletionService {
           ? databaseString(databaseRow(userResult.rows[0], 'account deletion user'), 'email')
           : undefined;
 
-        if (!email) throw new NotFoundError('User', userId);
+        if (!email) return;
 
         // Verification codes are keyed by email rather than user_id and are
         // therefore not covered by the users ON DELETE CASCADE graph.

@@ -91,6 +91,7 @@ export class AccountResetService {
         userId,
       ]);
       await transaction.query('DELETE FROM user_import_preferences WHERE user_id = $1', [userId]);
+      await transaction.query('DELETE FROM user_experience_state WHERE user_id = $1', [userId]);
       await transaction.query('INSERT INTO user_import_preferences (user_id) VALUES ($1)', [
         userId,
       ]);

@@ -124,8 +124,15 @@ class RedisConnectionManager {
     this.readyWaiters.clear();
     const client = this.client;
     this.client = null;
-    if (client?.isReady) await client.quit().catch(() => client.disconnect());
-    else if (client?.isOpen) client.disconnect();
+    if (client?.isReady) {
+      try {
+        await client.quit();
+      } catch {
+        await client.disconnect();
+      }
+    } else if (client?.isOpen) {
+      await client.disconnect();
+    }
   }
 }
 

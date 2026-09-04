@@ -15,6 +15,8 @@ import {
   CouldHaveBought,
   MissedInvestment,
   CostPerMeal,
+  DeliveryFeeTrend,
+  FeePeriod,
   PeakHungerHour,
   WeekendWarrior,
   DeliveryWaits,
@@ -78,6 +80,7 @@ export class WrappedAnalyticsCalculator {
       couldHaveBought,
       missedInvestment,
       costPerMeal,
+      deliveryFeeTrend,
       peakHungerHour,
       weekendWarrior,
       deliveryWaits,
@@ -99,6 +102,7 @@ export class WrappedAnalyticsCalculator {
       this.calculateCouldHaveBought(receipts),
       this.calculateMissedInvestment(receipts, userTimezone),
       this.calculateCostPerMeal(receipts),
+      this.calculateDeliveryFeeTrend(receipts),
 
       // Pattern analytics
       this.calculatePeakHungerHour(receipts, userTimezone),
@@ -128,6 +132,7 @@ export class WrappedAnalyticsCalculator {
         couldHaveBought,
         missedInvestment,
         costPerMeal,
+        deliveryFeeTrend,
       },
       patterns: {
         peakHungerHour,
@@ -693,6 +698,84 @@ export class WrappedAnalyticsCalculator {
     // tips, service fees, promotions, and substitutions. The current receipt
     // model does not store those components, so do not publish a false metric.
     return undefined;
+  }
+
+  private async calculateDeliveryFeeTrend(
+    receipts: ReceiptForAnalytics[],
+  ): Promise<DeliveryFeeTrend | undefined> {
+    const qualifying = receipts
+      .filter((receipt): receipt is ReceiptForAnalytics & {
+        orderDate: Date;
+        currencyCode: string;
+        deliveryFee: number;
+        serviceFee: number;
+      } => Boolean(
+        receipt.orderDate &&
+        receipt.currencyCode &&
+        receipt.currencyCode !== 'UNKNOWN' &&
+        Number.isFinite(receipt.deliveryFee) &&
+        Number.isFinite(receipt.serviceFee) &&
+        receipt.deliveryFee! >= 0 &&
+        receipt.serviceFee! >= 0,
+      ))
+      .sort((left, right) => left.orderDate.getTime() - right.orderDate.getTime());
+    if (qualifying.length < 6) return undefined;
+    const currencies = new Set(qualifying.map((receipt) => receipt.currencyCode));
+    if (currencies.size !== 1) return undefined;
+    const firstOrder = qualifying[0].orderDate;
+    const lastOrder = qualifying[qualifying.length - 1].orderDate;
+    if (lastOrder.getTime() - firstOrder.getTime() < 90 * 24 * 60 * 60 * 1000) return undefined;
+
+    const groups = new Map<string, typeof qualifying>();
+    for (const receipt of qualifying) {
+      const quarter = `${receipt.orderDate.getUTCFullYear()}-Q${Math.floor(receipt.orderDate.getUTCMonth() / 3) + 1}`;
+      groups.set(quarter, [...(groups.get(quarter) ?? []), receipt]);
+    }
+    const series: FeePeriod[] = [...groups.entries()]
+      .filter(([, values]) => values.length >= 3)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([quarter, values]) => {
+        const averageDeliveryFee = values.reduce((sum, receipt) => sum + receipt.deliveryFee, 0) / values.length;
+        const averageServiceFee = values.reduce((sum, receipt) => sum + receipt.serviceFee, 0) / values.length;
+        return {
+          quarter,
+          orderCount: values.length,
+          averageDeliveryFee: Number(averageDeliveryFee.toFixed(2)),
+          averageServiceFee: Number(averageServiceFee.toFixed(2)),
+          averageCompanyFees: Number((averageDeliveryFee + averageServiceFee).toFixed(2)),
+        };
+      });
+    if (series.length < 2) return undefined;
+    const earliestPeriod = series[0];
+    const latestPeriod = series[series.length - 1];
+    if (earliestPeriod.averageDeliveryFee <= 0 || earliestPeriod.averageCompanyFees <= 0) return undefined;
+    const percentChange = (latest: number, earliest: number): number =>
+      Number((((latest - earliest) / earliest) * 100).toFixed(1));
+    const deliveryFeeChangePercent = percentChange(
+      latestPeriod.averageDeliveryFee,
+      earliestPeriod.averageDeliveryFee,
+    );
+    const companyFeeChangePercent = percentChange(
+      latestPeriod.averageCompanyFees,
+      earliestPeriod.averageCompanyFees,
+    );
+    const trend = companyFeeChangePercent > 2
+      ? 'increased'
+      : companyFeeChangePercent < -2
+        ? 'decreased'
+        : 'flat';
+    return {
+      currency: qualifying[0].currencyCode,
+      coveredOrderCount: qualifying.length,
+      coverageStart: firstOrder.toISOString(),
+      coverageEnd: lastOrder.toISOString(),
+      earliestPeriod,
+      latestPeriod,
+      deliveryFeeChangePercent,
+      companyFeeChangePercent,
+      trend,
+      series,
+    };
   }
 
   /**

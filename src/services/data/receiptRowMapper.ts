@@ -13,6 +13,13 @@ export interface ReceiptRow extends DatabaseRow {
   data_source: unknown;
   delivery_time: unknown;
   external_id: unknown;
+  currency_code: unknown;
+  subtotal_amount: unknown;
+  tax_amount: unknown;
+  tip_amount: unknown;
+  delivery_fee_amount: unknown;
+  service_fee_amount: unknown;
+  savings_amount: unknown;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -31,6 +38,8 @@ const nonnegativeNumber = (value: unknown, field: string): number => {
   const candidate = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(candidate) && candidate >= 0 ? candidate : invalid(field);
 };
+const nullableNonnegativeNumber = (value: unknown, field: string): number | undefined =>
+  value === null || value === undefined ? undefined : nonnegativeNumber(value, field);
 const record = (value: unknown, field: string): UnknownRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as UnknownRecord)
@@ -88,6 +97,19 @@ export const mapReceiptRow = (row: ReceiptRow): Receipt => {
   const receiptType = isReceiptType(receiptTypeValue) ? receiptTypeValue : invalid('receipt_type');
   const dataSource = isDataSource(dataSourceValue) ? dataSourceValue : invalid('data_source');
 
+  const rawCurrency = nullableString(row.currency_code, 'currency_code');
+  const currencyCode = rawCurrency && ['CAD', 'USD', 'EUR', 'GBP', 'UNKNOWN'].includes(rawCurrency)
+    ? rawCurrency as 'CAD' | 'USD' | 'EUR' | 'GBP' | 'UNKNOWN'
+    : undefined;
+  const monetaryDetails = {
+    ...(currencyCode ? { currencyCode } : {}),
+    ...(nullableNonnegativeNumber(row.subtotal_amount, 'subtotal_amount') === undefined ? {} : { subtotal: nullableNonnegativeNumber(row.subtotal_amount, 'subtotal_amount') }),
+    ...(nullableNonnegativeNumber(row.tax_amount, 'tax_amount') === undefined ? {} : { tax: nullableNonnegativeNumber(row.tax_amount, 'tax_amount') }),
+    ...(nullableNonnegativeNumber(row.tip_amount, 'tip_amount') === undefined ? {} : { tip: nullableNonnegativeNumber(row.tip_amount, 'tip_amount') }),
+    ...(nullableNonnegativeNumber(row.delivery_fee_amount, 'delivery_fee_amount') === undefined ? {} : { deliveryFee: nullableNonnegativeNumber(row.delivery_fee_amount, 'delivery_fee_amount') }),
+    ...(nullableNonnegativeNumber(row.service_fee_amount, 'service_fee_amount') === undefined ? {} : { serviceFee: nullableNonnegativeNumber(row.service_fee_amount, 'service_fee_amount') }),
+    ...(nullableNonnegativeNumber(row.savings_amount, 'savings_amount') === undefined ? {} : { savings: nullableNonnegativeNumber(row.savings_amount, 'savings_amount') }),
+  };
   return new Receipt(
     nonemptyString(row.user_id, 'user_id'),
     decodeReceiptItems(row.items),
@@ -99,5 +121,6 @@ export const mapReceiptRow = (row: ReceiptRow): Receipt => {
     parseDate(row.delivery_time, 'delivery_time'),
     nullableString(row.external_id, 'external_id'),
     nonemptyString(row.id, 'id'),
+    Object.keys(monetaryDetails).length ? monetaryDetails : undefined,
   );
 };

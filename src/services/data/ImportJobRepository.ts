@@ -183,7 +183,7 @@ export class ImportJobRepository {
       const inserted = await transaction.query<Row>(
         `INSERT INTO import_jobs
          (user_id,kind,trigger_type,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at)
-         VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $4='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
+         VALUES ($1,$2,$3,$4::VARCHAR(24),$5,0,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $4::VARCHAR(24)='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
          RETURNING ${selectColumns}`,
         [input.userId,input.kind,input.trigger,status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
       );
@@ -392,6 +392,25 @@ export class ImportJobRepository {
       oldestUnpublishedOutboxAgeSeconds: outbox.rows[0]?.oldest_age_seconds === null || outbox.rows[0]?.oldest_age_seconds === undefined
         ? null : Math.max(0, number(outbox.rows[0], 'oldest_age_seconds')),
     };
+  }
+
+  async getP75DurationSeconds(queue: 'mailbox-imports' | 'export-imports'): Promise<number | null> {
+    const result = await this.database.query<Row>(
+      `SELECT PERCENTILE_CONT(0.75) WITHIN GROUP (
+         ORDER BY EXTRACT(EPOCH FROM (completed_at-started_at))
+       ) AS duration_seconds
+       FROM (
+         SELECT started_at,completed_at FROM import_jobs
+         WHERE status='succeeded' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+           AND completed_at>=NOW()-INTERVAL '7 days'
+           AND CASE WHEN $1::text='export-imports' THEN kind='export_file' ELSE kind<>'export_file' END
+         ORDER BY completed_at DESC LIMIT 100
+       ) recent`,
+      [queue],
+    );
+    const value = result.rows[0]?.duration_seconds;
+    if (value === null || value === undefined) return null;
+    return Math.max(1, number(result.rows[0], 'duration_seconds'));
   }
 
   async cancelPending(input: { actorAdminId: string; reason: string; requestId?: string }): Promise<CancelledImportJob[]> {

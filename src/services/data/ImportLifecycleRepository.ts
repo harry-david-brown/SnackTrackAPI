@@ -5,7 +5,7 @@ import type {
   ProviderExportLifecycleStatus,
   ProviderRelevance,
 } from '../import/ImportLifecycleTypes';
-import type { DatabaseQueryExecutor } from '../ports/DatabasePort';
+import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
 import type { ImportEventName, ImportEventRepository } from './ImportEventRepository';
 
 type EventPort = Pick<ImportEventRepository, 'record'>;
@@ -13,7 +13,7 @@ type EventPort = Pick<ImportEventRepository, 'record'>;
 /** Persists consent and provider-export lifecycle commands. */
 export class ImportLifecycleRepository {
   constructor(
-    private readonly database: DatabaseQueryExecutor,
+    private readonly database: DatabaseQueryExecutor & DatabaseTransactionRunner,
     private readonly events: EventPort,
   ) {}
 
@@ -110,13 +110,27 @@ export class ImportLifecycleRepository {
 
   async markExportRequested(userId: string, provider: ExportProvider): Promise<void> {
     await this.ensureProviderPreferences(userId);
-    const result = await this.database.query(
-      `UPDATE user_export_provider_preferences provider_preferences
-       SET status = 'requested', requested_at = NOW(), updated_at = NOW(),
-           error_code = NULL, ready_source = NULL, relevance = 'unknown'
-       WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
-      [userId, provider],
-    );
+    const result = await this.database.withTransaction(async (transaction) => {
+      const updated = await transaction.query(
+        `UPDATE user_export_provider_preferences provider_preferences
+         SET status = 'requested', requested_at = NOW(), updated_at = NOW(),
+             error_code = NULL, ready_source = NULL, relevance = 'unknown'
+         WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
+        [userId, provider],
+      );
+      if ((updated.rowCount ?? 0) > 0) {
+        await transaction.query(
+          `INSERT INTO user_experience_state (user_id, setup_completed_at, setup_completion_method)
+           VALUES ($1, NOW(), 'provider_history_request')
+           ON CONFLICT (user_id) DO UPDATE SET
+             setup_completed_at=COALESCE(user_experience_state.setup_completed_at, NOW()),
+             setup_completion_method=COALESCE(user_experience_state.setup_completion_method, 'provider_history_request'),
+             updated_at=NOW()`,
+          [userId],
+        );
+      }
+      return updated;
+    });
     if ((result.rowCount ?? 0) > 0) {
       await this.events.record(userId, 'export_requested', { provider });
     }

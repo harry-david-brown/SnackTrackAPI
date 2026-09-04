@@ -118,6 +118,16 @@ export class ReceiptEmailBatchExtractor {
       DataSource.EMAIL,
       undefined,
       data.orderId || undefined,
+      undefined,
+      {
+        currencyCode: data.currency,
+        ...(data.subtotal === null ? {} : { subtotal: data.subtotal }),
+        ...(data.tax === null ? {} : { tax: data.tax }),
+        ...(data.tip === null ? {} : { tip: data.tip }),
+        ...(data.deliveryFee === null ? {} : { deliveryFee: data.deliveryFee }),
+        ...(data.serviceFee === null ? {} : { serviceFee: data.serviceFee }),
+        ...(data.savings === null ? {} : { savings: data.savings }),
+      },
     );
   }
 

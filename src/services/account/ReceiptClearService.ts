@@ -47,6 +47,7 @@ export class ReceiptClearService {
         ]);
         deletedReceipts = receiptResult.rowCount ?? 0;
         await transaction.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
+        await transaction.query('DELETE FROM user_experience_state WHERE user_id = $1', [userId]);
 
         // Clearing receipt history resets source coverage while deliberately
         // preserving provider connection and consent decisions.

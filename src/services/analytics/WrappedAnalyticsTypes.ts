@@ -122,6 +122,27 @@ export interface CostPerMeal {
   message: string;
 }
 
+export interface FeePeriod {
+  quarter: string;
+  orderCount: number;
+  averageDeliveryFee: number;
+  averageServiceFee: number;
+  averageCompanyFees: number;
+}
+
+export interface DeliveryFeeTrend {
+  currency: string;
+  coveredOrderCount: number;
+  coverageStart: string;
+  coverageEnd: string;
+  earliestPeriod: FeePeriod;
+  latestPeriod: FeePeriod;
+  deliveryFeeChangePercent: number;
+  companyFeeChangePercent: number;
+  trend: 'increased' | 'decreased' | 'flat';
+  series: FeePeriod[];
+}
+
 // Pattern-Based Analytics
 
 export interface PeakHungerHour {
@@ -211,6 +232,7 @@ export interface WrappedAnalytics {
     couldHaveBought?: CouldHaveBought;
     missedInvestment?: MissedInvestment;
     costPerMeal?: CostPerMeal;
+    deliveryFeeTrend?: DeliveryFeeTrend;
   };
   patterns: {
     peakHungerHour?: PeakHungerHour;
@@ -236,4 +258,11 @@ export interface ReceiptForAnalytics {
   /** Optional until receipt currency is persisted for every historical source. */
   currency?: 'CAD' | 'USD' | 'EUR' | 'GBP' | 'UNKNOWN';
   deliveryTime?: Date | null; // Delivery time (for DoorDash wait time analytics)
+  currencyCode?: string | null;
+  subtotal?: number | null;
+  tax?: number | null;
+  tip?: number | null;
+  deliveryFee?: number | null;
+  serviceFee?: number | null;
+  savings?: number | null;
 }

@@ -19,6 +19,8 @@ export interface AdminUserFilters {
   createdFrom?: Date;
   createdTo?: Date;
   issue?: AdminUserIssue;
+  activityFrom?: Date;
+  activityTo?: Date;
   sort?: AdminUserSort;
   limit: number;
   offset: number;
@@ -96,7 +98,7 @@ export class AdminManagementService {
        WHERE ($1::text IS NULL OR POSITION($1 IN LOWER(u.email)) > 0 OR u.id::text = $1)
          AND ($2::boolean IS NULL OR u.email_verified = $2)
          AND ($3::text IS NULL OR ($3 = 'gmail' AND COALESCE(u.gmail_connected, false)) OR
-              ($3 = 'microsoft' AND EXISTS (SELECT 1 FROM mailbox_connections mc WHERE mc.user_id=u.id AND mc.provider='microsoft')))
+              ($3 = 'microsoft' AND EXISTS (SELECT 1 FROM mailbox_connections mc WHERE mc.user_id=u.id AND mc.provider='microsoft' AND mc.status='connected')))
          AND ($4::timestamptz IS NULL OR u.created_at >= $4)
          AND ($5::timestamptz IS NULL OR u.created_at < $5)
          AND ($6::text IS NULL OR p.gmail_import_status=$6 OR EXISTS (
@@ -104,13 +106,14 @@ export class AdminManagementService {
          AND ($7::text IS NULL OR p.tracking_status=$7)
          AND ($8::text IS NULL OR
            ($8='stuck_import' AND (EXISTS (SELECT 1 FROM gmail_sync_runs g WHERE g.user_id=u.id AND g.outcome='running' AND g.started_at<NOW()-INTERVAL '30 minutes') OR EXISTS (SELECT 1 FROM mailbox_sync_runs m WHERE m.user_id=u.id AND m.outcome='running' AND m.started_at<NOW()-INTERVAL '30 minutes'))) OR
-           ($8='recent_import_failure' AND (EXISTS (SELECT 1 FROM gmail_sync_runs g WHERE g.user_id=u.id AND g.outcome IN ('failed','partial') AND g.started_at>=NOW()-INTERVAL '30 days') OR EXISTS (SELECT 1 FROM mailbox_sync_runs m WHERE m.user_id=u.id AND m.outcome IN ('failed','partial') AND m.started_at>=NOW()-INTERVAL '30 days'))) OR
+           ($8='recent_import_failure' AND (EXISTS (SELECT 1 FROM gmail_sync_runs g WHERE g.user_id=u.id AND g.outcome IN ('failed','partial') AND g.started_at>=COALESCE($9::timestamptz,NOW()-INTERVAL '30 days') AND g.started_at<COALESCE($10::timestamptz,NOW())) OR EXISTS (SELECT 1 FROM mailbox_sync_runs m WHERE m.user_id=u.id AND m.outcome IN ('failed','partial') AND m.started_at>=COALESCE($9::timestamptz,NOW()-INTERVAL '30 days') AND m.started_at<COALESCE($10::timestamptz,NOW())))) OR
            ($8='reconnect_required' AND (p.tracking_status='reconnect_required' OR EXISTS (SELECT 1 FROM mailbox_connections mc WHERE mc.user_id=u.id AND mc.status='reconnect_required'))) OR
            ($8='tracking_error' AND p.tracking_status='error'))
-       GROUP BY u.id, p.gmail_import_status, p.tracking_status ORDER BY ${orderBy} LIMIT $9 OFFSET $10`,
+       GROUP BY u.id, p.gmail_import_status, p.tracking_status ORDER BY ${orderBy} LIMIT $11 OFFSET $12`,
       [search, filters.verified ?? null, filters.provider ?? null, filters.createdFrom ?? null,
        filters.createdTo ?? null, filters.importState ?? null, filters.trackingState ?? null,
-       filters.issue ?? null, filters.limit, filters.offset],
+       filters.issue ?? null, filters.activityFrom ?? null, filters.activityTo ?? null,
+       filters.limit, filters.offset],
     );
     return {
       users: result.rows.map((row) => ({
@@ -186,7 +189,7 @@ export class AdminManagementService {
       receiptSources: sources.rows.map((row) => ({ dataSource: String(row.data_source), receiptType: String(row.receipt_type), count: asNumber(row.count) })),
       importRuns: runs.slice(0, 25),
       auditEvents: audits.rows.map((row) => ({ action: String(row.action), reason: row.reason ? String(row.reason) : null, outcome: String(row.outcome), createdAt: asIso(row.created_at) })),
-      authMethods: authMethods.rows.map((row) => ({ method: String(row.method), linkedAt: asIso(row.linked_at), provenance: 'inferred' as const })),
+      authMethods: authMethods.rows.map((row) => ({ method: String(row.method), linkedAt: asIso(row.linked_at), provenance: 'exact' as const })),
       exports: exports.rows.map((row) => ({ provider: String(row.provider), status: String(row.status), requestedAt: asIso(row.requested_at), updatedAt: asIso(row.updated_at), errorCode: row.error_code ? String(row.error_code) : null })),
       mailboxSecurity,
     };
@@ -253,7 +256,9 @@ export class AdminManagementService {
     const createdAt = asIso(user.created_at);
     if (createdAt) {
       const earliestOAuth = oauth.rows[0];
-      const method = Boolean(user.has_password) ? 'password' : earliestOAuth ? String(earliestOAuth.provider) : 'unknown';
+      const oauthCreatedAt = asIso(earliestOAuth?.created_at);
+      const oauthWasAtCreation = oauthCreatedAt && Math.abs(Date.parse(oauthCreatedAt) - Date.parse(createdAt)) <= 5 * 60_000;
+      const method = oauthWasAtCreation ? String(earliestOAuth.provider) : user.has_password ? 'password' : 'unknown';
       events.push({ id: `account:${userId}`, kind: 'account_created', category: 'account', occurredAt: createdAt, provider: method === 'unknown' ? null : method, outcome: 'success', provenance: method === 'unknown' ? 'snapshot' : 'inferred', details: { method } });
     }
     for (const row of analytics.rows) {

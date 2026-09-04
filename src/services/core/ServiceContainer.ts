@@ -87,6 +87,10 @@ import { ScheduledImportJobService } from '../import/ScheduledImportJobService';
 import { ImportObjectStorage } from '../storage/ImportObjectStorage';
 import { PushDeviceRepository } from '../notifications/PushDeviceRepository';
 import { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
+import { AdConfigurationRepository } from '../data/AdConfigurationRepository';
+import { AdConfigurationService } from '../ads/AdConfigurationService';
+import { ExperienceStateRepository } from '../data/ExperienceStateRepository';
+import { ExperienceStateService } from '../experience/ExperienceStateService';
 
 /** The process-wide, typed composition root and resource owner. */
 export class ServiceContainer {
@@ -167,6 +171,10 @@ export class ServiceContainer {
   readonly importObjectStorage: ImportObjectStorage;
   readonly pushDeviceRepository: PushDeviceRepository;
   readonly mailboxSecurityPolicyRepository: MailboxSecurityPolicyRepository;
+  readonly adConfigurationRepository: AdConfigurationRepository;
+  readonly adConfigurationService: AdConfigurationService;
+  readonly experienceStateRepository: ExperienceStateRepository;
+  readonly experienceStateService: ExperienceStateService;
 
   constructor() {
     this.postgres = new PostgresService({
@@ -201,6 +209,10 @@ export class ServiceContainer {
       config.getQueueConfig().maximumWaitingJobs,
     );
     this.mailboxSecurityPolicyRepository = new MailboxSecurityPolicyRepository(this.postgres);
+    this.adConfigurationRepository = new AdConfigurationRepository(this.postgres);
+    this.adConfigurationService = new AdConfigurationService(this.adConfigurationRepository);
+    this.experienceStateRepository = new ExperienceStateRepository(this.postgres);
+    this.experienceStateService = new ExperienceStateService(this.experienceStateRepository);
     this.importObjectStorage = new ImportObjectStorage(config.getObjectStorageConfig());
     this.importJobService = new ImportJobService(this.importJobRepository, this.importObjectStorage);
     this.pushDeviceRepository = new PushDeviceRepository(this.postgres);

@@ -11,6 +11,8 @@ import { createImportsRouter, createNotificationDeviceRouter } from './routes/im
 import { createDatabaseRouter } from './routes/database';
 import { createMonitoringRouter } from './routes/monitoring';
 import { createAdminRouter } from './routes/admin';
+import { createAdsRouter } from './routes/ads';
+import { createExperienceRouter } from './routes/experience';
 import { createAnalyticsEventsRouter } from './routes/analyticsEvents';
 import { createGmailRouter } from './routes/gmail';
 import { createOutlookRouter } from './routes/outlook';
@@ -26,6 +28,7 @@ import { ShutdownCoordinator } from './services/core/ShutdownCoordinator';
 import { ImportQueueOperations } from './services/queue/ImportQueues';
 import { AdminQueueOperationsService } from './services/admin/AdminQueueOperationsService';
 import { redisLockStore } from './config/redis';
+import { ImportOperationPresentationService } from './services/import/ImportOperationPresentationService';
 
 import {
   securityHeaders,
@@ -61,6 +64,10 @@ import { validateUUIDParam } from './middleware/validation';
 
 const app = express();
 const queueOperations = new ImportQueueOperations(config.getQueueConfig());
+const importOperationPresentation = new ImportOperationPresentationService(
+  container.importJobRepository,
+  queueOperations,
+);
 const adminQueueOperations = new AdminQueueOperationsService(
   container.importJobRepository,
   queueOperations,
@@ -283,6 +290,7 @@ app.use('/imports', createImportsRouter({
   rateLimit: csvImportRateLimit,
   operations: container.importJobRepository,
   jobs: container.importJobService,
+  presentation: importOperationPresentation,
 }));
 app.use('/notifications', createNotificationDeviceRouter({
   authenticate: authenticateToken,
@@ -303,6 +311,14 @@ app.use(
     events: container.analyticsEventService,
   }),
 );
+app.use('/ads', createAdsRouter({
+  authenticate: authenticateToken,
+  configuration: container.adConfigurationService,
+}));
+app.use('/experience', createExperienceRouter({
+  authenticate: authenticateToken,
+  experience: container.experienceStateService,
+}));
 app.use(
   '/admin/v1',
   requireAdminOrigin(config.getSecurityConfig().adminDashboardUrl),
@@ -315,6 +331,7 @@ app.use(
   createAdminRouter({
     auth: container.adminAuthService,
     analytics: container.adminAnalyticsQueryService,
+    ads: container.adConfigurationService,
     management: container.adminManagementService,
     authenticate: authenticateAdmin,
     requireCsrf: requireAdminCsrf,

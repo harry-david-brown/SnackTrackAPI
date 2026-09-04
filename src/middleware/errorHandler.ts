@@ -129,6 +129,7 @@ export const statusForError = (error: AppError): number => {
     case 'IDEMPOTENCY_KEY_REUSED':
     case 'UPLOAD_CHANGED':
     case 'UPLOAD_SIZE_MISMATCH':
+    case 'AD_CONFIG_VERSION_CONFLICT':
       return 409;
     case 'UPLOAD_NOT_FOUND':
       return 404;

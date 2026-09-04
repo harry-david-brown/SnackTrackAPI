@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { AnalyticsEventService } = require('../dist/services/analytics/AdminAnalyticsService');
+const { AdminAnalyticsQueryService } = require('../dist/services/analytics/AdminAnalyticsService');
 const {
   createRequireAdminRole,
   createRequireAdminCsrf,
@@ -48,6 +49,34 @@ test('analytics ingestion rejects unbounded batches and expired events', async (
   assert.deepEqual(await service.ingest(userId, [event({ occurredAt: '2026-08-01T00:00:00.000Z' })]), {
     accepted: 0, duplicates: 0, rejected: 1,
   });
+});
+
+test('ad analytics accepts only bounded privacy-safe properties', async () => {
+  const service = new AnalyticsEventService({ query: async () => ({ rows: [], rowCount: 1 }) }, () => now);
+  const base = event({ eventName: 'ad_impression', properties: {
+    placement: 'dashboard_after_insights', source: 'admob', configurationVersion: 1,
+  } });
+  assert.deepEqual(await service.ingest(userId, [base]), { accepted: 1, duplicates: 0, rejected: 0 });
+  assert.deepEqual(await service.ingest(userId, [{ ...base, eventId: '52f287d3-3a99-4a46-81fe-08f1ac0d7549', properties: { ...base.properties, restaurant: 'Private' } }]), { accepted: 0, duplicates: 0, rejected: 1 });
+  assert.deepEqual(await service.ingest(userId, [{ ...base, eventId: '0a1c2f84-9bca-4c20-87ac-d01697929eb2', eventName: 'ad_revenue_paid', properties: { ...base.properties, currency: 'CAD', valueMicros: -1, precision: 'precise' } }]), { accepted: 0, duplicates: 0, rejected: 1 });
+});
+
+test('ad metric query handles zero denominators and keeps currencies separate', async () => {
+  const database = { query: async sql => {
+    if (sql.includes('AS exposed_users')) return { rows: [{ requests: 0, loads: 0, impressions: 0, exposed_users: 0, clicks: 0, failures: 0 }], rowCount: 1 };
+    if (sql.includes("GROUP BY currency ORDER BY currency")) return { rows: [
+      { currency: 'CAD', value_micros: '1250000', paid_events: 2 },
+      { currency: 'USD', value_micros: '500000', paid_events: 1 },
+    ], rowCount: 2 };
+    return { rows: [], rowCount: 0 };
+  } };
+  const result = await new AdminAnalyticsQueryService(database).ads(
+    new Date('2026-09-01T00:00:00.000Z'), new Date('2026-09-02T00:00:00.000Z'),
+  );
+  assert.equal(result.summary.fillRate, null);
+  assert.equal(result.summary.clickThroughRate, null);
+  assert.deepEqual(result.revenue.map(row => row.currency), ['CAD', 'USD']);
+  assert.ok(result.revenue.every(row => row.effectiveCpmMicros === null));
 });
 
 const runMiddleware = (middleware, request) => new Promise((resolve) =>

@@ -38,9 +38,9 @@ const unsubscribeRedis = redisLockStore.onStateChange((snapshot) => {
   const workers = [mailboxWorker, exportWorker].filter((worker): worker is Worker<QueuePayload> => worker !== null);
   if (snapshot.state === 'ready') {
     if (workers.length === 0) void startLockDependentWorkers();
-    else for (const worker of workers) void worker.resume().catch((error) => logger.warn('Import worker resume failed', { operation: 'import_worker_resume', queue: worker.name, error }));
+    else for (const worker of workers) void worker.resume().catch((error: unknown) => logger.warn('Import worker resume failed', { operation: 'import_worker_resume', queue: worker.name, error: error instanceof Error ? error.message : String(error) }));
   } else if (snapshot.enabled) {
-    for (const worker of workers) void worker.pause(true).catch((error) => logger.warn('Import worker pause failed', { operation: 'import_worker_pause', queue: worker.name, error }));
+    for (const worker of workers) void worker.pause(true).catch((error: unknown) => logger.warn('Import worker pause failed', { operation: 'import_worker_pause', queue: worker.name, error: error instanceof Error ? error.message : String(error) }));
   }
 });
 
@@ -49,7 +49,7 @@ void startLockDependentWorkers();
 dispatcher.start();
 void container.importObjectStorage.cleanupOrphanedTemporaryFiles()
   .then((removed) => { if (removed > 0) logger.info('Removed orphaned import temporary directories', { operation: 'import_temp_cleanup', removed }); })
-  .catch((error) => logger.warn('Import temporary directory cleanup failed', { operation: 'import_temp_cleanup', error }));
+  .catch((error: unknown) => logger.warn('Import temporary directory cleanup failed', { operation: 'import_temp_cleanup', error: error instanceof Error ? error.message : String(error) }));
 logger.info('Import worker process started', { operation: 'import_worker_process_start', notificationConcurrency: queueConfig.notificationConcurrency });
 
 let closing = false;

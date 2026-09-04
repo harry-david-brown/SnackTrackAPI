@@ -3,7 +3,20 @@ const assert = require('node:assert/strict');
 
 const { ImportPreferencesService } = require('../dist/services/import/ImportPreferencesService');
 
-const projection = { marker: 'canonical-projection' };
+const projection = {
+  marker: 'canonical-projection',
+  gmailConnection: {
+    connectionHealth: 'valid',
+    canImport: true,
+    connectionMode: 'offline',
+  },
+  outlookConnection: {
+    connectionHealth: 'disconnected',
+    canImport: false,
+    connectionMode: 'none',
+  },
+  ongoingTracking: { capability: { canTrack: true } },
+};
 const connected = {
   user: { id: 'user-id', email: 'user@example.com' },
   health: { status: 'valid', validatedAt: null },
@@ -43,7 +56,7 @@ test('tracking consent validates the historical baseline before writing', async 
   assert.equal(wrote, false);
 });
 
-test('tracking consent requires validated durable Gmail before writing', async () => {
+test('tracking consent requires a validated durable mailbox before writing', async () => {
   let wrote = false;
   const service = new ImportPreferencesService(
     {
@@ -53,9 +66,10 @@ test('tracking consent requires validated durable Gmail before writing', async (
     },
     { getTrackingBaseline: async () => ({ eligible: true, source: 'exports' }) },
     {
-      getConnection: async () => ({
-        ...connected,
-        health: { status: 'unavailable', validatedAt: null },
+      getPreferences: async () => ({
+        ...projection,
+        gmailConnection: { ...projection.gmailConnection, connectionHealth: 'unavailable' },
+        ongoingTracking: { capability: { canTrack: false } },
       }),
     },
     {},
@@ -63,7 +77,7 @@ test('tracking consent requires validated durable Gmail before writing', async (
 
   await assert.rejects(
     service.setOngoingTrackingConsent('user-id', 'granted', 'v1'),
-    (error) => error.code === 'GMAIL_VALIDATION_UNAVAILABLE',
+    (error) => error.code === 'MAILBOX_VALIDATION_UNAVAILABLE',
   );
   assert.equal(wrote, false);
 });
@@ -81,10 +95,6 @@ test('tracking consent commits only after preconditions and returns canonical st
       },
     },
     {
-      getConnection: async () => {
-        events.push('connection');
-        return connected;
-      },
       getPreferences: async () => {
         events.push('projection');
         return projection;
@@ -96,7 +106,7 @@ test('tracking consent commits only after preconditions and returns canonical st
   const result = await service.setOngoingTrackingConsent('user-id', 'granted', 'v1');
 
   assert.equal(result, projection);
-  assert.deepEqual(events, ['baseline', 'connection', 'write', 'projection']);
+  assert.deepEqual(events, ['baseline', 'projection', 'write', 'projection']);
 });
 
 test('export-ready check skips provider access when monitoring is not eligible', async () => {
@@ -158,7 +168,7 @@ test('export-ready detection records provider lifecycle before projecting state'
   const result = await service.checkExportReady('user-id');
 
   assert.deepEqual(result, { detected: true, preferences: projection });
-  assert.deepEqual(events, ['provider', 'write:uber_eats:file_ready:detected_email', 'projection']);
+  assert.deepEqual(events, ['projection', 'provider', 'write:uber_eats:file_ready:detected_email', 'projection']);
 });
 
 test('provider relevance rejects receipt-backed usage evidence', async () => {

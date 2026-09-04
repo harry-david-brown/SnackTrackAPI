@@ -28,9 +28,9 @@ test('Gmail acquisition owns credential preflight and incremental message retrie
   const calls = [];
   const service = new GmailImportAcquisitionService(
     {
-      getEmails: async (_user, options) => {
+      getEmailPages: (_user, options) => {
         calls.push(options);
-        return [];
+        return { async *[Symbol.asyncIterator]() {} };
       },
     },
     { getLatestCsvReceiptDates: async () => ({ uber_eats: new Date('2026-08-10T00:00:00Z') }) },
@@ -40,6 +40,7 @@ test('Gmail acquisition owns credential preflight and incremental message retrie
         gmailBaselineCompletedAt: '2026-08-01T00:00:00.000Z',
       }),
     },
+    { get: async () => ({ allowForwardedReceipts: false }) },
     () => new Date('2026-08-31T00:00:00.000Z').getTime(),
   );
 

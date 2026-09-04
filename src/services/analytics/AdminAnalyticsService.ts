@@ -8,6 +8,12 @@ export const CLIENT_ANALYTICS_EVENTS = [
   'wrapped_exited', 'wrapped_completed', 'wrapped_share_tapped',
   'wrapped_share_completed', 'wrapped_share_failed', 'export_offer_shown',
   'export_offer_clicked', 'export_offer_dismissed',
+  'ad_request_started', 'ad_loaded', 'ad_impression', 'ad_clicked',
+  'ad_load_failed', 'ad_revenue_paid',
+  'quick_setup_viewed', 'setup_method_selected', 'setup_completed', 'useful_history_reached',
+  'foreground_import_shown', 'import_stage_viewed', 'delayed_import_shown', 'delayed_import_explore_selected',
+  'automatic_recap_launched', 'data_tracking_viewed', 'data_source_action_selected',
+  'upsell_example_viewed', 'deeper_stats_selected', 'fee_trend_displayed', 'ad_suppressed',
 ] as const;
 export type ClientAnalyticsEventName = (typeof CLIENT_ANALYTICS_EVENTS)[number];
 
@@ -29,6 +35,17 @@ const FORBIDDEN_KEY = /(email|token|password|receipt|restaurant|item|filename|ur
 const EVENT_SET = new Set<string>(CLIENT_ANALYTICS_EVENTS);
 const PROPERTY_KEYS: Partial<Record<ClientAnalyticsEventName, readonly string[]>> = {
   mailbox_provider_selected: ['provider'],
+  setup_method_selected: ['method'],
+  setup_completed: ['method'],
+  automatic_recap_launched: ['entryPoint'],
+  data_source_action_selected: ['action', 'provider'],
+  foreground_import_shown: ['operationKind', 'reason'],
+  import_stage_viewed: ['operationKind', 'stage'],
+  delayed_import_shown: ['operationKind', 'reason'],
+  upsell_example_viewed: ['example'],
+  fee_trend_displayed: ['trend', 'coveredOrderCount'],
+  ad_suppressed: ['placement', 'reason'],
+  wrapped_started: ['entryPoint'],
   history_filter_changed: ['filter'],
   wrapped_slide_viewed: ['slideId', 'deckPosition', 'deckLength'],
   wrapped_exited: ['slideId', 'deckPosition', 'deckLength'],
@@ -37,6 +54,12 @@ const PROPERTY_KEYS: Partial<Record<ClientAnalyticsEventName, readonly string[]>
   export_offer_shown: ['surface'],
   export_offer_clicked: ['surface'],
   export_offer_dismissed: ['surface'],
+  ad_request_started: ['placement', 'source', 'configurationVersion'],
+  ad_loaded: ['placement', 'source', 'configurationVersion'],
+  ad_impression: ['placement', 'source', 'configurationVersion'],
+  ad_clicked: ['placement', 'source', 'configurationVersion'],
+  ad_load_failed: ['placement', 'source', 'configurationVersion', 'errorCode'],
+  ad_revenue_paid: ['placement', 'source', 'configurationVersion', 'currency', 'valueMicros', 'precision'],
 };
 
 const propertyValue = (value: unknown): boolean =>
@@ -59,6 +82,32 @@ const validateProperties = (
       throw new ValidationError(`Property ${key} is not allowed`, 'properties');
     }
     result[key] = candidate as string | number | boolean | null;
+  }
+  if (eventName.startsWith('ad_')) {
+    if (result.placement !== 'dashboard_after_insights' && result.placement !== 'dashboard_footer' && result.placement !== 'history_after_fifth_order') {
+      throw new ValidationError('Property placement is not allowed', 'properties');
+    }
+    if (result.source !== 'admob' && result.source !== 'direct') {
+      throw new ValidationError('Property source is not allowed', 'properties');
+    }
+    if (!Number.isSafeInteger(result.configurationVersion) || Number(result.configurationVersion) < 1) {
+      throw new ValidationError('Property configurationVersion is not allowed', 'properties');
+    }
+    if (eventName === 'ad_load_failed' &&
+      (typeof result.errorCode !== 'string' || !/^[A-Z0-9_-]{1,80}$/.test(result.errorCode))) {
+      throw new ValidationError('Property errorCode is not allowed', 'properties');
+    }
+    if (eventName === 'ad_revenue_paid') {
+      if (typeof result.currency !== 'string' || !/^[A-Z]{3}$/.test(result.currency)) {
+        throw new ValidationError('Property currency is not allowed', 'properties');
+      }
+      if (!Number.isSafeInteger(result.valueMicros) || Number(result.valueMicros) < 0) {
+        throw new ValidationError('Property valueMicros is not allowed', 'properties');
+      }
+      if (typeof result.precision !== 'string' || !/^[a-z_]{1,30}$/.test(result.precision)) {
+        throw new ValidationError('Property precision is not allowed', 'properties');
+      }
+    }
   }
   return result;
 };
@@ -199,7 +248,7 @@ export class AdminAnalyticsQueryService {
 
   async funnel(from: Date, to: Date, kind: 'activation' | 'wrapped' | 'export') {
     const definitions = {
-      activation: ['account_registered','mailbox_provider_selected','mailbox_connected','historical_import_completed','user_activated'],
+      activation: ['account_registered','setup_method_selected','setup_completed','useful_history_reached','wrapped_started','wrapped_completed','deeper_stats_selected','export_import_completed'],
       wrapped: ['wrapped_started','wrapped_completed','wrapped_share_tapped','wrapped_share_completed'],
       export: ['export_offer_shown','export_offer_clicked','export_import_completed'],
     } as const;
@@ -278,5 +327,129 @@ export class AdminAnalyticsQueryService {
         exportCompletionRate: rate('export_import_completed', 'export_offer_clicked'),
       },
     };
+  }
+
+  async ads(from: Date, to: Date) {
+    const eventNames = ['ad_request_started', 'ad_loaded', 'ad_impression', 'ad_clicked', 'ad_load_failed', 'ad_revenue_paid'];
+    const [summary, dailyCounts, dailyRevenue, revenue, platform, placement, appVersion, failures] = await Promise.all([
+      this.database.query<DatabaseRow>(
+        `SELECT COUNT(*) FILTER (WHERE event_name='ad_request_started')::int AS requests,
+                COUNT(*) FILTER (WHERE event_name='ad_loaded')::int AS loads,
+                COUNT(*) FILTER (WHERE event_name='ad_impression')::int AS impressions,
+                COUNT(DISTINCT user_id) FILTER (WHERE event_name='ad_impression')::int AS exposed_users,
+                COUNT(*) FILTER (WHERE event_name='ad_clicked')::int AS clicks,
+                COUNT(*) FILTER (WHERE event_name='ad_load_failed')::int AS failures
+           FROM analytics_events
+          WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name = ANY($3::text[])`,
+        [from, to, eventNames],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT occurred_at::date AS day,
+                COUNT(*) FILTER (WHERE event_name='ad_request_started')::int AS requests,
+                COUNT(*) FILTER (WHERE event_name='ad_impression')::int AS impressions,
+                COUNT(*) FILTER (WHERE event_name='ad_clicked')::int AS clicks
+           FROM analytics_events
+          WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name = ANY($3::text[])
+          GROUP BY day ORDER BY day`,
+        [from, to, eventNames],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT occurred_at::date AS day, properties->>'currency' AS currency,
+                SUM((properties->>'valueMicros')::numeric)::text AS value_micros
+           FROM analytics_events
+          WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name='ad_revenue_paid'
+            AND properties->>'currency' ~ '^[A-Z]{3}$'
+            AND properties->>'valueMicros' ~ '^[0-9]+$'
+          GROUP BY day, currency ORDER BY day, currency`,
+        [from, to],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT properties->>'currency' AS currency,
+                SUM((properties->>'valueMicros')::numeric)::text AS value_micros,
+                COUNT(*)::int AS paid_events
+           FROM analytics_events
+          WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name='ad_revenue_paid'
+            AND properties->>'currency' ~ '^[A-Z]{3}$'
+            AND properties->>'valueMicros' ~ '^[0-9]+$'
+          GROUP BY currency ORDER BY currency`,
+        [from, to],
+      ),
+      this.adBreakdown(from, to, `COALESCE(platform, 'unknown')`),
+      this.adBreakdown(from, to, `COALESCE(properties->>'placement', 'unknown')`),
+      this.adBreakdown(from, to, `COALESCE(app_version, 'unknown')`),
+      this.database.query<DatabaseRow>(
+        `SELECT COALESCE(properties->>'errorCode', 'UNKNOWN') AS error_code, COUNT(*)::int AS failures
+           FROM analytics_events
+          WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name='ad_load_failed'
+          GROUP BY error_code ORDER BY failures DESC, error_code`,
+        [from, to],
+      ),
+    ]);
+    const row = summary.rows[0] ?? {};
+    const requests = count(row.requests);
+    const loads = count(row.loads);
+    const impressions = count(row.impressions);
+    const exposedUsers = count(row.exposed_users);
+    const clicks = count(row.clicks);
+    const percent = (numerator: number, denominator: number) => denominator
+      ? Math.round(numerator / denominator * 1000) / 10
+      : null;
+    const revenueByDay = new Map<string, Record<string, number>>();
+    for (const revenueRow of dailyRevenue.rows) {
+      const day = isoDay(revenueRow.day);
+      const values = revenueByDay.get(day) ?? {};
+      values[String(revenueRow.currency)] = Number(revenueRow.value_micros ?? 0);
+      revenueByDay.set(day, values);
+    }
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      summary: {
+        requests, loads, impressions, exposedUsers, clicks, failures: count(row.failures),
+        fillRate: percent(loads, requests),
+        showRate: percent(impressions, loads),
+        clickThroughRate: percent(clicks, impressions),
+        impressionsPerExposedUser: exposedUsers ? Math.round(impressions / exposedUsers * 100) / 100 : null,
+      },
+      revenue: revenue.rows.map((item) => ({
+        currency: String(item.currency),
+        valueMicros: Number(item.value_micros ?? 0),
+        paidEvents: count(item.paid_events),
+        effectiveCpmMicros: impressions ? Math.round(Number(item.value_micros ?? 0) / impressions * 1000) : null,
+      })),
+      daily: dailyCounts.rows.map((item) => ({
+        date: isoDay(item.day), requests: count(item.requests), impressions: count(item.impressions),
+        clicks: count(item.clicks), revenueMicros: revenueByDay.get(isoDay(item.day)) ?? {},
+      })),
+      breakdowns: {
+        platform: this.mapAdBreakdown(platform.rows),
+        placement: this.mapAdBreakdown(placement.rows),
+        appVersion: this.mapAdBreakdown(appVersion.rows),
+      },
+      failures: failures.rows.map((item) => ({ errorCode: String(item.error_code), failures: count(item.failures) })),
+      collectedAt: new Date().toISOString(),
+    };
+  }
+
+  private adBreakdown(from: Date, to: Date, dimensionSql: string) {
+    return this.database.query<DatabaseRow>(
+      `SELECT ${dimensionSql} AS dimension,
+              COUNT(*) FILTER (WHERE event_name='ad_request_started')::int AS requests,
+              COUNT(*) FILTER (WHERE event_name='ad_loaded')::int AS loads,
+              COUNT(*) FILTER (WHERE event_name='ad_impression')::int AS impressions,
+              COUNT(*) FILTER (WHERE event_name='ad_clicked')::int AS clicks,
+              COUNT(*) FILTER (WHERE event_name='ad_load_failed')::int AS failures
+         FROM analytics_events
+        WHERE occurred_at >= $1 AND occurred_at < $2 AND event_name LIKE 'ad_%'
+        GROUP BY dimension ORDER BY impressions DESC, dimension`,
+      [from, to],
+    );
+  }
+
+  private mapAdBreakdown(rows: readonly DatabaseRow[]) {
+    return rows.map((item) => ({
+      dimension: String(item.dimension), requests: count(item.requests), loads: count(item.loads),
+      impressions: count(item.impressions), clicks: count(item.clicks), failures: count(item.failures),
+    }));
   }
 }

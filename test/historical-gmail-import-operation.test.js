@@ -63,7 +63,7 @@ const makeService = ({ status, gmailImport, locks, events = [] } = {}) => {
   );
 };
 
-test('historical Gmail import validates connection before acquiring its writer lock', async () => {
+test('historical Gmail import validates the connection while holding its writer lock', async () => {
   let acquired = false;
   const service = makeService({
     status: {
@@ -86,7 +86,7 @@ test('historical Gmail import validates connection before acquiring its writer l
     service.execute(userId),
     (error) => error.code === 'GMAIL_VALIDATION_UNAVAILABLE',
   );
-  assert.equal(acquired, false);
+  assert.equal(acquired, true);
 });
 
 test('historical Gmail import reports the shared busy code when the lock is held', async () => {

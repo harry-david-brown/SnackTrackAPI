@@ -140,7 +140,7 @@ export class ZipExtractor {
           settled = true;
           reject(error);
         };
-        zipfile.on('entry', (entry) => {
+        zipfile.on('entry', (entry: yauzl.Entry) => {
           try {
             count += 1;
             if (count > MAX_ENTRIES) throw this.error('ZIP_TOO_MANY_ENTRIES', 'The ZIP contains too many files.');

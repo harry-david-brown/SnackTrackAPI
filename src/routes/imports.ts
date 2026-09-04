@@ -8,12 +8,14 @@ import type { ImportJobRepository } from '../services/data/ImportJobRepository';
 import type { ImportJobService } from '../services/import/ImportJobService';
 import type { PushDeviceRepository } from '../services/notifications/PushDeviceRepository';
 import { toImportOperation } from '../services/import/ImportJobTypes';
+import type { ImportOperationPresentationService } from '../services/import/ImportOperationPresentationService';
 
 interface ImportsRouterDependencies {
   readonly authenticate: RequestHandler;
   readonly rateLimit: RequestHandler;
   readonly operations: ImportJobRepository;
   readonly jobs: ImportJobService;
+  readonly presentation: Pick<ImportOperationPresentationService, 'operation'>;
 }
 
 const idempotencyKey = (request: Request): string | undefined => {
@@ -29,14 +31,14 @@ export const createImportsRouter = (dependencies: ImportsRouterDependencies): Ro
 
   router.get('/active', asyncHandler(async (request: Request, response: Response) => {
     const operation = await dependencies.operations.findActive(authenticatedUserId(request));
-    response.json({ operation: operation ? toImportOperation(operation) : null });
+    response.json({ operation: operation ? await dependencies.presentation.operation(operation) : null });
   }));
   router.get('/recent', asyncHandler(async (request: Request, response: Response) => {
     const operations = await dependencies.operations.listRecent(authenticatedUserId(request));
-    response.json({ operations: operations.map(toImportOperation) });
+    response.json({ operations: await Promise.all(operations.map((operation) => dependencies.presentation.operation(operation))) });
   }));
   router.get('/:id', asyncHandler(async (request: Request, response: Response) => {
-    response.json({ operation: toImportOperation(await dependencies.operations.findForUser(authenticatedUserId(request), request.params.id)) });
+    response.json({ operation: await dependencies.presentation.operation(await dependencies.operations.findForUser(authenticatedUserId(request), request.params.id)) });
   }));
 
   const uploadIntent = (provider: 'uber_eats' | 'doordash') => asyncHandler(async (request: Request, response: Response) => {

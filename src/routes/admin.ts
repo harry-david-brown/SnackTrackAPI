@@ -13,10 +13,13 @@ import type {
   AdminUserSort,
 } from '../services/admin/AdminManagementService';
 import type { AdminQueueOperationsService } from '../services/admin/AdminQueueOperationsService';
+import type { AdConfigurationService } from '../services/ads/AdConfigurationService';
+import { AD_PLACEMENTS, AD_PLACEMENTS_V2, type AdPlacement, type AdPlacementV2 } from '../services/ads/AdConfigurationTypes';
 
 interface AdminRouterDependencies {
   auth: AdminAuthService;
   analytics: AdminAnalyticsQueryService;
+  ads: Pick<AdConfigurationService, 'get' | 'update' | 'kill'>;
   management: AdminManagementService;
   authenticate: RequestHandler;
   requireCsrf: RequestHandler;
@@ -58,6 +61,17 @@ const integer = (value: unknown, fallback: number, min: number, max: number) => 
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new ValidationError(`Must be ${min}–${max}`);
   return parsed;
 };
+const requiredBoolean = (body: Record<string, unknown>, field: string): boolean => {
+  if (typeof body[field] !== 'boolean') throw new ValidationError('Must be true or false', field);
+  return body[field] as boolean;
+};
+const requiredInteger = (body: Record<string, unknown>, field: string, min: number, max: number): number => {
+  const value = body[field];
+  if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) {
+    throw new ValidationError(`Must be ${min}–${max}`, field);
+  }
+  return Number(value);
+};
 
 export const createAdminRouter = (d: AdminRouterDependencies): Router => {
   const router = Router();
@@ -98,6 +112,36 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
   }));
   router.get('/analytics/retention', asyncHandler(async (req, res) => { const range = dateRange(req.query as Record<string, unknown>); res.json(await d.analytics.retention(range.from, range.to)); }));
   router.get('/analytics/features', asyncHandler(async (req, res) => { const range = dateRange(req.query as Record<string, unknown>); res.json(await d.analytics.features(range.from, range.to)); }));
+  router.get('/analytics/ads', asyncHandler(async (req, res) => { const range = dateRange(req.query as Record<string, unknown>); res.json(await d.analytics.ads(range.from, range.to)); }));
+
+  router.get('/ads/config', asyncHandler(async (_req, res) => res.json(await d.ads.get())));
+  router.patch('/ads/config', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
+    const body = requireObject(req.body);
+    const placement = string(body, 'placement');
+    if (!AD_PLACEMENTS.includes(placement as AdPlacement)) throw new ValidationError('Invalid placement', 'placement');
+    const placements = body.placements;
+    if (!Array.isArray(placements) || placements.some((value) => typeof value !== 'string' || !AD_PLACEMENTS_V2.includes(value as AdPlacementV2))) {
+      throw new ValidationError('Invalid placements', 'placements');
+    }
+    res.json(await d.ads.update({
+      enabled: requiredBoolean(body, 'enabled'),
+      iosRolloutPercent: requiredInteger(body, 'iosRolloutPercent', 0, 100),
+      androidRolloutPercent: requiredInteger(body, 'androidRolloutPercent', 0, 100),
+      placement: placement as AdPlacement,
+      placements: placements as AdPlacementV2[],
+      maxImpressionsPerSession: requiredInteger(body, 'maxImpressionsPerSession', 1, 3),
+      maxImpressionsPerDay: requiredInteger(body, 'maxImpressionsPerDay', 1, 10),
+      minimumReceiptCount: requiredInteger(body, 'minimumReceiptCount', 1, 100),
+      expectedVersion: requiredInteger(body, 'expectedVersion', 1, Number.MAX_SAFE_INTEGER),
+      actorAdminId: req.admin!.id,
+      reason: string(body, 'reason'),
+      requestId: req.requestId,
+    }));
+  }));
+  router.post('/ads/kill', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
+    const body = requireObject(req.body);
+    res.json(await d.ads.kill({ actorAdminId: req.admin!.id, reason: string(body, 'reason'), requestId: req.requestId }));
+  }));
 
   router.get('/operations/health', d.requireOperator, asyncHandler(async (_req, res) => {
     const database = await d.databaseHealth.check();
@@ -136,6 +180,12 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
     const createdTo = createdToRaw ? new Date(createdToRaw) : undefined;
     if (createdFrom && Number.isNaN(createdFrom.getTime())) throw new ValidationError('Invalid date', 'createdFrom');
     if (createdTo && Number.isNaN(createdTo.getTime())) throw new ValidationError('Invalid date', 'createdTo');
+    const activityFromRaw = optionalString(req.query.activityFrom, 'activityFrom');
+    const activityToRaw = optionalString(req.query.activityTo, 'activityTo');
+    const activityFrom = activityFromRaw ? new Date(activityFromRaw) : undefined;
+    const activityTo = activityToRaw ? new Date(activityToRaw) : undefined;
+    if (activityFrom && Number.isNaN(activityFrom.getTime())) throw new ValidationError('Invalid date', 'activityFrom');
+    if (activityTo && Number.isNaN(activityTo.getTime())) throw new ValidationError('Invalid date', 'activityTo');
     const issue = optionalString(req.query.issue, 'issue');
     const issues: readonly AdminUserIssue[] = ['stuck_import', 'recent_import_failure', 'reconnect_required', 'tracking_error'];
     if (issue !== undefined && !issues.includes(issue as AdminUserIssue)) throw new ValidationError('Invalid user issue', 'issue');
@@ -148,6 +198,8 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
       trackingState: optionalString(req.query.trackingState, 'trackingState'),
       createdFrom, createdTo,
       issue: issue as AdminUserIssue | undefined,
+      activityFrom,
+      activityTo,
       sort: sort as AdminUserSort,
       limit: integer(req.query.limit, 50, 1, 100), offset: integer(req.query.offset, 0, 0, 1_000_000),
     }));

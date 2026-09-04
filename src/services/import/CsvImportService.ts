@@ -110,7 +110,7 @@ const parserOptions = {
 };
 
 const boundedText = (value: string, maximum: number): string => {
-  const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = value.replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim();
   if (normalized.length > maximum) throw new ValidationError('CSV field exceeds the safe length limit', 'file');
   return normalized;
 };
@@ -556,6 +556,9 @@ export class CsvImportService {
         orderDate,
         DataSource.CSV, // dataSource
         deliveryTime, // delivery_time for wait time analytics
+        undefined,
+        undefined,
+        { subtotal: group.subtotal },
       );
 
       receipts.push(receipt);
@@ -619,6 +622,13 @@ export class CsvImportService {
         orderDate,
         DataSource.CSV, // dataSource
         deliveryTime, // delivery_time for wait time analytics
+        undefined,
+        undefined,
+        {
+          currencyCode: ['CAD', 'USD', 'EUR', 'GBP'].includes(firstRow.Currency.trim().toUpperCase())
+            ? firstRow.Currency.trim().toUpperCase() as 'CAD' | 'USD' | 'EUR' | 'GBP'
+            : 'UNKNOWN',
+        },
       );
 
       receipts.push(receipt);

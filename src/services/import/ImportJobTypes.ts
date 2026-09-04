@@ -24,6 +24,14 @@ export type ImportJobTrigger = 'user' | 'scheduler';
 export const EXPORT_PROVIDERS = ['uber_eats', 'doordash'] as const;
 export type ExportProvider = (typeof EXPORT_PROVIDERS)[number];
 
+export interface ImportOperationPresentation {
+  readonly mode: 'foreground' | 'delayed';
+  readonly expectedDurationBand: 'under_5_minutes' | 'over_5_minutes' | 'unknown';
+  readonly reason: 'normal' | 'queue_backlog' | 'workers_unavailable' | 'queue_paused' | 'retrying' | 'elapsed_over_threshold';
+  readonly stage: 'waiting' | 'discovering' | 'building_history' | 'preparing_recap';
+  readonly discoveredOrderCount: number | null;
+}
+
 export interface ImportJob {
   readonly id: string;
   readonly userId: string;
@@ -59,7 +67,8 @@ export type ImportOperation = Omit<ImportJob,
   'userId' | 'heartbeatAt' | 'objectKey' | 'originalFilename' | 'contentType' | 'contentLength' |
   'exportProvider' | 'objectEtag' | 'submittedContentType' | 'submittedContentLength' |
   'importGeneration' | 'checkpoint' | 'expiresAt'> & {
-    readonly provider: ExportProvider | null;
+  readonly provider: ExportProvider | null;
+    readonly presentation: ImportOperationPresentation | null;
   };
 
 export interface ImportExecutionCheckpoint {
@@ -84,6 +93,15 @@ export const toImportOperation = (job: ImportJob): ImportOperation => ({
   errorMessage: job.errorMessage,
   attempts: job.attempts,
   provider: job.exportProvider,
+  presentation: job.trigger === 'user' && ['gmail_historical', 'outlook_historical', 'export_file'].includes(job.kind)
+    ? {
+        mode: 'foreground',
+        expectedDurationBand: 'unknown',
+        reason: 'normal',
+        stage: 'waiting',
+        discoveredOrderCount: null,
+      }
+    : null,
   createdAt: job.createdAt,
   queuedAt: job.queuedAt,
   startedAt: job.startedAt,

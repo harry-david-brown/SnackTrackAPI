@@ -18,12 +18,13 @@ const importJob = (id, userId, kind) => ({
   id, userId, kind, trigger: 'user', status: 'pending_dispatch', phase: 'waiting', progress: 0,
   result: null, errorCode: null, errorMessage: null, attempts: 0, heartbeatAt: null,
   objectKey: null, originalFilename: null, contentType: null, contentLength: null,
+  exportProvider: null, objectEtag: null, submittedContentType: null, submittedContentLength: null,
   importGeneration: 0, createdAt: '2026-09-02T12:00:00.000Z', queuedAt: null,
   startedAt: null, completedAt: null, expiresAt: null, updatedAt: '2026-09-02T12:00:00.000Z',
 });
 const publicOperation = (id, kind) => ({
   id, kind, trigger: 'user', status: 'pending_dispatch', phase: 'waiting', progress: 0,
-  result: null, errorCode: null, errorMessage: null, attempts: 0,
+  result: null, errorCode: null, errorMessage: null, attempts: 0, provider: null,
   createdAt: '2026-09-02T12:00:00.000Z', queuedAt: null, startedAt: null,
   completedAt: null, updatedAt: '2026-09-02T12:00:00.000Z',
 });
@@ -41,7 +42,7 @@ const invoke = (router, path, method, request) =>
       status(value) { this.statusCode = value; return this; },
       json: (value) => resolve(value),
     };
-    handler(request, response, reject);
+    handler({ get: () => undefined, ...request }, response, reject);
   });
 
 test('Gmail preference routes use token identity and validated provider input', async () => {

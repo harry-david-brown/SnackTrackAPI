@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { Receipt, ReceiptType, DataSource } = require('../dist/models/Receipt');
 const { CacheService } = require('../dist/services/core/CacheService');
-const { redisConfig } = require('../dist/config/redis');
+const { redisCacheStore } = require('../dist/config/redis');
 const {
   DASHBOARD_INSIGHT_METRIC_VERSION,
   GENERIC_ITEM_PUNCHLINES,
@@ -1040,21 +1040,21 @@ test('development day previews advance by local calendar date across DST', () =>
 test('dashboard edition cache is namespaced, honors midnight TTL, and participates in user invalidation', async () => {
   const calls = [];
   const originals = {
-    set: redisConfig.set,
-    get: redisConfig.get,
-    delPattern: redisConfig.delPattern,
-    isAvailable: redisConfig.isAvailable,
+    set: redisCacheStore.set,
+    get: redisCacheStore.get,
+    delPattern: redisCacheStore.delPattern,
+    isAvailable: redisCacheStore.isAvailable,
   };
-  redisConfig.set = async (...args) => {
+  redisCacheStore.set = async (...args) => {
     calls.push(['set', ...args]);
     return true;
   };
-  redisConfig.get = async () => null;
-  redisConfig.delPattern = async (pattern) => {
+  redisCacheStore.get = async () => null;
+  redisCacheStore.delPattern = async (pattern) => {
     calls.push(['delPattern', pattern]);
     return 0;
   };
-  redisConfig.isAvailable = () => false;
+  redisCacheStore.isAvailable = () => false;
   try {
     const cache = new CacheService();
     const edition = buildDashboardInsightEdition(
@@ -1075,6 +1075,6 @@ test('dashboard edition cache is namespaced, honors midnight TTL, and participat
       calls.some((call) => call[0] === 'delPattern' && call[1] === 'dashboard_insights:user-id*'),
     );
   } finally {
-    Object.assign(redisConfig, originals);
+    Object.assign(redisCacheStore, originals);
   }
 });

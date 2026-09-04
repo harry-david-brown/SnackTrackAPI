@@ -89,7 +89,7 @@ export class HistoricalGmailImportService {
           );
         }
         throw new AppError({
-          code: result.errorCode ?? 'GMAIL_IMPORT_FAILED',
+          code: 'GMAIL_IMPORT_FAILED',
           message: 'Gmail import failed',
           publicMessage: 'Gmail import failed. Please try again.',
           details: result.errorCode ? { providerCode: result.errorCode } : undefined,

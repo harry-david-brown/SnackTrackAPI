@@ -15,6 +15,9 @@ import { importJobCheckpointsMigration } from './013_import_job_checkpoints';
 import { importInputSecurityMigration } from './014_import_input_security';
 import { adminQueryIndexesMigration } from './015_admin_query_indexes';
 import { redisQueueResilienceMigration } from './016_redis_queue_resilience';
+import { launchAdsMigration } from './017_launch_ads';
+import { experienceAndFeeDetailsMigration } from './018_experience_and_fee_details';
+import { adPlacementsV2Migration } from './019_ad_placements_v2';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -33,4 +36,7 @@ export const migrations: readonly Migration[] = [
   importInputSecurityMigration,
   adminQueryIndexesMigration,
   redisQueueResilienceMigration,
+  launchAdsMigration,
+  experienceAndFeeDetailsMigration,
+  adPlacementsV2Migration,
 ];

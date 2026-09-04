@@ -26,6 +26,13 @@ interface ExistingEmailReceiptRow extends DatabaseRow {
   order_date: unknown;
   receipt_type: unknown;
   items: unknown;
+  currency_code: unknown;
+  subtotal_amount: unknown;
+  tax_amount: unknown;
+  tip_amount: unknown;
+  delivery_fee_amount: unknown;
+  service_fee_amount: unknown;
+  savings_amount: unknown;
 }
 
 interface ReceiptCutoffRow extends DatabaseRow {
@@ -118,7 +125,9 @@ export class ReceiptRepository {
 
     const userId = identified[0].receipt.userId;
     const existingResult = await transaction.query<ExistingEmailReceiptRow>(
-      `SELECT source_identity, amount_spent, restaurant_name, order_date, receipt_type, items
+      `SELECT source_identity, amount_spent, restaurant_name, order_date, receipt_type, items,
+         currency_code, subtotal_amount, tax_amount, tip_amount,
+         delivery_fee_amount, service_fee_amount, savings_amount
        FROM receipts
        WHERE user_id = $1 AND data_source = 'email' AND source_identity = ANY($2::TEXT[])`,
       [userId, identified.map((entry) => entry.identity)],
@@ -139,6 +148,15 @@ export class ReceiptRepository {
           orderDate: new Date(orderDate),
           receiptType,
           items: decodeReceiptItems(row.items),
+          monetaryDetails: {
+            currencyCode: databaseNullableString(row, 'currency_code'),
+            subtotal: nullableDatabaseNumber(row.subtotal_amount),
+            tax: nullableDatabaseNumber(row.tax_amount),
+            tip: nullableDatabaseNumber(row.tip_amount),
+            deliveryFee: nullableDatabaseNumber(row.delivery_fee_amount),
+            serviceFee: nullableDatabaseNumber(row.service_fee_amount),
+            savings: nullableDatabaseNumber(row.savings_amount),
+          },
         };
         return [decoded.sourceIdentity, decoded] as const;
       }),
@@ -158,7 +176,16 @@ export class ReceiptRepository {
         (previous.restaurantName ?? '') !== (receipt.restaurantName ?? '') ||
         previous.orderDate.getTime() !== receipt.orderDate?.getTime() ||
         previous.receiptType !== receipt.receiptType ||
-        JSON.stringify(previous.items) !== JSON.stringify(receipt.items);
+        JSON.stringify(previous.items) !== JSON.stringify(receipt.items) ||
+        JSON.stringify(previous.monetaryDetails) !== JSON.stringify({
+          currencyCode: receipt.monetaryDetails?.currencyCode ?? null,
+          subtotal: receipt.monetaryDetails?.subtotal ?? null,
+          tax: receipt.monetaryDetails?.tax ?? null,
+          tip: receipt.monetaryDetails?.tip ?? null,
+          deliveryFee: receipt.monetaryDetails?.deliveryFee ?? null,
+          serviceFee: receipt.monetaryDetails?.serviceFee ?? null,
+          savings: receipt.monetaryDetails?.savings ?? null,
+        });
       if (changed) updatedOrders++;
       else unchangedOrders++;
     }
@@ -169,7 +196,7 @@ export class ReceiptRepository {
       const batch = identified.slice(offset, offset + batchSize);
       const values: unknown[] = [];
       const placeholders = batch.map(({ receipt, identity }, index) => {
-        const parameter = index * 11 + 1;
+        const parameter = index * 18 + 1;
         values.push(
           uuidv4(),
           receipt.userId,
@@ -182,14 +209,23 @@ export class ReceiptRepository {
           receipt.deliveryTime ?? null,
           receipt.externalId ?? null,
           identity,
+          receipt.monetaryDetails?.currencyCode ?? null,
+          receipt.monetaryDetails?.subtotal ?? null,
+          receipt.monetaryDetails?.tax ?? null,
+          receipt.monetaryDetails?.tip ?? null,
+          receipt.monetaryDetails?.deliveryFee ?? null,
+          receipt.monetaryDetails?.serviceFee ?? null,
+          receipt.monetaryDetails?.savings ?? null,
         );
-        return `($${parameter}, $${parameter + 1}, $${parameter + 2}, $${parameter + 3}, $${parameter + 4}, $${parameter + 5}, $${parameter + 6}, $${parameter + 7}, $${parameter + 8}, $${parameter + 9}, $${parameter + 10})`;
+        return `(${Array.from({ length: 18 }, (_, value) => `$${parameter + value}`).join(', ')})`;
       });
 
       await transaction.query(
         `INSERT INTO receipts (
            id, user_id, receipt_type, data_source, restaurant_name, order_date,
-           amount_spent, items, delivery_time, external_id, source_identity
+           amount_spent, items, delivery_time, external_id, source_identity,
+           currency_code, subtotal_amount, tax_amount, tip_amount,
+           delivery_fee_amount, service_fee_amount, savings_amount
          ) VALUES ${placeholders.join(', ')}
          ON CONFLICT (user_id, data_source, source_identity)
            WHERE source_identity IS NOT NULL
@@ -201,6 +237,13 @@ export class ReceiptRepository {
            items = EXCLUDED.items,
            delivery_time = EXCLUDED.delivery_time,
            external_id = COALESCE(EXCLUDED.external_id, receipts.external_id),
+           currency_code = COALESCE(EXCLUDED.currency_code, receipts.currency_code),
+           subtotal_amount = COALESCE(EXCLUDED.subtotal_amount, receipts.subtotal_amount),
+           tax_amount = COALESCE(EXCLUDED.tax_amount, receipts.tax_amount),
+           tip_amount = COALESCE(EXCLUDED.tip_amount, receipts.tip_amount),
+           delivery_fee_amount = COALESCE(EXCLUDED.delivery_fee_amount, receipts.delivery_fee_amount),
+           service_fee_amount = COALESCE(EXCLUDED.service_fee_amount, receipts.service_fee_amount),
+           savings_amount = COALESCE(EXCLUDED.savings_amount, receipts.savings_amount),
            last_seen_at = NOW(),
            updated_at = CASE WHEN
              receipts.receipt_type IS DISTINCT FROM EXCLUDED.receipt_type OR
@@ -208,11 +251,28 @@ export class ReceiptRepository {
              receipts.order_date IS DISTINCT FROM EXCLUDED.order_date OR
              receipts.amount_spent IS DISTINCT FROM EXCLUDED.amount_spent OR
              receipts.items IS DISTINCT FROM EXCLUDED.items OR
-             receipts.delivery_time IS DISTINCT FROM EXCLUDED.delivery_time
+             receipts.delivery_time IS DISTINCT FROM EXCLUDED.delivery_time OR
+             (EXCLUDED.currency_code IS NOT NULL AND receipts.currency_code IS DISTINCT FROM EXCLUDED.currency_code) OR
+             (EXCLUDED.subtotal_amount IS NOT NULL AND receipts.subtotal_amount IS DISTINCT FROM EXCLUDED.subtotal_amount) OR
+             (EXCLUDED.tax_amount IS NOT NULL AND receipts.tax_amount IS DISTINCT FROM EXCLUDED.tax_amount) OR
+             (EXCLUDED.tip_amount IS NOT NULL AND receipts.tip_amount IS DISTINCT FROM EXCLUDED.tip_amount) OR
+             (EXCLUDED.delivery_fee_amount IS NOT NULL AND receipts.delivery_fee_amount IS DISTINCT FROM EXCLUDED.delivery_fee_amount) OR
+             (EXCLUDED.service_fee_amount IS NOT NULL AND receipts.service_fee_amount IS DISTINCT FROM EXCLUDED.service_fee_amount) OR
+             (EXCLUDED.savings_amount IS NOT NULL AND receipts.savings_amount IS DISTINCT FROM EXCLUDED.savings_amount)
            THEN CURRENT_TIMESTAMP ELSE receipts.updated_at END`,
         values,
       );
     }
+
+    await transaction.query(
+      `INSERT INTO user_experience_state (user_id, setup_completed_at, setup_completion_method)
+       VALUES ($1, NOW(), 'email_receipts')
+       ON CONFLICT (user_id) DO UPDATE SET
+         setup_completed_at=COALESCE(user_experience_state.setup_completed_at, NOW()),
+         setup_completion_method=COALESCE(user_experience_state.setup_completion_method, 'email_receipts'),
+         updated_at=NOW()`,
+      [userId],
+    );
 
     return { newOrders, updatedOrders, unchangedOrders };
   }
@@ -251,7 +311,7 @@ export class ReceiptRepository {
         const batch = receipts.slice(offset, offset + batchSize);
         const values: unknown[] = [];
         const placeholders = batch.map((receipt, index) => {
-          const parameter = index * 8 + 1;
+          const parameter = index * 15 + 1;
           values.push(
             userId,
             receipt.receiptType,
@@ -261,17 +321,34 @@ export class ReceiptRepository {
             receipt.amountSpent,
             JSON.stringify(receipt.items),
             receipt.deliveryTime ?? null,
+            receipt.monetaryDetails?.currencyCode ?? null,
+            receipt.monetaryDetails?.subtotal ?? null,
+            receipt.monetaryDetails?.tax ?? null,
+            receipt.monetaryDetails?.tip ?? null,
+            receipt.monetaryDetails?.deliveryFee ?? null,
+            receipt.monetaryDetails?.serviceFee ?? null,
+            receipt.monetaryDetails?.savings ?? null,
           );
-          return `($${parameter}, $${parameter + 1}, $${parameter + 2}, $${parameter + 3}, $${parameter + 4}, $${parameter + 5}, $${parameter + 6}, $${parameter + 7})`;
+          return `(${Array.from({ length: 15 }, (_, value) => `$${parameter + value}`).join(', ')})`;
         });
         await transaction.query(
           `INSERT INTO receipts (
              user_id, receipt_type, data_source, restaurant_name, order_date,
-             amount_spent, items, delivery_time
+             amount_spent, items, delivery_time, currency_code, subtotal_amount,
+             tax_amount, tip_amount, delivery_fee_amount, service_fee_amount, savings_amount
            ) VALUES ${placeholders.join(', ')}`,
           values,
         );
       }
+      await transaction.query(
+        `INSERT INTO user_experience_state (user_id, setup_completed_at, setup_completion_method)
+         VALUES ($1, NOW(), 'provider_archive')
+         ON CONFLICT (user_id) DO UPDATE SET
+           setup_completed_at=COALESCE(user_experience_state.setup_completed_at, NOW()),
+           setup_completion_method=COALESCE(user_experience_state.setup_completion_method, 'provider_archive'),
+           updated_at=NOW()`,
+        [userId],
+      );
       await assertWriteAllowed();
     });
   }
@@ -320,13 +397,30 @@ export class ReceiptRepository {
         [userId, receiptTypes[0], row.latest_export_date],
       );
       await transaction.query(
-        `INSERT INTO receipts(user_id,receipt_type,data_source,restaurant_name,order_date,amount_spent,items,delivery_time,external_id)
+        `INSERT INTO receipts(user_id,receipt_type,data_source,restaurant_name,order_date,amount_spent,items,delivery_time,external_id,
+           currency_code,subtotal_amount,tax_amount,tip_amount,delivery_fee_amount,service_fee_amount,savings_amount)
          SELECT $2,(receipt->>'receiptType')::varchar,(receipt->>'dataSource')::varchar,
            NULLIF(receipt->>'restaurantName',''),NULLIF(receipt->>'orderDate','')::timestamptz,
            (receipt->>'amountSpent')::numeric,COALESCE(receipt->'items','[]'::jsonb),
-           NULLIF(receipt->>'deliveryTime','')::timestamptz,NULLIF(receipt->>'externalId','')
+           NULLIF(receipt->>'deliveryTime','')::timestamptz,NULLIF(receipt->>'externalId',''),
+           NULLIF(receipt->'monetaryDetails'->>'currencyCode',''),
+           NULLIF(receipt->'monetaryDetails'->>'subtotal','')::numeric,
+           NULLIF(receipt->'monetaryDetails'->>'tax','')::numeric,
+           NULLIF(receipt->'monetaryDetails'->>'tip','')::numeric,
+           NULLIF(receipt->'monetaryDetails'->>'deliveryFee','')::numeric,
+           NULLIF(receipt->'monetaryDetails'->>'serviceFee','')::numeric,
+           NULLIF(receipt->'monetaryDetails'->>'savings','')::numeric
          FROM import_receipt_staging WHERE job_id=$1 ORDER BY sequence_number`,
         [jobId,userId],
+      );
+      await transaction.query(
+        `INSERT INTO user_experience_state (user_id, setup_completed_at, setup_completion_method)
+         VALUES ($1, NOW(), 'provider_archive')
+         ON CONFLICT (user_id) DO UPDATE SET
+           setup_completed_at=COALESCE(user_experience_state.setup_completed_at, NOW()),
+           setup_completion_method=COALESCE(user_experience_state.setup_completion_method, 'provider_archive'),
+           updated_at=NOW()`,
+        [userId],
       );
       await assertWriteAllowed();
       await transaction.query('DELETE FROM import_receipt_staging WHERE job_id=$1', [jobId]);
@@ -417,4 +511,9 @@ const databaseNumber = (
     throw new DatabaseError(`Invalid receipt aggregate row: ${field}`);
   }
   return candidate;
+};
+
+const nullableDatabaseNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  return databaseNumber(value, 'receipt monetary detail');
 };

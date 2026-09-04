@@ -45,7 +45,7 @@ test('CSV import operation owns lifecycle, write, cache, and lock ordering', asy
     preferences,
     cache,
     createLocks(events),
-  ).execute({ userId: 'user-id', csvBuffer: Buffer.from('csv'), fileType: 'csv' });
+  ).execute({ userId: 'user-id', provider: 'uber_eats', csvBuffer: Buffer.from('csv'), fileType: 'csv' });
 
   assert.equal(result.provider, 'uber_eats');
   assert.deepEqual(events, [
@@ -90,6 +90,7 @@ test('CSV import operation marks a started lifecycle failed and releases its loc
       createLocks(events),
     ).execute({
       userId: 'user-id',
+      provider: 'doordash',
       csvBuffer: Buffer.from('csv'),
       fileType: 'zip',
     }),
@@ -128,6 +129,7 @@ test('CSV import operation maps unexpected parser failures to a stable public co
       createLocks(events),
     ).execute({
       userId: 'user-id',
+      provider: 'uber_eats',
       csvBuffer: Buffer.from('csv'),
       fileType: 'zip',
     }),

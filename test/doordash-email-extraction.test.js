@@ -17,7 +17,6 @@ const {
 const {
   ReceiptImportPersistenceService,
 } = require('../dist/services/import/ReceiptImportPersistenceService');
-const { ImportLockService } = require('../dist/services/import/ImportLockService');
 const { ReceiptType, DataSource } = require('../dist/models/Receipt');
 
 const fixture = (name) =>
@@ -156,7 +155,9 @@ const createImportDependencies = (email) => {
 
   return {
     service: new GmailImportService(
-      new GmailImportAcquisitionService(gmailClient, receipts, importPreferences),
+      new GmailImportAcquisitionService(gmailClient, receipts, importPreferences, {
+        async get() { return { allowForwardedReceipts: false }; },
+      }),
       new ReceiptEmailBatchExtractor(new ReceiptExtractor(), debugCapture),
       new ReceiptImportPersistenceService(receipts, cache, {
         assertLockOwned: async () => undefined,
@@ -180,30 +181,31 @@ test('a parsed DoorDash email crosses the Gmail import boundary as a DoorDash re
     new Date('2026-06-12T02:01:21.000Z'),
   );
   const dependencies = createImportDependencies(email);
-  const lock = await ImportLockService.acquireLock(userId);
-  assert.ok(lock);
+  const lock = {
+    userId,
+    ownerToken: 'test-owner',
+    backend: 'memory',
+    acquiredAt: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+  };
 
-  try {
-    const result = await dependencies.service.importFromGmail(
-      {
-        id: userId,
-        email: recipient,
-        gmailRefreshToken: 'test-refresh-token',
-        timezone: 'America/Toronto',
-      },
-      lock,
-    );
+  const result = await dependencies.service.importFromGmail(
+    {
+      id: userId,
+      email: recipient,
+      gmailRefreshToken: 'test-refresh-token',
+      timezone: 'America/Toronto',
+    },
+    lock,
+  );
 
-    assert.equal(result.success, true);
-    assert.equal(result.totalReceiptsImported, 1);
-    assert.equal(dependencies.persisted.length, 1);
-    assert.equal(dependencies.persisted[0].receiptType, ReceiptType.DOORDASH);
-    assert.equal(dependencies.persisted[0].dataSource, DataSource.EMAIL);
-    assert.equal(dependencies.persisted[0].amountSpent, 41.62);
-    assert.match(dependencies.persisted[0].externalId, /^doordash:gmail:/);
-  } finally {
-    await ImportLockService.releaseLock(lock);
-  }
+  assert.equal(result.success, true);
+  assert.equal(result.totalReceiptsImported, 1);
+  assert.equal(dependencies.persisted.length, 1);
+  assert.equal(dependencies.persisted[0].receiptType, ReceiptType.DOORDASH);
+  assert.equal(dependencies.persisted[0].dataSource, DataSource.EMAIL);
+  assert.equal(dependencies.persisted[0].amountSpent, 41.62);
+  assert.match(dependencies.persisted[0].externalId, /^doordash:gmail:/);
 });
 
 test('the Gmail import boundary does not persist a DoorDash receipt without a usable total', async () => {
@@ -219,25 +221,26 @@ test('the Gmail import boundary does not persist a DoorDash receipt without a us
     new Date('2026-06-12T02:01:21.000Z'),
   );
   const dependencies = createImportDependencies(email);
-  const lock = await ImportLockService.acquireLock(userId);
-  assert.ok(lock);
+  const lock = {
+    userId,
+    ownerToken: 'test-owner',
+    backend: 'memory',
+    acquiredAt: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+  };
 
-  try {
-    const result = await dependencies.service.importFromGmail(
-      {
-        id: userId,
-        email: recipient,
-        gmailRefreshToken: 'test-refresh-token',
-        timezone: 'America/Toronto',
-      },
-      lock,
-    );
+  const result = await dependencies.service.importFromGmail(
+    {
+      id: userId,
+      email: recipient,
+      gmailRefreshToken: 'test-refresh-token',
+      timezone: 'America/Toronto',
+    },
+    lock,
+  );
 
-    assert.equal(result.success, true);
-    assert.equal(result.totalReceiptsImported, 0);
-    assert.equal(dependencies.getUpsertCalls(), 0);
-    assert.equal(dependencies.persisted.length, 0);
-  } finally {
-    await ImportLockService.releaseLock(lock);
-  }
+  assert.equal(result.success, true);
+  assert.equal(result.totalReceiptsImported, 0);
+  assert.equal(dependencies.getUpsertCalls(), 0);
+  assert.equal(dependencies.persisted.length, 0);
 });

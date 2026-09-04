@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { redisConfig } = require('../dist/config/redis');
+const { redisLockStore } = require('../dist/config/redis');
 const { ImportLockService } = require('../dist/services/import/ImportLockService');
 const { AccountDeletionService } = require('../dist/services/account/AccountDeletionService');
 const { AccountResetService } = require('../dist/services/data/AccountResetService');
@@ -25,21 +25,21 @@ const transactional = (client) => ({
 test('an expired lock owner cannot release a newer Redis lock', async (t) => {
   const values = new Map();
   const originals = {
-    isAvailable: redisConfig.isAvailable,
-    isEnabled: redisConfig.isEnabled,
-    setNX: redisConfig.setNX,
-    deleteIfValueMatches: redisConfig.deleteIfValueMatches,
+    isAvailable: redisLockStore.isAvailable,
+    isEnabled: redisLockStore.isEnabled,
+    setNX: redisLockStore.setNX,
+    deleteIfValueMatches: redisLockStore.deleteIfValueMatches,
   };
-  t.after(() => Object.assign(redisConfig, originals));
+  t.after(() => Object.assign(redisLockStore, originals));
 
-  redisConfig.isAvailable = () => true;
-  redisConfig.isEnabled = () => true;
-  redisConfig.setNX = async (key, value) => {
+  redisLockStore.isAvailable = () => true;
+  redisLockStore.isEnabled = () => true;
+  redisLockStore.setNX = async (key, value) => {
     if (values.has(key)) return false;
     values.set(key, value);
     return true;
   };
-  redisConfig.deleteIfValueMatches = async (key, expectedValue) => {
+  redisLockStore.deleteIfValueMatches = async (key, expectedValue) => {
     if (values.get(key) !== expectedValue) return false;
     values.delete(key);
     return true;

@@ -21,6 +21,18 @@ export interface ReceiptItem {
   customizations?: string[];
 }
 
+export type ReceiptCurrencyCode = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'UNKNOWN';
+
+export interface ReceiptMonetaryDetails {
+  currencyCode?: ReceiptCurrencyCode;
+  subtotal?: number;
+  tax?: number;
+  tip?: number;
+  deliveryFee?: number;
+  serviceFee?: number;
+  savings?: number;
+}
+
 /** Persistence input accepted by receipt writer ports; it has no persisted identity. */
 export interface ReceiptWriteCommand {
   userId: string;
@@ -32,6 +44,7 @@ export interface ReceiptWriteCommand {
   dataSource: DataSource;
   deliveryTime?: Date;
   externalId?: string;
+  monetaryDetails?: ReceiptMonetaryDetails;
 }
 
 /**
@@ -53,6 +66,7 @@ export class Receipt implements ReceiptWriteCommand {
     // External Provider ID (e.g. Uber Order UUID) for deduplication
     public externalId?: string,
     public readonly id?: string,
+    public monetaryDetails?: ReceiptMonetaryDetails,
   ) {}
 
   // Helper method to get total items count

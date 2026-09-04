@@ -47,7 +47,9 @@ export class WrappedAnalyticsQueryRepository {
     const result = await this.postgres.query<ReceiptRow>(
       `
       SELECT id, user_id, restaurant_name, order_date, amount_spent, items,
-        receipt_type, data_source, delivery_time, external_id
+        receipt_type, data_source, delivery_time, external_id,
+        currency_code, subtotal_amount, tax_amount, tip_amount,
+        delivery_fee_amount, service_fee_amount, savings_amount
       FROM receipts
       WHERE user_id = $1
       ORDER BY order_date DESC
@@ -69,6 +71,13 @@ export class WrappedAnalyticsQueryRepository {
         receiptType: receipt.receiptType,
         dataSource: receipt.dataSource,
         deliveryTime: receipt.deliveryTime ?? null,
+        currencyCode: receipt.monetaryDetails?.currencyCode ?? null,
+        subtotal: receipt.monetaryDetails?.subtotal ?? null,
+        tax: receipt.monetaryDetails?.tax ?? null,
+        tip: receipt.monetaryDetails?.tip ?? null,
+        deliveryFee: receipt.monetaryDetails?.deliveryFee ?? null,
+        serviceFee: receipt.monetaryDetails?.serviceFee ?? null,
+        savings: receipt.monetaryDetails?.savings ?? null,
       };
     });
   }
