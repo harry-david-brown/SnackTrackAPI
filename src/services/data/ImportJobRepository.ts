@@ -3,12 +3,14 @@ import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/
 import {
   IMPORT_JOB_KINDS,
   IMPORT_JOB_STATUSES,
+  IMPORT_JOURNEY_CONTEXTS,
   EXPORT_PROVIDERS,
   type ExportProvider,
   type ImportJob,
   type ImportJobKind,
   type ImportJobStatus,
   type ImportJobTrigger,
+  type ImportJourneyContext,
 } from '../import/ImportJobTypes';
 
 type Row = Record<string, unknown>;
@@ -41,7 +43,7 @@ const jsonObject = (value: unknown): Readonly<Record<string, unknown>> | null =>
     ? (value as Readonly<Record<string, unknown>>)
     : null;
 
-const selectColumns = `id,user_id,kind,trigger_type,status,phase,progress,result,error_code,
+const selectColumns = `id,user_id,kind,trigger_type,journey_context,status,phase,progress,result,error_code,
   error_message,attempts,heartbeat_at,object_key,original_filename,content_type,content_length,
   export_provider,object_etag,submitted_content_type,submitted_content_length,
   import_generation,checkpoint,created_at,queued_at,started_at,completed_at,expires_at,updated_at`;
@@ -51,6 +53,7 @@ const decode = (row: Row): ImportJob => ({
   userId: text(row, 'user_id'),
   kind: enumValue(row, 'kind', IMPORT_JOB_KINDS),
   trigger: enumValue(row, 'trigger_type', ['user', 'scheduler'] as const),
+  journeyContext: enumValue(row, 'journey_context', IMPORT_JOURNEY_CONTEXTS),
   status: enumValue(row, 'status', IMPORT_JOB_STATUSES),
   phase: text(row, 'phase'),
   progress: number(row, 'progress'),
@@ -85,6 +88,7 @@ export interface CreateImportJobInput {
   readonly userId: string;
   readonly kind: ImportJobKind;
   readonly trigger: ImportJobTrigger;
+  readonly journeyContext?: ImportJourneyContext;
   readonly idempotencyKey?: string;
   readonly awaitingUpload?: boolean;
   readonly objectKey?: string;
@@ -133,8 +137,8 @@ export class ImportJobRepository {
         );
         if (existing.rows[0]) {
           const job = decode(existing.rows[0]);
-          if (job.kind !== input.kind) {
-            throw new ConflictError('IDEMPOTENCY_KEY_REUSED', 'This idempotency key was already used for another import type.');
+          if (job.kind !== input.kind || job.journeyContext !== (input.journeyContext ?? 'legacy')) {
+            throw new ConflictError('IDEMPOTENCY_KEY_REUSED', 'This idempotency key was already used for a different import journey.');
           }
           return job;
         }
@@ -182,10 +186,10 @@ export class ImportJobRepository {
       const status = input.awaitingUpload ? 'awaiting_upload' : 'pending_dispatch';
       const inserted = await transaction.query<Row>(
         `INSERT INTO import_jobs
-         (user_id,kind,trigger_type,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at)
-         VALUES ($1,$2,$3,$4::VARCHAR(24),$5,0,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $4::VARCHAR(24)='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
+         (user_id,kind,trigger_type,journey_context,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at)
+         VALUES ($1,$2,$3,$4,$5::VARCHAR(24),$6,0,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $5::VARCHAR(24)='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
          RETURNING ${selectColumns}`,
-        [input.userId,input.kind,input.trigger,status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
+        [input.userId,input.kind,input.trigger,input.journeyContext ?? 'legacy',status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
       );
       const job = decode(inserted.rows[0]);
       if (!input.awaitingUpload) await this.insertOutbox(transaction, job.id, 'dispatch');

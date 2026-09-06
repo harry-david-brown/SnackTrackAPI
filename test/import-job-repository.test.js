@@ -8,6 +8,7 @@ const persistedJob = {
   user_id: '57d0a1df-93ca-4ec3-a47c-6d9700340e18',
   kind: 'gmail_historical',
   trigger_type: 'user',
+  journey_context: 'legacy',
   status: 'pending_dispatch',
   phase: 'waiting_for_queue',
   progress: 0,
@@ -67,6 +68,15 @@ test('job creation casts a reused status parameter consistently for PostgreSQL',
   });
 
   assert.equal(created.status, 'pending_dispatch');
-  assert.match(insertSql, /\$4::VARCHAR\(24\)/);
-  assert.match(insertSql, /CASE WHEN \$4::VARCHAR\(24\)='awaiting_upload'/);
+  assert.match(insertSql, /\$5::VARCHAR\(24\)/);
+  assert.match(insertSql, /CASE WHEN \$5::VARCHAR\(24\)='awaiting_upload'/);
+});
+
+test('rejects an idempotency key reused for a different journey context', async () => {
+  const executor = { query: async (sql) => sql.includes('idempotency_key') ? { rows: [persistedJob], rowCount: 1 } : { rows: [], rowCount: 0 } };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async (operation) => operation(executor) });
+  await assert.rejects(
+    repository.create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'post_onboarding', idempotencyKey: 'same-key' }),
+    (error) => error.code === 'IDEMPOTENCY_KEY_REUSED',
+  );
 });

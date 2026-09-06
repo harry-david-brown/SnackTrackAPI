@@ -21,6 +21,10 @@ export const IMPORT_JOB_STATUSES = [
 ] as const;
 export type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 export type ImportJobTrigger = 'user' | 'scheduler';
+export const IMPORT_JOURNEY_CONTEXTS = ['onboarding', 'post_onboarding', 'routine', 'legacy'] as const;
+export type ImportJourneyContext = (typeof IMPORT_JOURNEY_CONTEXTS)[number];
+export const isImportJourneyContext = (value: unknown): value is ImportJourneyContext =>
+  typeof value === 'string' && IMPORT_JOURNEY_CONTEXTS.includes(value as ImportJourneyContext);
 export const EXPORT_PROVIDERS = ['uber_eats', 'doordash'] as const;
 export type ExportProvider = (typeof EXPORT_PROVIDERS)[number];
 
@@ -37,6 +41,7 @@ export interface ImportJob {
   readonly userId: string;
   readonly kind: ImportJobKind;
   readonly trigger: ImportJobTrigger;
+  readonly journeyContext: ImportJourneyContext;
   readonly status: ImportJobStatus;
   readonly phase: string;
   readonly progress: number;
@@ -68,8 +73,8 @@ export type ImportOperation = Omit<ImportJob,
   'exportProvider' | 'objectEtag' | 'submittedContentType' | 'submittedContentLength' |
   'importGeneration' | 'checkpoint' | 'expiresAt'> & {
   readonly provider: ExportProvider | null;
-    readonly presentation: ImportOperationPresentation | null;
-  };
+  readonly presentation: ImportOperationPresentation | null;
+};
 
 export interface ImportExecutionCheckpoint {
   readonly checkpoint: Readonly<Record<string, unknown>>;
@@ -85,6 +90,7 @@ export const toImportOperation = (job: ImportJob): ImportOperation => ({
   id: job.id,
   kind: job.kind,
   trigger: job.trigger,
+  journeyContext: job.journeyContext,
   status: job.status,
   phase: job.phase,
   progress: job.progress,

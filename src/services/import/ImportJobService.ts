@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { AppError, ValidationError } from '../../core/errors';
 import type { ImportJobRepository } from '../data/ImportJobRepository';
 import type { ImportObjectStorage } from '../storage/ImportObjectStorage';
-import type { ImportJob, ImportJobKind, ImportJobTrigger } from './ImportJobTypes';
+import type { ImportJob, ImportJobKind, ImportJobTrigger, ImportJourneyContext } from './ImportJobTypes';
 import type { ExportProvider } from './ImportJobTypes';
 
 const CSV_LIMIT = 10 * 1024 * 1024;
@@ -31,8 +31,8 @@ export class ImportJobService {
     private readonly storage: ImportObjectStorage,
   ) {}
 
-  start(userId: string, kind: Exclude<ImportJobKind, 'export_file'>, trigger: ImportJobTrigger, idempotencyKey?: string): Promise<ImportJob> {
-    return this.jobs.create({ userId, kind, trigger, idempotencyKey });
+  start(userId: string, kind: Exclude<ImportJobKind, 'export_file'>, trigger: ImportJobTrigger, idempotencyKey?: string, journeyContext: ImportJourneyContext = 'legacy'): Promise<ImportJob> {
+    return this.jobs.create({ userId, kind, trigger, idempotencyKey, journeyContext });
   }
 
   createUberEatsUploadIntent(input: Omit<UploadIntentInput, 'provider'>) {
@@ -63,6 +63,7 @@ export class ImportJobService {
       userId: input.userId,
       kind: 'export_file',
       trigger: 'user',
+      journeyContext: input.journeyContext,
       idempotencyKey: input.idempotencyKey,
       awaitingUpload: true,
       objectKey,
@@ -137,6 +138,7 @@ export class ImportJobService {
 interface UploadIntentInput {
   readonly userId: string;
   readonly provider: ExportProvider;
+  readonly journeyContext: ImportJourneyContext;
   readonly filename: string;
   readonly contentType: string;
   readonly contentLength: number;

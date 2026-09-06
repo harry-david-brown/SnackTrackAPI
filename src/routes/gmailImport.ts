@@ -3,7 +3,8 @@ import { authenticatedUserId } from '../http/authenticatedUser';
 import { asyncHandler } from '../middleware/errorHandler';
 import type { ImportJobService } from '../services/import/ImportJobService';
 import type { ImportStatusService } from '../services/import/ImportStatusService';
-import { toImportOperation } from '../services/import/ImportJobTypes';
+import { isImportJourneyContext, toImportOperation } from '../services/import/ImportJobTypes';
+import { ValidationError } from '../core/errors';
 
 export interface GmailImportRouterDependencies {
   readonly authenticate: RequestHandler;
@@ -69,8 +70,10 @@ export const createGmailImportRouter = (dependencies: GmailImportRouterDependenc
     '/import',
     dependencies.authenticate,
     asyncHandler(async (request: Request, response: Response) => {
+      const journeyContext = request.body?.journeyContext ?? 'legacy';
+      if (!isImportJourneyContext(journeyContext)) throw new ValidationError('Invalid import journey context.', 'journeyContext');
       const operation = await dependencies.importJobs.start(
-        authenticatedUserId(request), 'gmail_historical', 'user', request.get('Idempotency-Key')?.trim(),
+        authenticatedUserId(request), 'gmail_historical', 'user', request.get('Idempotency-Key')?.trim(), journeyContext,
       );
       response.status(202).json({ operation: toImportOperation(operation) });
     }),

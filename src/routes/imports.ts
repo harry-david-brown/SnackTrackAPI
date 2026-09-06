@@ -7,7 +7,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import type { ImportJobRepository } from '../services/data/ImportJobRepository';
 import type { ImportJobService } from '../services/import/ImportJobService';
 import type { PushDeviceRepository } from '../services/notifications/PushDeviceRepository';
-import { toImportOperation } from '../services/import/ImportJobTypes';
+import { isImportJourneyContext, toImportOperation } from '../services/import/ImportJobTypes';
 import type { ImportOperationPresentationService } from '../services/import/ImportOperationPresentationService';
 
 interface ImportsRouterDependencies {
@@ -44,6 +44,8 @@ export const createImportsRouter = (dependencies: ImportsRouterDependencies): Ro
   const uploadIntent = (provider: 'uber_eats' | 'doordash') => asyncHandler(async (request: Request, response: Response) => {
     const body = requireObject(request.body as unknown);
     const contentLength = Number(body.contentLength);
+    const journeyContext = body.journeyContext ?? 'legacy';
+    if (!isImportJourneyContext(journeyContext)) throw new ValidationError('Invalid import journey context.', 'journeyContext');
     const create = provider === 'uber_eats'
       ? dependencies.jobs.createUberEatsUploadIntent.bind(dependencies.jobs)
       : dependencies.jobs.createDoorDashUploadIntent.bind(dependencies.jobs);
@@ -52,6 +54,7 @@ export const createImportsRouter = (dependencies: ImportsRouterDependencies): Ro
       filename: requireStringField(body, 'filename'),
       contentType: requireStringField(body, 'contentType'),
       contentLength,
+      journeyContext,
       idempotencyKey: idempotencyKey(request),
     });
     response.status(201).json({ ...result, operation: toImportOperation(result.operation) });

@@ -18,6 +18,7 @@ import { redisQueueResilienceMigration } from './016_redis_queue_resilience';
 import { launchAdsMigration } from './017_launch_ads';
 import { experienceAndFeeDetailsMigration } from './018_experience_and_fee_details';
 import { adPlacementsV2Migration } from './019_ad_placements_v2';
+import { importJourneyContextMigration } from './020_import_journey_context';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -39,4 +40,5 @@ export const migrations: readonly Migration[] = [
   launchAdsMigration,
   experienceAndFeeDetailsMigration,
   adPlacementsV2Migration,
+  importJourneyContextMigration,
 ];

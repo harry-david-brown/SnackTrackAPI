@@ -24,6 +24,7 @@ export class ScheduledImportJobService {
           userId,
           kind: 'scheduled_tracking',
           trigger: 'scheduler',
+          journeyContext: 'routine',
           idempotencyKey: `scheduled:${new Date().toISOString().slice(0, 13)}`,
         });
         queued += 1;

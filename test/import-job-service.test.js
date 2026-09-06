@@ -8,6 +8,7 @@ const { ImportJobService } = require('../dist/services/import/ImportJobService')
 
 const job = (overrides = {}) => ({
   id: '67bce5bc-436e-4c4f-9c0f-93880b5ced9a', userId: 'user-1', kind: 'export_file', trigger: 'user',
+  journeyContext: 'post_onboarding',
   status: 'awaiting_upload', phase: 'awaiting_upload', progress: 0, result: null, errorCode: null,
   errorMessage: null, attempts: 0, heartbeatAt: null, objectKey: 'imports/user-1/persisted/export.zip',
   originalFilename: 'export.zip', contentType: 'application/zip', contentLength: 1024,
@@ -17,10 +18,11 @@ const job = (overrides = {}) => ({
   ...overrides,
 });
 
-test('upload intent signs persisted metadata and preserves idempotency', async () => {
+test('upload intent signs persisted metadata and preserves idempotency and journey context', async () => {
   const signed = [];
+  const created = [];
   const service = new ImportJobService(
-    { create: async () => job() },
+    { create: async (input) => { created.push(input); return job(); } },
     {
       createUploadUrl: async (...args) => { signed.push(args); return 'http://storage.test/upload'; },
       uploadUrlExpiresAt: () => '2026-09-02T12:15:00.000Z',
@@ -28,11 +30,12 @@ test('upload intent signs persisted metadata and preserves idempotency', async (
   );
   const result = await service.createUberEatsUploadIntent({
     userId: 'user-1', filename: 'export.zip', contentType: 'application/zip', contentLength: 1024,
-    idempotencyKey: 'same-request',
+    idempotencyKey: 'same-request', journeyContext: 'post_onboarding',
   });
   assert.deepEqual(signed, [['imports/user-1/persisted/export.zip', 'application/zip', 1024]]);
   assert.equal(result.operation.id, job().id);
   assert.equal(result.expiresAt, '2026-09-02T12:15:00.000Z');
+  assert.equal(created[0].journeyContext, 'post_onboarding');
 });
 
 test('upload intent rejects files above the type-specific limit before creating a job', async () => {

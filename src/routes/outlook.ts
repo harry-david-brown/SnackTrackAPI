@@ -10,7 +10,7 @@ import {
 import { asyncHandler } from '../middleware/errorHandler';
 import type { HistoricalOutlookImportService } from '../services/import/HistoricalOutlookImportService';
 import type { ImportJobService } from '../services/import/ImportJobService';
-import { toImportOperation } from '../services/import/ImportJobTypes';
+import { isImportJourneyContext, toImportOperation } from '../services/import/ImportJobTypes';
 import type { MicrosoftMailboxConnectionHealthService } from '../services/mailbox/MicrosoftMailboxConnectionHealthService';
 import type { MicrosoftMailboxConnectionService } from '../services/mailbox/MicrosoftMailboxConnectionService';
 import {
@@ -124,8 +124,10 @@ export const createOutlookRouter = (dependencies: OutlookRouterDependencies): Ro
     '/import',
     dependencies.authenticate,
     asyncHandler(async (request: Request, response: Response) => {
+      const journeyContext = request.body?.journeyContext ?? 'legacy';
+      if (!isImportJourneyContext(journeyContext)) throw new ValidationError('Invalid import journey context.', 'journeyContext');
       const operation = await dependencies.importJobs.start(
-        authenticatedUserId(request), 'outlook_historical', 'user', request.get('Idempotency-Key')?.trim(),
+        authenticatedUserId(request), 'outlook_historical', 'user', request.get('Idempotency-Key')?.trim(), journeyContext,
       );
       response.status(202).json({ operation: toImportOperation(operation) });
     }),

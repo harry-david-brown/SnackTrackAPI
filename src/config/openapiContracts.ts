@@ -667,18 +667,21 @@ export const contractSchemas = {
   ImportOperation: {
     type: 'object',
     additionalProperties: false,
-    required: ['id', 'kind', 'trigger', 'status', 'phase', 'progress', 'result', 'errorCode', 'errorMessage', 'attempts', 'createdAt', 'queuedAt', 'startedAt', 'completedAt', 'updatedAt'],
+    required: ['id', 'kind', 'trigger', 'journeyContext', 'status', 'phase', 'progress', 'result', 'errorCode', 'errorMessage', 'attempts', 'provider', 'presentation', 'createdAt', 'queuedAt', 'startedAt', 'completedAt', 'updatedAt'],
     properties: {
       id: { type: 'string', format: 'uuid' },
       kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'export_file'] },
       trigger: { type: 'string', enum: ['user', 'scheduler'] },
-      status: { type: 'string', enum: ['awaiting_upload', 'pending_dispatch', 'queued', 'running', 'retrying', 'succeeded', 'failed', 'expired', 'superseded'] },
+      journeyContext: { type: 'string', enum: ['onboarding', 'post_onboarding', 'routine', 'legacy'] },
+      status: { type: 'string', enum: ['awaiting_upload', 'pending_dispatch', 'queued', 'running', 'retrying', 'succeeded', 'failed', 'expired', 'superseded', 'cancelled'] },
       phase: { type: 'string' },
       progress: { type: 'integer', minimum: 0, maximum: 100 },
       result: { type: 'object', nullable: true, additionalProperties: true },
       errorCode: { type: 'string', nullable: true },
       errorMessage: { type: 'string', nullable: true },
       attempts: { type: 'integer', minimum: 0 },
+      provider: { type: 'string', enum: ['uber_eats', 'doordash'], nullable: true },
+      presentation: { type: 'object', nullable: true, additionalProperties: true },
       createdAt: { type: 'string', format: 'date-time' },
       queuedAt: nullableTimestamp,
       startedAt: nullableTimestamp,
@@ -700,6 +703,14 @@ export const contractSchemas = {
       filename: { type: 'string', maxLength: 120 },
       contentType: { type: 'string' },
       contentLength: { type: 'integer', minimum: 1, maximum: 52428800 },
+      journeyContext: { type: 'string', enum: ['onboarding', 'post_onboarding', 'routine', 'legacy'] },
+    },
+  },
+  ImportJourneyRequest: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      journeyContext: { type: 'string', enum: ['onboarding', 'post_onboarding', 'routine', 'legacy'] },
     },
   },
 } as const;
@@ -1059,6 +1070,7 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
       summary: 'Queue a historical receipt import from Gmail',
       tags: ['Gmail Integration'],
       security: secured,
+      requestBody: jsonBody('ImportJourneyRequest', false),
       responses: {
         '202': response('Durable import operation', 'ImportOperationEnvelope'),
         '401': { $ref: '#/components/responses/Unauthorized' },
@@ -1171,6 +1183,7 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
       summary: 'Queue a historical supported-receipt import from Outlook',
       tags: ['Outlook Integration'],
       security: secured,
+      requestBody: jsonBody('ImportJourneyRequest', false),
       responses: {
         '202': response('Durable import operation', 'ImportOperationEnvelope'),
         '401': { $ref: '#/components/responses/Unauthorized' },

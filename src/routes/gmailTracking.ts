@@ -25,7 +25,7 @@ export const createGmailTrackingRouter = (
     dependencies.authenticate,
     asyncHandler(async (request: Request, response: Response) => {
       const operation = await dependencies.importJobs.start(
-        authenticatedUserId(request), 'manual_tracking', 'user', request.get('Idempotency-Key')?.trim(),
+        authenticatedUserId(request), 'manual_tracking', 'user', request.get('Idempotency-Key')?.trim(), 'routine',
       );
       response.status(202).json({ operation: toImportOperation(operation) });
     }),
