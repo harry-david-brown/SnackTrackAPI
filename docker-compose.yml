@@ -12,7 +12,7 @@ x-api-environment: &api-environment
   OBJECT_STORAGE_SECRET_ACCESS_KEY: snacktrack-local-secret
   OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
   PUSH_DELIVERY_MODE: log
-  USE_MOCK_DATA: ${USE_MOCK_DATA:-true}
+  USE_MOCK_DATA: ${USE_MOCK_DATA:-false}
   TRACKING_SYNC_INTERVAL_MINUTES: "0"
 
 x-app-service: &app-service
