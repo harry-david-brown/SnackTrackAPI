@@ -31,8 +31,11 @@ export class ImportJobService {
     private readonly storage: ImportObjectStorage,
   ) {}
 
-  start(userId: string, kind: Exclude<ImportJobKind, 'export_file'>, trigger: ImportJobTrigger, idempotencyKey?: string, journeyContext: ImportJourneyContext = 'legacy'): Promise<ImportJob> {
-    return this.jobs.create({ userId, kind, trigger, idempotencyKey, journeyContext });
+  start(userId: string, kind: Exclude<ImportJobKind, 'export_file'>, trigger: ImportJobTrigger, idempotencyKey?: string, journeyContext: ImportJourneyContext = 'legacy', automaticUpdates = false): Promise<ImportJob> {
+    if (automaticUpdates && (journeyContext !== 'onboarding' || trigger !== 'user' || !['gmail_historical', 'outlook_historical'].includes(kind))) {
+      throw new ValidationError('Automatic updates can only be included in an onboarding email import.', 'automaticUpdates');
+    }
+    return this.jobs.create({ userId, kind, trigger, idempotencyKey, journeyContext, automaticUpdates });
   }
 
   createUberEatsUploadIntent(input: Omit<UploadIntentInput, 'provider'>) {

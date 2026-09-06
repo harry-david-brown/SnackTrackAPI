@@ -80,3 +80,32 @@ test('rejects an idempotency key reused for a different journey context', async 
     (error) => error.code === 'IDEMPOTENCY_KEY_REUSED',
   );
 });
+
+
+for (const consent of ['not_offered', 'granted', 'declined', 'revoked']) {
+  test(`onboarding auto imports preserve the ${consent} Settings choice`, async () => {
+    let storedConsent = consent;
+    const executor = { query: async sql => {
+      if (sql.includes('SELECT import_generation')) return { rows: [{ import_generation: 1 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO import_jobs')) return { rows: [{ ...persistedJob, journey_context: 'onboarding' }], rowCount: 1 };
+      if (sql.includes('UPDATE user_import_preferences')) {
+        assert.match(sql, /ongoing_tracking_consent_state='not_offered'/);
+        if (storedConsent === 'not_offered') storedConsent = 'granted';
+      }
+      return { rows: [], rowCount: 0 };
+    }};
+    const repository = new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) });
+    await repository.create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'onboarding', automaticUpdates: true });
+    assert.equal(storedConsent, consent === 'not_offered' ? 'granted' : consent);
+  });
+}
+
+test('legacy onboarding imports do not grant automatic updates without the new disclosed choice', async () => {
+  const executor = { query: async sql => {
+    assert.equal(sql.includes('UPDATE user_import_preferences'), false);
+    if (sql.includes('SELECT import_generation')) return { rows: [{ import_generation: 1 }], rowCount: 1 };
+    if (sql.includes('INSERT INTO import_jobs')) return { rows: [{ ...persistedJob, journey_context: 'onboarding' }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  }};
+  await new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) }).create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'onboarding' });
+});

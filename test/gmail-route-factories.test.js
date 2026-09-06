@@ -171,3 +171,16 @@ test('Gmail tracking and import routers delegate each endpoint to one capability
   });
   assert.deepEqual(importResult, { operation: publicOperation('job-2', 'gmail_historical') });
 });
+
+
+test('Gmail import validates and forwards the onboarding automatic updates choice', async () => {
+  const calls = [];
+  const router = createGmailImportRouter({ authenticate: passThrough, status: {}, historicalImport: {}, importJobs: {
+    start: async (...args) => { calls.push(args); return importJob('job-automatic', args[0], args[1]); },
+  }});
+  await invoke(router, '/import', 'post', { user: { userId: 'user-automatic' }, body: { journeyContext: 'onboarding', automaticUpdates: true } });
+  assert.equal(calls[0][4], 'onboarding');
+  assert.equal(calls[0][5], true);
+  await assert.rejects(invoke(router, '/import', 'post', { user: { userId: 'user-automatic' }, body: { journeyContext: 'onboarding', automaticUpdates: 'yes' } }), error => error.code === 'VALIDATION_ERROR');
+  assert.equal(calls.length, 1);
+});

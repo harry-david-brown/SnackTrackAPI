@@ -89,6 +89,7 @@ export interface CreateImportJobInput {
   readonly kind: ImportJobKind;
   readonly trigger: ImportJobTrigger;
   readonly journeyContext?: ImportJourneyContext;
+  readonly automaticUpdates?: boolean;
   readonly idempotencyKey?: string;
   readonly awaitingUpload?: boolean;
   readonly objectKey?: string;
@@ -192,6 +193,19 @@ export class ImportJobRepository {
         [input.userId,input.kind,input.trigger,input.journeyContext ?? 'legacy',status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
       );
       const job = decode(inserted.rows[0]);
+      // The new onboarding UI discloses this choice before import. Older clients omit it.
+      // Keep consent and job acceptance atomic; never overwrite a Settings opt-out.
+      // The scheduler still requires a completed historical baseline before checking receipts.
+      if (input.automaticUpdates && input.journeyContext === 'onboarding' && ['gmail_historical', 'outlook_historical'].includes(input.kind)) {
+        await transaction.query(`INSERT INTO user_import_preferences (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, [input.userId]);
+        await transaction.query(
+          `UPDATE user_import_preferences SET ongoing_tracking_consent_state='granted',
+             ongoing_tracking_consent_version='onboarding-email-updates-v1', ongoing_tracking_consented_at=NOW(),
+             ongoing_tracking_revoked_at=NULL, tracking_status='setting_up', updated_at=NOW()
+           WHERE user_id=$1 AND ongoing_tracking_consent_state='not_offered'`,
+          [input.userId],
+        );
+      }
       if (!input.awaitingUpload) await this.insertOutbox(transaction, job.id, 'dispatch');
       return job;
     });

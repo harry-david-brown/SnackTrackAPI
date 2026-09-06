@@ -63,3 +63,15 @@ test('upload submission verifies object size before dispatch', async () => {
   await assert.rejects(service.submitUpload('user-1', job().id), (error) => error.code === 'VALIDATION_ERROR');
   assert.equal(submitted, false);
 });
+
+
+test('onboarding email import carries the disclosed automatic update choice', async () => {
+  const inputs = [];
+  const service = new ImportJobService({ create: async input => { inputs.push(input); return job(); } }, {});
+  await service.start('user-1', 'gmail_historical', 'user', undefined, 'onboarding', true);
+  assert.equal(inputs[0].automaticUpdates, true);
+  await service.start('user-1', 'gmail_historical', 'user', undefined, 'legacy');
+  assert.equal(inputs[1].automaticUpdates, false);
+  assert.throws(() => service.start('user-1', 'gmail_historical', 'user', undefined, 'post_onboarding', true), error => error.code === 'VALIDATION_ERROR');
+  assert.throws(() => service.start('user-1', 'scheduled_tracking', 'scheduler', undefined, 'onboarding', true), error => error.code === 'VALIDATION_ERROR');
+});

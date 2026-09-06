@@ -72,8 +72,10 @@ export const createGmailImportRouter = (dependencies: GmailImportRouterDependenc
     asyncHandler(async (request: Request, response: Response) => {
       const journeyContext = request.body?.journeyContext ?? 'legacy';
       if (!isImportJourneyContext(journeyContext)) throw new ValidationError('Invalid import journey context.', 'journeyContext');
+      const automaticUpdates = request.body?.automaticUpdates ?? false;
+      if (typeof automaticUpdates !== 'boolean') throw new ValidationError('Invalid automatic updates choice.', 'automaticUpdates');
       const operation = await dependencies.importJobs.start(
-        authenticatedUserId(request), 'gmail_historical', 'user', request.get('Idempotency-Key')?.trim(), journeyContext,
+        authenticatedUserId(request), 'gmail_historical', 'user', request.get('Idempotency-Key')?.trim(), journeyContext, automaticUpdates,
       );
       response.status(202).json({ operation: toImportOperation(operation) });
     }),
