@@ -25,6 +25,7 @@ export interface MailboxImportState {
   readonly version: 1;
   readonly cursor: string | null;
   readonly done: boolean;
+  readonly estimatedTotalMessages?: number;
   readonly counters: MailboxImportCounters;
 }
 
@@ -59,12 +60,17 @@ export const restoreMailboxCheckpoint = (
   }
   const raw = execution.checkpoint;
   const counters = raw.counters;
+  const estimatedTotalMessages = raw.estimatedTotalMessages;
   if (
     raw.provider !== provider ||
     raw.version !== 1 ||
     typeof raw.done !== 'boolean' ||
     !('cursor' in raw) ||
     (raw.cursor !== null && typeof raw.cursor !== 'string') ||
+    (estimatedTotalMessages !== undefined &&
+      (typeof estimatedTotalMessages !== 'number' ||
+        !Number.isInteger(estimatedTotalMessages) ||
+        estimatedTotalMessages < 0)) ||
     typeof counters !== 'object' ||
     counters === null ||
     Array.isArray(counters)
@@ -92,21 +98,46 @@ export const restoreMailboxCheckpoint = (
     version: 1,
     cursor: raw.cursor as string | null,
     done: raw.done,
+    ...(estimatedTotalMessages !== undefined
+      ? { estimatedTotalMessages: estimatedTotalMessages as number }
+      : {}),
     counters: restored,
   };
 };
 
-export const checkpointProgress = (pages: number): number =>
-  Math.min(90, 15 + Math.max(0, pages) * 2);
+export const checkpointProgress = (
+  pages: number,
+  processedMessages?: number,
+  estimatedTotalMessages?: number,
+): number => {
+  if (
+    processedMessages !== undefined &&
+    estimatedTotalMessages !== undefined &&
+    estimatedTotalMessages > 0
+  ) {
+    const completionRatio = Math.min(1, Math.max(0, processedMessages) / estimatedTotalMessages);
+    return Math.min(89, 15 + Math.round(completionRatio * 74));
+  }
+  return Math.min(89, 15 + Math.max(0, pages) * 2);
+};
 
 export const saveMailboxCheckpoint = async (
   execution: ImportExecutionCheckpoint | undefined,
   state: MailboxImportState,
+  estimatedTotalMessages?: number,
 ): Promise<void> => {
   if (!execution) return;
+  const totalMessages = estimatedTotalMessages ?? state.estimatedTotalMessages;
+  const checkpoint = totalMessages === undefined
+    ? state
+    : { ...state, estimatedTotalMessages: totalMessages };
   await execution.save(
-    state as unknown as Readonly<Record<string, unknown>>,
+    checkpoint as unknown as Readonly<Record<string, unknown>>,
     state.done ? 'mailbox_imported' : 'importing_mailbox',
-    state.done ? 90 : checkpointProgress(state.counters.pages),
+    state.done ? 90 : checkpointProgress(
+      state.counters.pages,
+      state.counters.matchedMessages,
+      totalMessages,
+    ),
   );
 };

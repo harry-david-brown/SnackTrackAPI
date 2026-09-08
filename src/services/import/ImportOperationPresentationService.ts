@@ -19,6 +19,11 @@ interface Snapshot {
   readonly metrics: readonly QueueMetrics[];
 }
 
+interface GmailQuotaEstimate {
+  readonly messageGetQueryUnits: number;
+  readonly queryUnitsPerMinute: number;
+}
+
 export class ImportOperationPresentationService {
   private snapshot: Snapshot | null = null;
 
@@ -26,6 +31,7 @@ export class ImportOperationPresentationService {
     private readonly jobs: Pick<ImportJobRepository, 'getP75DurationSeconds'>,
     private readonly queues: Pick<ImportQueueOperations, 'metrics'>,
     private readonly clock: () => number = Date.now,
+    private readonly gmailQuota?: GmailQuotaEstimate,
   ) {}
 
   async forJob(job: ImportJob): Promise<ImportOperationPresentation | null> {
@@ -71,7 +77,8 @@ export class ImportOperationPresentationService {
     const jobsAhead = Math.max(0, metrics.waiting + metrics.active - currentJobIsCounted);
     const queueSeconds = (jobsAhead / metrics.workers) * serviceSeconds;
     const progressRemaining = Math.max(0.05, (100 - job.progress) / 100);
-    const processingSeconds = serviceSeconds * progressRemaining;
+    const processingSeconds = this.gmailThrottleRemainingSeconds(job)
+      ?? serviceSeconds * progressRemaining;
     const retrySeconds = this.retryWaitSeconds(job);
     const projectedSeconds = queueSeconds + processingSeconds + retrySeconds.maximum;
     const estimate = this.timeEstimate(job, elapsedSeconds, queueSeconds + processingSeconds, retrySeconds);
@@ -115,6 +122,21 @@ export class ImportOperationPresentationService {
       minimum: Math.max(0, minimumDelay - waitingSeconds),
       maximum: Math.max(0, maximumDelay - waitingSeconds),
     };
+  }
+
+  private gmailThrottleRemainingSeconds(job: ImportJob): number | null {
+    if (job.kind !== 'gmail_historical' || !this.gmailQuota) return null;
+    const totalMessages = job.checkpoint.estimatedTotalMessages;
+    const counters = job.checkpoint.counters;
+    if (typeof totalMessages !== 'number' || !Number.isInteger(totalMessages) || totalMessages < 0 ||
+      typeof counters !== 'object' || counters === null || Array.isArray(counters)) return null;
+    const processedMessages = (counters as Readonly<Record<string, unknown>>).matchedMessages;
+    if (typeof processedMessages !== 'number' || !Number.isInteger(processedMessages) || processedMessages < 0 ||
+      !Number.isFinite(this.gmailQuota.messageGetQueryUnits) || this.gmailQuota.messageGetQueryUnits <= 0 ||
+      !Number.isFinite(this.gmailQuota.queryUnitsPerMinute) || this.gmailQuota.queryUnitsPerMinute <= 0) return null;
+    const remainingMessages = Math.max(0, totalMessages - processedMessages);
+    return (remainingMessages * this.gmailQuota.messageGetQueryUnits * 60)
+      / this.gmailQuota.queryUnitsPerMinute;
   }
 
   private timeEstimate(

@@ -29,6 +29,7 @@ import { ImportQueueOperations } from './services/queue/ImportQueues';
 import { AdminQueueOperationsService } from './services/admin/AdminQueueOperationsService';
 import { redisLockStore } from './config/redis';
 import { ImportOperationPresentationService } from './services/import/ImportOperationPresentationService';
+import { GMAIL_MESSAGE_GET_QUERY_UNITS } from './services/email/GmailQuotaPacer';
 
 import {
   securityHeaders,
@@ -67,6 +68,11 @@ const queueOperations = new ImportQueueOperations(config.getQueueConfig());
 const importOperationPresentation = new ImportOperationPresentationService(
   container.importJobRepository,
   queueOperations,
+  Date.now,
+  {
+    messageGetQueryUnits: GMAIL_MESSAGE_GET_QUERY_UNITS,
+    queryUnitsPerMinute: config.getGmailConfig().importQueryUnitsPerMinute,
+  },
 );
 const adminQueueOperations = new AdminQueueOperationsService(
   container.importJobRepository,

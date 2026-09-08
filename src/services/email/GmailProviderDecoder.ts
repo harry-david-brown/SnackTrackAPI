@@ -93,6 +93,7 @@ export const decodeGmailMessage = (value: unknown): DecodedGmailMessage => {
 export interface DecodedGmailList {
   readonly messageIds: readonly string[];
   readonly nextPageToken?: string;
+  readonly resultSizeEstimate?: number;
 }
 
 export const decodeGmailMessageList = (value: unknown): DecodedGmailList => {
@@ -101,6 +102,11 @@ export const decodeGmailMessageList = (value: unknown): DecodedGmailList => {
   const messages: unknown[] = Array.isArray(data.messages ?? [])
     ? ((data.messages as unknown[] | undefined) ?? [])
     : invalid('messageListResponse.data.messages');
+  const resultSizeEstimate = data.resultSizeEstimate;
+  if (
+    resultSizeEstimate !== undefined &&
+    (typeof resultSizeEstimate !== 'number' || !Number.isInteger(resultSizeEstimate) || resultSizeEstimate < 0)
+  ) invalid('messageListResponse.data.resultSizeEstimate');
   return {
     messageIds: messages.map((entry, index) => {
       const message = record(entry, `messageListResponse.data.messages.${index}`);
@@ -108,6 +114,7 @@ export const decodeGmailMessageList = (value: unknown): DecodedGmailList => {
       return id && id.length > 0 ? id : invalid(`messageListResponse.data.messages.${index}.id`);
     }),
     nextPageToken: optionalString(data.nextPageToken, 'messageListResponse.data.nextPageToken'),
+    ...(resultSizeEstimate !== undefined ? { resultSizeEstimate: resultSizeEstimate as number } : {}),
   };
 };
 

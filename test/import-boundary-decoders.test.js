@@ -102,9 +102,9 @@ test('parsed receipt boundary accepts the complete schema and rejects malformed 
 test('Gmail provider boundary decodes message, profile, and OAuth payloads once', () => {
   assert.deepEqual(
     decodeGmailMessageList({
-      data: { messages: [{ id: 'message-1' }], nextPageToken: 'next-page' },
+      data: { messages: [{ id: 'message-1' }], nextPageToken: 'next-page', resultSizeEstimate: 42 },
     }),
-    { messageIds: ['message-1'], nextPageToken: 'next-page' },
+    { messageIds: ['message-1'], nextPageToken: 'next-page', resultSizeEstimate: 42 },
   );
   const message = decodeGmailMessage({
     data: {

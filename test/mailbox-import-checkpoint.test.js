@@ -5,11 +5,19 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-thirty-
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret-at-least-thirty-two-characters';
 
 const { GmailImportService } = require('../dist/services/import/GmailImportService');
+const { checkpointProgress } = require('../dist/services/import/MailboxImportCheckpoint');
 
 const emptyExtraction = {
   extractedReceipts: [], supportedReceipts: [], errors: [],
   nonReceiptCount: 0, nonFoodCount: 0, durationMs: 1,
 };
+
+test('mailbox progress follows the discovered message workload', () => {
+  assert.equal(checkpointProgress(1, 20, 400), 19);
+  assert.equal(checkpointProgress(10, 200, 400), 52);
+  assert.equal(checkpointProgress(19, 380, 400), 85);
+  assert.equal(checkpointProgress(20, 400, 400), 89);
+});
 
 test('Gmail import resumes at the first uncommitted provider page', async () => {
   let persistedCheckpoint = {};
@@ -22,10 +30,10 @@ test('Gmail import resumes at the first uncommitted provider page', async () => 
         exportCutoffs: {},
         pages: (async function* () {
           if (cursor === 'page-2') {
-            yield { messages: [{ userId: 'user-1' }], matchedCount: 1, nextCursor: null };
+            yield { messages: [{ userId: 'user-1' }], matchedCount: 1, estimatedTotalCount: 2, nextCursor: null };
             return;
           }
-          yield { messages: [{ userId: 'user-1' }], matchedCount: 1, nextCursor: 'page-2' };
+          yield { messages: [{ userId: 'user-1' }], matchedCount: 1, estimatedTotalCount: 2, nextCursor: 'page-2' };
           if (firstAttempt) {
             firstAttempt = false;
             throw new Error('temporary provider failure');
@@ -54,6 +62,7 @@ test('Gmail import resumes at the first uncommitted provider page', async () => 
   const failed = await service.importFromGmail(user, lock, 'manual', execution());
   assert.equal(failed.success, false);
   assert.equal(persistedCheckpoint.cursor, 'page-2');
+  assert.equal(persistedCheckpoint.estimatedTotalMessages, 2);
 
   const resumed = await service.importFromGmail(user, lock, 'manual', execution());
   assert.equal(resumed.success, true);

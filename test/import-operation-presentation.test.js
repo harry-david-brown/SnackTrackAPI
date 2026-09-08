@@ -40,6 +40,31 @@ test('projects durable mailbox progress without exposing its checkpoint', async 
   assert.equal(presentation.discoveredOrderCount, 7);
 });
 
+test('estimates Gmail processing time from the remaining quota-paced message fetches', async () => {
+  const service = new ImportOperationPresentationService(
+    { getP75DurationSeconds: async () => 30 },
+    { metrics: async () => [{ name: 'mailbox-imports', waiting: 0, active: 1, delayed: 0, failed: 0, paused: false, workers: 1, oldestWaitingAgeSeconds: null }] },
+    () => 1_030_000,
+    { messageGetQueryUnits: 20, queryUnitsPerMinute: 3_000 },
+  );
+
+  const presentation = await service.forJob(job({
+    status: 'running',
+    phase: 'importing_mailbox',
+    progress: 34,
+    checkpoint: {
+      estimatedTotalMessages: 600,
+      counters: { matchedMessages: 150, supportedReceiptsFound: 7 },
+    },
+  }));
+
+  // 450 remaining messages * 20 units / 3,000 units per minute = 3 minutes.
+  assert.deepEqual(presentation.timeEstimate, {
+    kind: 'remaining', minimumMinutes: 2, maximumMinutes: 4, revision: 0,
+  });
+  assert.equal(presentation.expectedDurationBand, 'under_5_minutes');
+});
+
 test('exposes delayed mode only for a backlog or elapsed threshold', async () => {
   const backlog = new ImportOperationPresentationService(
     { getP75DurationSeconds: async () => 120 },

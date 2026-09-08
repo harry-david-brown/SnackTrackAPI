@@ -20,6 +20,8 @@ export interface MailboxMessagePage {
   /** Opaque resume cursor for the next durable processing batch; null means complete. */
   readonly nextCursor: string | null;
   readonly matchedCount: number;
+  /** Exact discovered count when available; otherwise the provider's workload estimate. */
+  readonly estimatedTotalCount?: number;
   readonly rejectedCount?: number;
   readonly decodedBytes?: number;
 }

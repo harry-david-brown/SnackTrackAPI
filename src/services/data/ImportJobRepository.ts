@@ -308,7 +308,7 @@ export class ImportJobRepository {
   }
 
   async progress(jobId: string, phase: string, progress: number): Promise<void> {
-    await this.database.query(`UPDATE import_jobs SET phase=$2,progress=$3,heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [jobId,phase,Math.max(1,Math.min(99,Math.round(progress)))]);
+    await this.database.query(`UPDATE import_jobs SET phase=$2,progress=GREATEST(progress,$3),heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [jobId,phase,Math.max(1,Math.min(99,Math.round(progress)))]);
   }
 
   async heartbeat(jobId: string): Promise<void> {
@@ -325,7 +325,7 @@ export class ImportJobRepository {
     progress: number,
   ): Promise<void> {
     await this.database.query(
-      `UPDATE import_jobs SET checkpoint=$2::jsonb,phase=$3,progress=$4,heartbeat_at=NOW(),updated_at=NOW()
+      `UPDATE import_jobs SET checkpoint=$2::jsonb,phase=$3,progress=GREATEST(progress,$4),heartbeat_at=NOW(),updated_at=NOW()
        WHERE id=$1 AND status='running'`,
       [jobId, JSON.stringify(checkpoint), phase, Math.max(1, Math.min(94, Math.round(progress)))],
     );

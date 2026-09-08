@@ -248,3 +248,53 @@ test('Gmail import checkpoints 500-ID listings in 20-message processing batches'
   assert.equal(listInputs.length, 1);
   assert.deepEqual(getCalls, listedIds);
 });
+
+test('Gmail import exhausts every list page before fetching message bodies', async () => {
+  const events = [];
+  const gmail = {
+    users: {
+      messages: {
+        list: async (input) => {
+          events.push(`list:${input.pageToken ?? 'first'}`);
+          return input.pageToken
+            ? { data: { messages: [{ id: 'message-3' }] } }
+            : {
+                data: {
+                  messages: [{ id: 'message-1' }, { id: 'message-2' }],
+                  nextPageToken: 'second-page',
+                  resultSizeEstimate: 3,
+                },
+              };
+        },
+        get: async (input) => {
+          events.push(`get:${input.id}`);
+          return { data: {
+            id: input.id, sizeEstimate: 500,
+            payload: {
+              mimeType: 'text/html',
+              headers: [
+                { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
+                { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=uber.com' },
+              ],
+              body: { data: encoded('<p>Receipt total: $24.00</p>') },
+            },
+          } };
+        },
+      },
+    },
+  };
+  const client = new GmailClient(undefined, undefined, gmail);
+
+  const pages = [];
+  for await (const page of client.getEmailPages(
+    { id: 'user-1', email: 'user@example.test' },
+    { safety: { allowForwardedReceipts: false } },
+  )) pages.push(page);
+
+  assert.deepEqual(events.slice(0, 2), ['list:first', 'list:second-page']);
+  assert.deepEqual(events.slice(2).sort(), ['get:message-1', 'get:message-2', 'get:message-3']);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].matchedCount, 3);
+  assert.equal(pages[0].estimatedTotalCount, 3);
+  assert.equal(pages[0].nextCursor, null);
+});

@@ -37,12 +37,14 @@ interface GmailBufferedCursor {
   readonly pendingMessageIds: readonly string[];
   readonly nextPageToken: string | null;
   readonly searchQueryVersion: GmailSearchQueryVersion;
+  readonly estimatedTotalCount?: number;
 }
 
 const encodeGmailBufferedCursor = (cursor: GmailBufferedCursor): string =>
   `${cursor.searchQueryVersion === 1 ? GMAIL_BUFFERED_CURSOR_V1_PREFIX : GMAIL_BUFFERED_CURSOR_V2_PREFIX}${Buffer.from(JSON.stringify({
     pendingMessageIds: cursor.pendingMessageIds,
     nextPageToken: cursor.nextPageToken,
+    estimatedTotalCount: cursor.estimatedTotalCount,
   })).toString('base64url')}`;
 
 const decodeGmailBufferedCursor = (cursor: string): GmailBufferedCursor => {
@@ -54,17 +56,21 @@ const decodeGmailBufferedCursor = (cursor: string): GmailBufferedCursor => {
     ) as Record<string, unknown>;
     const pendingMessageIds = decoded.pendingMessageIds;
     const nextPageToken = decoded.nextPageToken;
+    const estimatedTotalCount = decoded.estimatedTotalCount;
     if (
       !Array.isArray(pendingMessageIds) ||
-      pendingMessageIds.length > GMAIL_LIST_PAGE_SIZE ||
+      pendingMessageIds.length > MAX_IMPORT_MESSAGES ||
       pendingMessageIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 256) ||
       (nextPageToken !== null && typeof nextPageToken !== 'string') ||
+      (estimatedTotalCount !== undefined &&
+        (typeof estimatedTotalCount !== 'number' || !Number.isInteger(estimatedTotalCount) || estimatedTotalCount < 0)) ||
       (pendingMessageIds.length === 0 && nextPageToken === null)
     ) throw new Error('Invalid buffered Gmail cursor');
     return {
       pendingMessageIds: pendingMessageIds as string[],
       nextPageToken: nextPageToken as string | null,
       searchQueryVersion,
+      estimatedTotalCount: estimatedTotalCount as number | undefined,
     };
   } catch (error) {
     throw new AppError({
@@ -265,7 +271,7 @@ export class GmailClient implements MailboxClient {
     return safeMessages;
   }
 
-  /** Production import path: yields at most one Gmail page at a time. */
+  /** Production import path: lists the bounded workload, then yields one processing batch at a time. */
   async *getEmailPages(
     user: User,
     options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety },
@@ -298,6 +304,7 @@ export class GmailClient implements MailboxClient {
         yield {
           messages,
           matchedCount: candidates.length,
+          estimatedTotalCount: emails.length,
           rejectedCount: candidates.length - messages.length,
           decodedBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.body), 0),
           nextCursor: next < emails.length ? `mock:${next}` : null,
@@ -338,11 +345,15 @@ export class GmailClient implements MailboxClient {
       ? bufferedCursor.nextPageToken
       : options?.cursor;
     let pendingMessageIds = bufferedCursor ? [...bufferedCursor.pendingMessageIds] : [];
+    let estimatedTotalCount = bufferedCursor?.estimatedTotalCount;
     let pageCount = 0;
     const startedAt = Date.now();
 
     try {
-      while (true) {
+      // Exhaust the Gmail listing before fetching any message bodies. This gives
+      // new imports an exact, bounded workload for progress and time estimates.
+      let hasMoreListPages = bufferedCursor ? pageToken !== null : true;
+      while (hasMoreListPages) {
         if (Date.now() - startedAt > MAX_IMPORT_DURATION_MS) {
           throw new AppError({
             code: 'MAILBOX_IMPORT_LIMIT_REACHED',
@@ -350,31 +361,57 @@ export class GmailClient implements MailboxClient {
             publicMessage: 'This mailbox is too large to import safely in one operation.',
           });
         }
-        if (pendingMessageIds.length === 0) {
-          pageCount += 1;
-          if (pageCount > MAX_IMPORT_PAGES) {
-            throw new AppError({
-              code: 'MAILBOX_IMPORT_LIMIT_REACHED',
-              message: 'Gmail import exceeded its page budget',
-              publicMessage: 'This mailbox is too large to import safely in one operation.',
-            });
-          }
-          await quotaPacer.waitFor(GMAIL_MESSAGE_LIST_QUERY_UNITS);
-          gmailRequestCount += 1;
-          modeledQueryUnits += GMAIL_MESSAGE_LIST_QUERY_UNITS;
-          const page = decodeGmailMessageList(await gmail.users.messages.list({
-            userId: 'me', q: searchQuery, maxResults: GMAIL_LIST_PAGE_SIZE, pageToken: pageToken || undefined,
-          }, { retry: false }));
-          pendingMessageIds = [...page.messageIds];
-          pageToken = page.nextPageToken || null;
-
-          if (pendingMessageIds.length === 0) {
-            yield { messages: [], matchedCount: 0, nextCursor: pageToken };
-            if (!pageToken) break;
-            continue;
-          }
+        pageCount += 1;
+        if (pageCount > MAX_IMPORT_PAGES) {
+          throw new AppError({
+            code: 'MAILBOX_IMPORT_LIMIT_REACHED',
+            message: 'Gmail import exceeded its page budget',
+            publicMessage: 'This mailbox is too large to import safely in one operation.',
+          });
         }
+        await quotaPacer.waitFor(GMAIL_MESSAGE_LIST_QUERY_UNITS);
+        gmailRequestCount += 1;
+        modeledQueryUnits += GMAIL_MESSAGE_LIST_QUERY_UNITS;
+        const page = decodeGmailMessageList(await gmail.users.messages.list({
+          userId: 'me', q: searchQuery, maxResults: GMAIL_LIST_PAGE_SIZE, pageToken: pageToken || undefined,
+        }, { retry: false }));
+        pendingMessageIds.push(...page.messageIds);
+        if (pendingMessageIds.length > MAX_IMPORT_MESSAGES) {
+          throw new AppError({
+            code: 'MAILBOX_IMPORT_LIMIT_REACHED',
+            message: 'Gmail import exceeded its message budget while listing matches',
+            publicMessage: 'This mailbox has too many matching messages to import safely in one operation.',
+          });
+        }
+        pageToken = page.nextPageToken || null;
+        hasMoreListPages = pageToken !== null;
+      }
 
+      // Buffered cursors from imports started by an older deployment may already
+      // carry a provider estimate that includes messages processed before resume.
+      estimatedTotalCount = bufferedCursor?.estimatedTotalCount ?? pendingMessageIds.length;
+      this.logger.info('Gmail message listing completed', {
+        userId: user.id,
+        operation: 'gmail_message_list',
+        provider: 'gmail',
+        outcome: 'success',
+        listedMessageCount: pendingMessageIds.length,
+        pageCount,
+      });
+
+      if (pendingMessageIds.length === 0) {
+        yield { messages: [], matchedCount: 0, estimatedTotalCount, nextCursor: null };
+        return;
+      }
+
+      while (pendingMessageIds.length > 0) {
+        if (Date.now() - startedAt > MAX_IMPORT_DURATION_MS) {
+          throw new AppError({
+            code: 'MAILBOX_IMPORT_LIMIT_REACHED',
+            message: 'Gmail import exceeded its time budget',
+            publicMessage: 'This mailbox is too large to import safely in one operation.',
+          });
+        }
         const processingBatch = pendingMessageIds.slice(0, GMAIL_PROCESSING_BATCH_SIZE);
         const fetched = await Promise.all(processingBatch.map((messageId) => limit(async () => {
           if (pageFailure) throw pageFailure;
@@ -453,11 +490,12 @@ export class GmailClient implements MailboxClient {
         })));
         const messages = fetched.filter((message): message is MailboxMessage => message !== null);
         pendingMessageIds = pendingMessageIds.slice(processingBatch.length);
-        const nextCursor = pendingMessageIds.length > 0 || pageToken
+        const nextCursor = pendingMessageIds.length > 0
           ? encodeGmailBufferedCursor({
             pendingMessageIds,
-            nextPageToken: pageToken ?? null,
+            nextPageToken: null,
             searchQueryVersion,
+            estimatedTotalCount,
           })
           : null;
         this.logger.debug('Gmail message page yielded', {
@@ -467,11 +505,11 @@ export class GmailClient implements MailboxClient {
         yield {
           messages,
           matchedCount: processingBatch.length,
+          estimatedTotalCount,
           rejectedCount: processingBatch.length - messages.length,
           decodedBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.body), 0),
           nextCursor,
         };
-        if (pendingMessageIds.length === 0 && !pageToken) break;
       }
     } catch (error) {
       if (error instanceof AppError) throw error;

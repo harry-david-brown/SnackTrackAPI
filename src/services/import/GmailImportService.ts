@@ -151,7 +151,7 @@ export class GmailImportService {
           counters.decodedBytesExamined += page.decodedBytes ?? 0;
           counters.errorCount += page.rejectedCount ?? 0;
           state = { ...state, cursor: page.nextCursor, done: page.nextCursor === null };
-          await saveMailboxCheckpoint(execution, state);
+          await saveMailboxCheckpoint(execution, state, page.estimatedTotalCount);
         }
       }
       await this.lifecycle.complete(syncRunId, user.id, state.counters.errorCount ? 'partial' : 'success', {
