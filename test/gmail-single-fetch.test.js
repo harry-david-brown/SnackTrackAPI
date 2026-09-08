@@ -143,8 +143,57 @@ test('Gmail import disables transport retries and uses the configured quota budg
   )) { /* consume */ }
 
   assert.equal(listInputs[0].maxResults, 500);
+  assert.match(listInputs[0].q, /subject:order/);
   assert.deepEqual(listOptions, [{ retry: false }]);
   assert.deepEqual(getOptions, [{ retry: false }]);
+});
+
+test('new forwarded-receipt searches also require order in the subject', async () => {
+  const listInputs = [];
+  const gmail = {
+    users: {
+      messages: {
+        list: async (input) => {
+          listInputs.push(input);
+          return { data: { messages: [] } };
+        },
+        get: async () => { throw new Error('No messages should be fetched'); },
+      },
+    },
+  };
+  const client = new GmailClient(undefined, undefined, gmail);
+
+  for await (const _page of client.getEmailPages(
+    { id: 'user-1', email: 'user@example.test' },
+    { safety: { allowForwardedReceipts: true } },
+  )) { /* consume */ }
+
+  assert.match(listInputs[0].q, /\(subject:Uber OR subject:DoorDash\)/);
+  assert.match(listInputs[0].q, /subject:order/);
+});
+
+test('legacy provider cursors retain the original sender-only search', async () => {
+  const listInputs = [];
+  const gmail = {
+    users: {
+      messages: {
+        list: async (input) => {
+          listInputs.push(input);
+          return { data: { messages: [] } };
+        },
+        get: async () => { throw new Error('No messages should be fetched'); },
+      },
+    },
+  };
+  const client = new GmailClient(undefined, undefined, gmail);
+
+  for await (const _page of client.getEmailPages(
+    { id: 'user-1', email: 'user@example.test' },
+    { cursor: 'legacy-provider-token', safety: { allowForwardedReceipts: false } },
+  )) { /* consume */ }
+
+  assert.equal(listInputs[0].pageToken, 'legacy-provider-token');
+  assert.doesNotMatch(listInputs[0].q, /subject:order/);
 });
 
 test('Gmail import checkpoints 500-ID listings in 20-message processing batches', async () => {
@@ -185,7 +234,7 @@ test('Gmail import checkpoints 500-ID listings in 20-message processing batches'
   await firstIterator.return();
 
   assert.equal(first.value.matchedCount, 20);
-  assert.match(first.value.nextCursor, /^snacktrack:gmail-buffer:v1:/);
+  assert.match(first.value.nextCursor, /^snacktrack:gmail-buffer:v2:/);
   assert.equal(listInputs.length, 1);
 
   const resumedIterator = client.getEmailPages(

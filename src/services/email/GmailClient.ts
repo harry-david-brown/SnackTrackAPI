@@ -28,31 +28,44 @@ const MAX_IMPORT_PAGES = 1_000;
 const MAX_IMPORT_DURATION_MS = 15 * 60 * 1000;
 const GMAIL_LIST_PAGE_SIZE = 500;
 const GMAIL_PROCESSING_BATCH_SIZE = 20;
-const GMAIL_BUFFERED_CURSOR_PREFIX = 'snacktrack:gmail-buffer:v1:';
+const GMAIL_BUFFERED_CURSOR_V1_PREFIX = 'snacktrack:gmail-buffer:v1:';
+const GMAIL_BUFFERED_CURSOR_V2_PREFIX = 'snacktrack:gmail-buffer:v2:';
+
+type GmailSearchQueryVersion = 1 | 2;
 
 interface GmailBufferedCursor {
   readonly pendingMessageIds: readonly string[];
   readonly nextPageToken: string | null;
+  readonly searchQueryVersion: GmailSearchQueryVersion;
 }
 
 const encodeGmailBufferedCursor = (cursor: GmailBufferedCursor): string =>
-  `${GMAIL_BUFFERED_CURSOR_PREFIX}${Buffer.from(JSON.stringify(cursor)).toString('base64url')}`;
+  `${cursor.searchQueryVersion === 1 ? GMAIL_BUFFERED_CURSOR_V1_PREFIX : GMAIL_BUFFERED_CURSOR_V2_PREFIX}${Buffer.from(JSON.stringify({
+    pendingMessageIds: cursor.pendingMessageIds,
+    nextPageToken: cursor.nextPageToken,
+  })).toString('base64url')}`;
 
 const decodeGmailBufferedCursor = (cursor: string): GmailBufferedCursor => {
   try {
+    const searchQueryVersion: GmailSearchQueryVersion = cursor.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX) ? 2 : 1;
+    const prefix = searchQueryVersion === 2 ? GMAIL_BUFFERED_CURSOR_V2_PREFIX : GMAIL_BUFFERED_CURSOR_V1_PREFIX;
     const decoded = JSON.parse(
-      Buffer.from(cursor.slice(GMAIL_BUFFERED_CURSOR_PREFIX.length), 'base64url').toString('utf8'),
+      Buffer.from(cursor.slice(prefix.length), 'base64url').toString('utf8'),
     ) as Record<string, unknown>;
     const pendingMessageIds = decoded.pendingMessageIds;
     const nextPageToken = decoded.nextPageToken;
     if (
       !Array.isArray(pendingMessageIds) ||
-      pendingMessageIds.length === 0 ||
       pendingMessageIds.length > GMAIL_LIST_PAGE_SIZE ||
       pendingMessageIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 256) ||
-      (nextPageToken !== null && typeof nextPageToken !== 'string')
+      (nextPageToken !== null && typeof nextPageToken !== 'string') ||
+      (pendingMessageIds.length === 0 && nextPageToken === null)
     ) throw new Error('Invalid buffered Gmail cursor');
-    return { pendingMessageIds: pendingMessageIds as string[], nextPageToken: nextPageToken as string | null };
+    return {
+      pendingMessageIds: pendingMessageIds as string[],
+      nextPageToken: nextPageToken as string | null,
+      searchQueryVersion,
+    };
   } catch (error) {
     throw new AppError({
       code: 'IMPORT_CHECKPOINT_INVALID',
@@ -294,9 +307,24 @@ export class GmailClient implements MailboxClient {
     }
 
     const gmail = await this.createAuthenticatedGmailClient(user);
-    const baseSearchQuery = options?.safety?.allowForwardedReceipts
-      ? `(${config.getGmailSearchQuery()}) OR ((subject:Uber OR subject:DoorDash) (receipt OR order))`
-      : config.getGmailSearchQuery();
+    const isBufferedCursor = options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V1_PREFIX) ||
+      options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX);
+    const bufferedCursor = isBufferedCursor && options?.cursor
+      ? decodeGmailBufferedCursor(options.cursor)
+      : null;
+    // Raw provider tokens and v1 buffered cursors belong to imports that began
+    // before subject filtering. Keep their query stable because Gmail page
+    // tokens are tied to the original search.
+    const searchQueryVersion: GmailSearchQueryVersion = bufferedCursor?.searchQueryVersion ??
+      (options?.cursor ? 1 : 2);
+    const senderQuery = config.getGmailSearchQuery();
+    const baseSearchQuery = searchQueryVersion === 1
+      ? (options?.safety?.allowForwardedReceipts
+        ? `(${senderQuery}) OR ((subject:Uber OR subject:DoorDash) (receipt OR order))`
+        : senderQuery)
+      : (options?.safety?.allowForwardedReceipts
+        ? `((${senderQuery}) OR (subject:Uber OR subject:DoorDash)) subject:order`
+        : `(${senderQuery}) subject:order`);
     const afterSeconds = options?.after ? Math.floor(options.after.getTime() / 1000) : null;
     const searchQuery = afterSeconds && Number.isFinite(afterSeconds)
       ? `(${baseSearchQuery}) after:${afterSeconds}`
@@ -306,9 +334,6 @@ export class GmailClient implements MailboxClient {
     let gmailRequestCount = 0;
     let modeledQueryUnits = 0;
     let pageFailure: unknown;
-    const bufferedCursor = options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_PREFIX)
-      ? decodeGmailBufferedCursor(options.cursor)
-      : null;
     let pageToken: string | null | undefined = bufferedCursor
       ? bufferedCursor.nextPageToken
       : options?.cursor;
@@ -428,9 +453,13 @@ export class GmailClient implements MailboxClient {
         })));
         const messages = fetched.filter((message): message is MailboxMessage => message !== null);
         pendingMessageIds = pendingMessageIds.slice(processingBatch.length);
-        const nextCursor = pendingMessageIds.length > 0
-          ? encodeGmailBufferedCursor({ pendingMessageIds, nextPageToken: pageToken ?? null })
-          : pageToken ?? null;
+        const nextCursor = pendingMessageIds.length > 0 || pageToken
+          ? encodeGmailBufferedCursor({
+            pendingMessageIds,
+            nextPageToken: pageToken ?? null,
+            searchQueryVersion,
+          })
+          : null;
         this.logger.debug('Gmail message page yielded', {
           userId: user.id, operation: 'gmail_message_fetch', provider: 'gmail', outcome: 'page_fetched',
           requestedCount: processingBatch.length, fetchedCount: messages.length, pageCount,
