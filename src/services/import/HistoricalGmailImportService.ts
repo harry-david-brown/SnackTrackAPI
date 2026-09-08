@@ -88,6 +88,16 @@ export class HistoricalGmailImportService {
             'Your Gmail authorization is no longer valid. Reconnect Gmail to continue.',
           );
         }
+        if (result.errorCode === 'GMAIL_RATE_LIMITED' || result.errorCode === 'GMAIL_ACCESS_BLOCKED') {
+          throw new AppError({
+            code: result.errorCode,
+            message: 'Gmail message access failed',
+            publicMessage: result.errorCode === 'GMAIL_RATE_LIMITED'
+              ? 'Your receipt import couldn’t finish right now. Please wait a little before trying again. Your email connection is still active.'
+              : 'Google blocked access to receipt messages. This may be an account policy or app configuration issue. Your Gmail connection has been kept.',
+            details: result.failureDetails ?? undefined,
+          });
+        }
         throw new AppError({
           code: 'GMAIL_IMPORT_FAILED',
           message: 'Gmail import failed',

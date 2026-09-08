@@ -17,7 +17,7 @@ export class MailboxMessage {
 
 export interface MailboxMessagePage {
   readonly messages: readonly MailboxMessage[];
-  /** Opaque provider cursor for the next page; null means complete. */
+  /** Opaque resume cursor for the next durable processing batch; null means complete. */
   readonly nextCursor: string | null;
   readonly matchedCount: number;
   readonly rejectedCount?: number;

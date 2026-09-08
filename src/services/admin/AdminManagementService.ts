@@ -2,6 +2,7 @@ import { NotFoundError, ValidationError } from '../../core/errors';
 import type { AccountDeletionService } from '../account/AccountDeletionService';
 import type { DatabaseQueryExecutor, DatabaseRow } from '../ports/DatabasePort';
 import type { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
+import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
 
 const asNumber = (value: unknown): number => Number(value ?? 0);
 const asIso = (value: unknown): string | null => {
@@ -9,6 +10,63 @@ const asIso = (value: unknown): string | null => {
   const date = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
+
+const blockedDiagnosticKey = /(?:token|cursor|authorization|cookie|body|subject|headers?|object_?key|etag|email_?content)/i;
+const safeDiagnosticValue = (value: unknown, depth = 0): unknown => {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return value
+    .replace(/[\w.+-]+@[\w.-]+/g, '[address]')
+    .replace(/https?:\/\/[^\s"<>]+/gi, '[url]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/(?:ya29\.|1\/\/|GOCSPX-)[A-Za-z0-9_.\/-]+/g, '[redacted]')
+    .slice(0, 1_500);
+  if (depth >= 4) return '[truncated]';
+  if (Array.isArray(value)) return value.slice(0, 25).map((item) => safeDiagnosticValue(item, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !blockedDiagnosticKey.test(key))
+      .slice(0, 100)
+      .map(([key, item]) => [key, safeDiagnosticValue(item, depth + 1)]));
+  }
+  return String(value).slice(0, 1_500);
+};
+
+const safeDiagnosticObject = (value: unknown): Readonly<Record<string, unknown>> => {
+  const safe = safeDiagnosticValue(value);
+  return safe && typeof safe === 'object' && !Array.isArray(safe) ? safe as Readonly<Record<string, unknown>> : {};
+};
+
+const importProvider = (row: DatabaseRow): string => {
+  if (row.export_provider) return String(row.export_provider);
+  if (row.kind === 'gmail_historical') return 'gmail';
+  if (row.kind === 'outlook_historical') return 'microsoft';
+  return String(row.kind).includes('tracking') ? 'mailbox tracking' : 'unknown';
+};
+
+const importOperationSummary = (row: DatabaseRow) => ({
+  id: String(row.id),
+  userId: String(row.user_id),
+  userEmail: String(row.user_email),
+  kind: String(row.kind),
+  provider: importProvider(row),
+  trigger: String(row.trigger_type),
+  journeyContext: String(row.journey_context),
+  status: String(row.status),
+  phase: String(row.phase),
+  progress: asNumber(row.progress),
+  attempts: asNumber(row.attempts),
+  errorCode: row.error_code ? String(row.error_code) : null,
+  errorMessage: row.error_message ? String(row.error_message) : null,
+  createdAt: asIso(row.created_at),
+  queuedAt: asIso(row.queued_at),
+  startedAt: asIso(row.started_at),
+  completedAt: asIso(row.completed_at),
+  updatedAt: asIso(row.updated_at),
+  heartbeatAt: asIso(row.heartbeat_at),
+  durationSeconds: row.duration_seconds === null || row.duration_seconds === undefined ? null : Math.max(0, asNumber(row.duration_seconds)),
+  lastHeartbeatAgeSeconds: row.heartbeat_age_seconds === null || row.heartbeat_age_seconds === undefined ? null : Math.max(0, asNumber(row.heartbeat_age_seconds)),
+  stalled: Boolean(row.stalled),
+});
 
 export interface AdminUserFilters {
   query?: string;
@@ -22,6 +80,14 @@ export interface AdminUserFilters {
   activityFrom?: Date;
   activityTo?: Date;
   sort?: AdminUserSort;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminImportOperationFilters {
+  query?: string;
+  status?: string;
+  kind?: string;
   limit: number;
   offset: number;
 }
@@ -76,6 +142,7 @@ export class AdminManagementService {
     private readonly database: DatabaseQueryExecutor,
     private readonly accountDeletion: Pick<AccountDeletionService, 'deleteAccount'>,
     private readonly mailboxSecurityPolicies: MailboxSecurityPolicyRepository,
+    private readonly importTestScenarios: ImportTestScenarioRepository,
   ) {}
 
   async listUsers(filters: AdminUserFilters) {
@@ -129,7 +196,7 @@ export class AdminManagementService {
     };
   }
 
-  async getUser(userId: string) {
+  async getUser(userId: string, includeOwnerControls = false) {
     const userResult = await this.database.query<DatabaseRow>(
       `SELECT u.id, u.email, u.email_verified, u.timezone, u.created_at,
          COALESCE(u.gmail_connected, false) AS gmail_connected,
@@ -140,7 +207,7 @@ export class AdminManagementService {
     );
     const user = userResult.rows[0];
     if (!user) throw new NotFoundError('User', userId);
-    const [sources, gmailRuns, microsoftRuns, audits, mailboxSecurity, authMethods, exports] = await Promise.all([
+    const [sources, gmailRuns, microsoftRuns, audits, mailboxSecurity, testScenarios, authMethods, exports] = await Promise.all([
       this.database.query<DatabaseRow>(
         'SELECT data_source, receipt_type, COUNT(*)::int AS count FROM receipts WHERE user_id=$1 GROUP BY data_source, receipt_type ORDER BY data_source, receipt_type', [userId]),
       this.database.query<DatabaseRow>(
@@ -157,6 +224,7 @@ export class AdminManagementService {
         `SELECT action, reason, outcome, created_at FROM admin_audit_events
          WHERE target_type='user' AND target_id=$1 ORDER BY created_at DESC LIMIT 20`, [userId]),
       this.mailboxSecurityPolicies.get(userId),
+      includeOwnerControls ? this.importTestScenarios.get(userId) : Promise.resolve(null),
       this.database.query<DatabaseRow>(
         `SELECT provider AS method, created_at AS linked_at FROM oauth_accounts WHERE user_id=$1
          UNION ALL SELECT 'password' AS method, created_at AS linked_at FROM users WHERE id=$1 AND password IS NOT NULL
@@ -192,6 +260,7 @@ export class AdminManagementService {
       authMethods: authMethods.rows.map((row) => ({ method: String(row.method), linkedAt: asIso(row.linked_at), provenance: 'exact' as const })),
       exports: exports.rows.map((row) => ({ provider: String(row.provider), status: String(row.status), requestedAt: asIso(row.requested_at), updatedAt: asIso(row.updated_at), errorCode: row.error_code ? String(row.error_code) : null })),
       mailboxSecurity,
+      ...(testScenarios ? { testScenarios } : {}),
     };
   }
 
@@ -293,6 +362,80 @@ export class AdminManagementService {
 
   updateMailboxSecurityPolicy(input: { userId: string; allowForwardedReceipts: boolean; reason: string; actorAdminId: string; requestId?: string }) {
     return this.mailboxSecurityPolicies.set(input);
+  }
+
+  updateGmailLongRunningScenario(input: { userId: string; enabled: boolean; reason: string; actorAdminId: string; requestId?: string }) {
+    return this.importTestScenarios.setGmailLongRunning(input);
+  }
+
+  async importOperations(filters: AdminImportOperationFilters) {
+    const search = filters.query?.trim().toLowerCase() || null;
+    const result = await this.database.query<DatabaseRow>(
+      `SELECT j.*,u.email AS user_email,COUNT(*) OVER()::int AS total,
+         EXTRACT(EPOCH FROM (COALESCE(j.completed_at,NOW())-j.created_at))::float AS duration_seconds,
+         EXTRACT(EPOCH FROM (NOW()-j.heartbeat_at))::float AS heartbeat_age_seconds,
+         (j.status='running' AND COALESCE(j.heartbeat_at,j.updated_at)<NOW()-INTERVAL '2 minutes') AS stalled
+       FROM import_jobs j JOIN users u ON u.id=j.user_id
+       WHERE ($1::text IS NULL OR POSITION($1 IN LOWER(u.email))>0 OR j.id::text=$1 OR j.user_id::text=$1)
+         AND ($2::text IS NULL OR ($2='active' AND j.status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')) OR j.status=$2)
+         AND ($3::text IS NULL OR j.kind=$3)
+       ORDER BY CASE WHEN j.status IN ('running','retrying','queued','pending_dispatch','awaiting_upload') THEN 0 ELSE 1 END,
+         j.updated_at DESC,j.id DESC LIMIT $4 OFFSET $5`,
+      [search,filters.status ?? null,filters.kind ?? null,filters.limit,filters.offset],
+    );
+    return {
+      operations: result.rows.map(importOperationSummary),
+      pagination: { total: asNumber(result.rows[0]?.total), limit: filters.limit, offset: filters.offset },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  async importOperation(operationId: string) {
+    const [operationResult, eventsResult] = await Promise.all([
+      this.database.query<DatabaseRow>(
+        `SELECT j.*,u.email AS user_email,
+           EXTRACT(EPOCH FROM (COALESCE(j.completed_at,NOW())-j.created_at))::float AS duration_seconds,
+           EXTRACT(EPOCH FROM (NOW()-j.heartbeat_at))::float AS heartbeat_age_seconds,
+           (j.status='running' AND COALESCE(j.heartbeat_at,j.updated_at)<NOW()-INTERVAL '2 minutes') AS stalled
+         FROM import_jobs j JOIN users u ON u.id=j.user_id WHERE j.id=$1`,
+        [operationId],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT id,event_type,attempt,status,phase,progress,error_code,details,created_at
+         FROM import_job_events WHERE job_id=$1 ORDER BY created_at DESC,id DESC LIMIT 200`,
+        [operationId],
+      ),
+    ]);
+    const row = operationResult.rows[0];
+    if (!row) throw new NotFoundError('Import operation', operationId);
+    const events = eventsResult.rows.map((event) => ({
+      id: String(event.id), eventType: String(event.event_type), attempt: asNumber(event.attempt),
+      status: String(event.status), phase: String(event.phase), progress: asNumber(event.progress),
+      errorCode: event.error_code ? String(event.error_code) : null,
+      details: safeDiagnosticObject(event.details), createdAt: asIso(event.created_at),
+    }));
+    const retryEvent = row.status === 'retrying'
+      ? events.find((event) => event.status === 'retrying' && ['attempt_failed_retrying','test_delay_started','infrastructure_wait'].includes(event.eventType))
+      : undefined;
+    const retryNotBefore = retryEvent && typeof retryEvent.details.retryNotBefore === 'string' ? retryEvent.details.retryNotBefore
+      : retryEvent && typeof retryEvent.details.resumeAt === 'string' ? retryEvent.details.resumeAt : null;
+    const retryBy = retryEvent && typeof retryEvent.details.retryBy === 'string' ? retryEvent.details.retryBy : retryNotBefore;
+    return {
+      operation: {
+        ...importOperationSummary(row),
+        originalFilename: row.original_filename ? String(row.original_filename).slice(0, 255) : null,
+        contentType: row.submitted_content_type ? String(row.submitted_content_type) : row.content_type ? String(row.content_type) : null,
+        contentLength: row.submitted_content_length === null || row.submitted_content_length === undefined
+          ? row.content_length === null || row.content_length === undefined ? null : asNumber(row.content_length)
+          : asNumber(row.submitted_content_length),
+        checkpoint: safeDiagnosticObject(row.checkpoint),
+        result: safeDiagnosticObject(row.result),
+        retryNotBefore,
+        retryBy,
+      },
+      events,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async deleteUser(input: { userId: string; confirmationEmail: string; reason: string; actorAdminId: string; requestId?: string }) {

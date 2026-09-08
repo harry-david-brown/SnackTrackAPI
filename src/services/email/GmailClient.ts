@@ -1,3 +1,4 @@
+import { classifyGmailRequestFailure, gmailFailureDiagnostics } from './GmailRequestFailure';
 import { User } from '../../models/User';
 import { MailboxClient, MailboxMessage, type MailboxMessagePage, type MailboxReadSafety } from '../ports/MailboxPorts';
 import { google } from 'googleapis';
@@ -16,10 +17,51 @@ import {
 } from './GmailProviderDecoder';
 import { AppError } from '../../core/errors';
 import { MailboxContentGuard } from '../mailbox/MailboxContentGuard';
+import {
+  GmailQuotaPacer,
+  GMAIL_MESSAGE_GET_QUERY_UNITS,
+  GMAIL_MESSAGE_LIST_QUERY_UNITS,
+} from './GmailQuotaPacer';
 
 const MAX_IMPORT_MESSAGES = 20_000;
 const MAX_IMPORT_PAGES = 1_000;
 const MAX_IMPORT_DURATION_MS = 15 * 60 * 1000;
+const GMAIL_LIST_PAGE_SIZE = 500;
+const GMAIL_PROCESSING_BATCH_SIZE = 20;
+const GMAIL_BUFFERED_CURSOR_PREFIX = 'snacktrack:gmail-buffer:v1:';
+
+interface GmailBufferedCursor {
+  readonly pendingMessageIds: readonly string[];
+  readonly nextPageToken: string | null;
+}
+
+const encodeGmailBufferedCursor = (cursor: GmailBufferedCursor): string =>
+  `${GMAIL_BUFFERED_CURSOR_PREFIX}${Buffer.from(JSON.stringify(cursor)).toString('base64url')}`;
+
+const decodeGmailBufferedCursor = (cursor: string): GmailBufferedCursor => {
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(cursor.slice(GMAIL_BUFFERED_CURSOR_PREFIX.length), 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const pendingMessageIds = decoded.pendingMessageIds;
+    const nextPageToken = decoded.nextPageToken;
+    if (
+      !Array.isArray(pendingMessageIds) ||
+      pendingMessageIds.length === 0 ||
+      pendingMessageIds.length > GMAIL_LIST_PAGE_SIZE ||
+      pendingMessageIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 256) ||
+      (nextPageToken !== null && typeof nextPageToken !== 'string')
+    ) throw new Error('Invalid buffered Gmail cursor');
+    return { pendingMessageIds: pendingMessageIds as string[], nextPageToken: nextPageToken as string | null };
+  } catch (error) {
+    throw new AppError({
+      code: 'IMPORT_CHECKPOINT_INVALID',
+      message: 'Invalid buffered Gmail checkpoint cursor',
+      publicMessage: 'This import could not be resumed safely. Start a new import.',
+      cause: error,
+    });
+  }
+};
 
 // Utility for base64 decoding (Gmail uses URL-safe base64)
 function decodeBase64Gmail(str: string): string {
@@ -33,11 +75,14 @@ interface GmailOAuthConfig {
   redirectUri: string;
 }
 
+type GmailApiClient = ReturnType<typeof google.gmail>;
+
 export class GmailClient implements MailboxClient {
   private readonly contentGuard = new MailboxContentGuard();
   constructor(
     private readonly logger: StructuredLogger = silentStructuredLogger,
     private readonly debugCapture: EmailDebugCapturePort = new DisabledEmailDebugCapture(),
+    private readonly clientOverride?: GmailApiClient,
   ) {}
 
   private getRequiredOAuthConfig(): GmailOAuthConfig {
@@ -78,7 +123,8 @@ export class GmailClient implements MailboxClient {
     return expiry > Date.now();
   }
 
-  private async createAuthenticatedGmailClient(user: User) {
+  private async createAuthenticatedGmailClient(user: User): Promise<GmailApiClient> {
+    if (this.clientOverride) return this.clientOverride;
     const { clientId, clientSecret, redirectUri } = this.getRequiredOAuthConfig();
     const hasRefreshToken = !!user.gmailRefreshToken;
     const hasAccessToken = this.hasUsableAccessToken(user);
@@ -206,198 +252,6 @@ export class GmailClient implements MailboxClient {
     return safeMessages;
   }
 
-  /** Retained only while older focused tests are migrated to the paged adapter. */
-  private async getEmailsLegacy(user: User, options?: { after?: Date; safety?: MailboxReadSafety }): Promise<MailboxMessage[]> {
-    if (config.shouldUseMockData() && !config.isProduction()) {
-      this.logger.info('Loading Gmail messages from configured mock fixtures', {
-        operation: 'gmail_message_fetch',
-        provider: 'gmail',
-        outcome: 'mock_source',
-      });
-      return this.loadEmailsFromDebugFolder(user);
-    }
-
-    const gmail = await this.createAuthenticatedGmailClient(user);
-    const emailList: MailboxMessage[] = [];
-
-    try {
-      // Use centralized config for Gmail search query
-      const baseSearchQuery = config.getGmailSearchQuery();
-      const after = options?.after;
-      const afterSeconds = after ? Math.floor(after.getTime() / 1000) : null;
-      const searchQuery =
-        afterSeconds && Number.isFinite(afterSeconds)
-          ? `(${baseSearchQuery}) after:${afterSeconds}`
-          : baseSearchQuery;
-
-      if (config.shouldEnableDetailedLogging()) {
-        this.logger.debug('Gmail message search started', {
-          userId: user.id,
-          operation: 'gmail_message_fetch',
-          provider: 'gmail',
-          outcome: 'started',
-          incremental: afterSeconds !== null,
-        });
-      }
-
-      // Concurrency limiter for parallel Gmail API calls
-      // Limit to 10 concurrent requests to avoid rate limiting
-      const limit = pLimit(10);
-
-      // Helper function to process a single message
-      const fetchSingleMessage = async (msgId: string): Promise<MailboxMessage | null> => {
-        try {
-          const message = decodeGmailMessage(
-            await gmail.users.messages.get({
-              userId: 'me',
-              id: msgId,
-            }),
-          );
-          const payload = message.payload;
-          let from = '',
-            to = '',
-            subject = '',
-            dateHeader = '',
-            body = '';
-          if (payload && payload.headers) {
-            for (const header of payload.headers) {
-              if (header.name === 'From') from = header.value || '';
-              if (header.name === 'To') to = header.value || '';
-              if (header.name === 'Subject') subject = header.value || '';
-              if (header.name === 'Date') dateHeader = header.value || '';
-            }
-          }
-          // Get the body (handle multipart)
-          body = this.extractBody(payload);
-          const internalTimestamp = Number(message.internalDate);
-          const receivedAt = Number.isFinite(internalTimestamp)
-            ? new Date(internalTimestamp)
-            : dateHeader
-              ? new Date(dateHeader)
-              : undefined;
-          return new MailboxMessage(
-            user.id,
-            from,
-            to,
-            body,
-            subject,
-            msgId,
-            receivedAt && !Number.isNaN(receivedAt.getTime()) ? receivedAt : undefined,
-          );
-        } catch (error) {
-          this.logger.warn('Gmail message fetch failed', {
-            userId: user.id,
-            operation: 'gmail_message_fetch',
-            provider: 'gmail',
-            outcome: 'message_failure',
-            error,
-          });
-          return null;
-        }
-      };
-
-      // Helper function to process a batch of messages in parallel
-      const processMessages = async (messageIds: readonly string[]) => {
-        if (messageIds.length === 0) return;
-
-        const startTime = Date.now();
-
-        // Create limited promises for all messages
-        const promises = messageIds.map((messageId) => limit(() => fetchSingleMessage(messageId)));
-
-        // Wait for all to complete
-        const results = await Promise.all(promises);
-
-        // Filter out failed fetches and add to email list
-        const successfulEmails = results.filter((email): email is MailboxMessage => email !== null);
-        emailList.push(...successfulEmails);
-
-        this.logger.debug('Gmail message page fetched', {
-          userId: user.id,
-          operation: 'gmail_message_fetch',
-          provider: 'gmail',
-          outcome: 'page_fetched',
-          requestedCount: messageIds.length,
-          fetchedCount: successfulEmails.length,
-          durationMs: Date.now() - startTime,
-        });
-      };
-
-      // Fetch emails with pagination
-      let nextPageToken: string | null | undefined = undefined;
-      let pageCount = 0;
-      let totalMessagesFound = 0;
-      const importStartedAt = Date.now();
-
-      while (true) {
-        pageCount++;
-        if (pageCount > MAX_IMPORT_PAGES || Date.now() - importStartedAt > MAX_IMPORT_DURATION_MS) {
-          throw new AppError({
-            code: 'MAILBOX_IMPORT_LIMIT_REACHED',
-            message: 'Gmail import exceeded its page or time budget',
-            publicMessage: 'This mailbox is too large to import safely in one operation.',
-          });
-        }
-        const page = decodeGmailMessageList(
-          await gmail.users.messages.list({
-            userId: 'me', // Use 'me' for the authenticated user
-            q: searchQuery, // Use centralized config for search query
-            maxResults: 500, // Maximum allowed by Gmail API
-            pageToken: nextPageToken || undefined,
-          }),
-        );
-
-        const messagesInPage = page.messageIds.length;
-        totalMessagesFound += messagesInPage;
-        if (totalMessagesFound > MAX_IMPORT_MESSAGES) {
-          throw new AppError({
-            code: 'MAILBOX_IMPORT_LIMIT_REACHED',
-            message: 'Gmail import exceeded its message budget',
-            publicMessage: 'This mailbox has too many matching messages to import safely in one operation.',
-          });
-        }
-
-        // Process messages from this page in parallel
-        await processMessages(page.messageIds);
-
-        // Check if there are more pages
-        nextPageToken = page.nextPageToken || null;
-
-        if (!nextPageToken) {
-          break; // No more pages
-        }
-      }
-
-      this.logger.info('Gmail message search completed', {
-        userId: user.id,
-        operation: 'gmail_message_fetch',
-        provider: 'gmail',
-        outcome: 'success',
-        pageCount,
-        messagesFound: totalMessagesFound,
-        messagesFetched: emailList.length,
-      });
-      await this.debugCapture.capture('gmail-message-fetch', {
-        userId: user.id,
-        pageCount,
-        messagesFound: totalMessagesFound,
-        messagesFetched: emailList.length,
-      });
-      return emailList;
-    } catch (error) {
-      this.logger.error('Gmail message search failed', {
-        userId: user.id,
-        operation: 'gmail_message_fetch',
-        provider: 'gmail',
-        outcome: 'failure',
-        error,
-      });
-      const errorMsg = error instanceof Error ? error.message : 'Unknown Gmail API error';
-      if (error instanceof AppError) throw error;
-      throw new Error(`Failed to fetch emails from Gmail: ${errorMsg}`);
-    }
-  }
-
   /** Production import path: yields at most one Gmail page at a time. */
   async *getEmailPages(
     user: User,
@@ -448,35 +302,73 @@ export class GmailClient implements MailboxClient {
       ? `(${baseSearchQuery}) after:${afterSeconds}`
       : baseSearchQuery;
     const limit = pLimit(5);
-    let pageToken: string | null | undefined = options?.cursor;
+    const quotaPacer = new GmailQuotaPacer(config.getGmailConfig().importQueryUnitsPerMinute);
+    let gmailRequestCount = 0;
+    let modeledQueryUnits = 0;
+    let pageFailure: unknown;
+    const bufferedCursor = options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_PREFIX)
+      ? decodeGmailBufferedCursor(options.cursor)
+      : null;
+    let pageToken: string | null | undefined = bufferedCursor
+      ? bufferedCursor.nextPageToken
+      : options?.cursor;
+    let pendingMessageIds = bufferedCursor ? [...bufferedCursor.pendingMessageIds] : [];
     let pageCount = 0;
     const startedAt = Date.now();
 
     try {
-      do {
-        pageCount += 1;
-        if (pageCount > MAX_IMPORT_PAGES || Date.now() - startedAt > MAX_IMPORT_DURATION_MS) {
+      while (true) {
+        if (Date.now() - startedAt > MAX_IMPORT_DURATION_MS) {
           throw new AppError({
             code: 'MAILBOX_IMPORT_LIMIT_REACHED',
-            message: 'Gmail import exceeded its page or time budget',
+            message: 'Gmail import exceeded its time budget',
             publicMessage: 'This mailbox is too large to import safely in one operation.',
           });
         }
-        const page = decodeGmailMessageList(await gmail.users.messages.list({
-          userId: 'me', q: searchQuery, maxResults: 20, pageToken: pageToken || undefined,
-        }));
-        const fetched = await Promise.all(page.messageIds.map((messageId) => limit(async () => {
+        if (pendingMessageIds.length === 0) {
+          pageCount += 1;
+          if (pageCount > MAX_IMPORT_PAGES) {
+            throw new AppError({
+              code: 'MAILBOX_IMPORT_LIMIT_REACHED',
+              message: 'Gmail import exceeded its page budget',
+              publicMessage: 'This mailbox is too large to import safely in one operation.',
+            });
+          }
+          await quotaPacer.waitFor(GMAIL_MESSAGE_LIST_QUERY_UNITS);
+          gmailRequestCount += 1;
+          modeledQueryUnits += GMAIL_MESSAGE_LIST_QUERY_UNITS;
+          const page = decodeGmailMessageList(await gmail.users.messages.list({
+            userId: 'me', q: searchQuery, maxResults: GMAIL_LIST_PAGE_SIZE, pageToken: pageToken || undefined,
+          }, { retry: false }));
+          pendingMessageIds = [...page.messageIds];
+          pageToken = page.nextPageToken || null;
+
+          if (pendingMessageIds.length === 0) {
+            yield { messages: [], matchedCount: 0, nextCursor: pageToken };
+            if (!pageToken) break;
+            continue;
+          }
+        }
+
+        const processingBatch = pendingMessageIds.slice(0, GMAIL_PROCESSING_BATCH_SIZE);
+        const fetched = await Promise.all(processingBatch.map((messageId) => limit(async () => {
+          if (pageFailure) throw pageFailure;
+          await quotaPacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
+          if (pageFailure) throw pageFailure;
           try {
-            const metadata = decodeGmailMessage(await gmail.users.messages.get({
-              userId: 'me', id: messageId, format: 'metadata',
-              metadataHeaders: ['From', 'To', 'Subject', 'Date', 'Authentication-Results'],
-            }));
+            gmailRequestCount += 1;
+            modeledQueryUnits += GMAIL_MESSAGE_GET_QUERY_UNITS;
+            // A full response already contains the headers used by the safety preflight.
+            // Reading metadata separately doubles messages.get quota without adding data.
+            const message = decodeGmailMessage(await gmail.users.messages.get({
+              userId: 'me', id: messageId, format: 'full',
+            }, { retry: false }));
             let from = '';
             let to = '';
             let subject = '';
             let dateHeader = '';
             const authenticationHeaders: string[] = [];
-            for (const header of metadata.payload?.headers ?? []) {
+            for (const header of message.payload?.headers ?? []) {
               const name = header.name.toLowerCase();
               if (name === 'from') from = header.value || '';
               if (name === 'to') to = header.value || '';
@@ -485,7 +377,7 @@ export class GmailClient implements MailboxClient {
               if (name === 'authentication-results') authenticationHeaders.push(header.value || '');
             }
             const preflight = this.contentGuard.preflight({
-              provider: 'gmail', from, to, subject, providerBytes: metadata.sizeEstimate, authenticationHeaders,
+              provider: 'gmail', from, to, subject, providerBytes: message.sizeEstimate, authenticationHeaders,
               allowForwardedReceipts: options?.safety?.allowForwardedReceipts ?? false,
             });
             if (!preflight.accepted) {
@@ -495,7 +387,6 @@ export class GmailClient implements MailboxClient {
               });
               return null;
             }
-            const message = decodeGmailMessage(await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' }));
             const guarded = this.contentGuard.acceptBody(this.extractBody(message.payload), preflight);
             if (!guarded.accepted) {
               this.logger.warn('Gmail message rejected by import safety policy', {
@@ -504,7 +395,7 @@ export class GmailClient implements MailboxClient {
               });
               return null;
             }
-            const internalTimestamp = Number(message.internalDate ?? metadata.internalDate);
+            const internalTimestamp = Number(message.internalDate);
             const receivedAt = Number.isFinite(internalTimestamp)
               ? new Date(internalTimestamp)
               : dateHeader ? new Date(dateHeader) : undefined;
@@ -513,38 +404,62 @@ export class GmailClient implements MailboxClient {
               receivedAt && !Number.isNaN(receivedAt.getTime()) ? receivedAt : undefined,
             );
           } catch (error) {
-            this.logger.warn('Gmail message fetch failed', {
-              userId: user.id, operation: 'gmail_message_fetch', provider: 'gmail',
-              outcome: 'message_failure', error,
-            });
             if (error instanceof AppError && error.code === 'GMAIL_PROVIDER_PAYLOAD_INVALID') return null;
-            const status = this.providerStatus(error);
-            if (status === 404) return null;
-            if (status === 401 || status === 403) {
-              throw new AppError({ code: 'GMAIL_RECONNECT_REQUIRED', message: 'Gmail authorization is no longer valid.', publicMessage: 'Reconnect Gmail to continue.', cause: error });
-            }
-            throw new AppError({ code: 'GMAIL_IMPORT_FAILED', message: 'A Gmail message could not be loaded.', publicMessage: 'Gmail messages could not be loaded. Please try again.', cause: error });
+            const failure = classifyGmailRequestFailure(error);
+            if (failure.status === 404) return null;
+            this.logger.warn(`Gmail message fetch failed (${failure.code}; status ${failure.status ?? 'unknown'}; ${failure.reason}) ${JSON.stringify(gmailFailureDiagnostics(error))}`, {
+              userId: user.id, operation: 'gmail_message_fetch', provider: 'gmail',
+              outcome: 'message_failure', errorCode: failure.code,
+            });
+            pageFailure = new AppError({
+              code: failure.code,
+              message: 'A Gmail message could not be loaded.',
+              publicMessage: failure.publicMessage,
+              details: {
+                ...gmailFailureDiagnostics(error),
+                gmailRequestCount,
+                modeledQueryUnits,
+                configuredQueryUnitsPerMinute: config.getGmailConfig().importQueryUnitsPerMinute,
+              },
+              cause: error,
+            });
+            throw pageFailure;
           }
         })));
         const messages = fetched.filter((message): message is MailboxMessage => message !== null);
-        pageToken = page.nextPageToken || null;
+        pendingMessageIds = pendingMessageIds.slice(processingBatch.length);
+        const nextCursor = pendingMessageIds.length > 0
+          ? encodeGmailBufferedCursor({ pendingMessageIds, nextPageToken: pageToken ?? null })
+          : pageToken ?? null;
         this.logger.debug('Gmail message page yielded', {
           userId: user.id, operation: 'gmail_message_fetch', provider: 'gmail', outcome: 'page_fetched',
-          requestedCount: page.messageIds.length, fetchedCount: messages.length, pageCount,
+          requestedCount: processingBatch.length, fetchedCount: messages.length, pageCount,
         });
         yield {
           messages,
-          matchedCount: page.messageIds.length,
-          rejectedCount: page.messageIds.length - messages.length,
+          matchedCount: processingBatch.length,
+          rejectedCount: processingBatch.length - messages.length,
           decodedBytes: messages.reduce((sum, message) => sum + Buffer.byteLength(message.body), 0),
-          nextCursor: pageToken,
+          nextCursor,
         };
-      } while (pageToken);
+        if (pendingMessageIds.length === 0 && !pageToken) break;
+      }
     } catch (error) {
       if (error instanceof AppError) throw error;
+      const failure = classifyGmailRequestFailure(error);
+      this.logger.warn(`Gmail page fetch failed (${failure.code}; status ${failure.status ?? 'unknown'}; ${failure.reason}) ${JSON.stringify(gmailFailureDiagnostics(error))}`, {
+        userId: user.id, operation: 'gmail_message_fetch', provider: 'gmail', errorCode: failure.code,
+      });
       throw new AppError({
-        code: 'GMAIL_IMPORT_FAILED', message: 'Failed to fetch a Gmail message page',
-        publicMessage: 'Gmail messages could not be loaded. Please try again.', cause: error,
+        code: failure.code, message: 'Failed to fetch a Gmail message page',
+        publicMessage: failure.publicMessage,
+        details: {
+          ...gmailFailureDiagnostics(error),
+          gmailRequestCount,
+          modeledQueryUnits,
+          configuredQueryUnitsPerMinute: config.getGmailConfig().importQueryUnitsPerMinute,
+        },
+        cause: error,
       });
     }
   }
@@ -652,13 +567,6 @@ export class GmailClient implements MailboxClient {
       });
       throw error;
     }
-  }
-
-  private providerStatus(error: unknown): number | null {
-    if (!error || typeof error !== 'object') return null;
-    const candidate = error as { code?: unknown; response?: { status?: unknown } };
-    if (typeof candidate.response?.status === 'number') return candidate.response.status;
-    return typeof candidate.code === 'number' ? candidate.code : null;
   }
 
   private extractBody(part: DecodedGmailPart | null | undefined): string {

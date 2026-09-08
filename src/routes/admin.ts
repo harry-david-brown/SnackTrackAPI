@@ -168,6 +168,23 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
     const range = dateRange(req.query as Record<string, unknown>);
     res.json(await d.management.imports(range.from, range.to, optionalString(req.query.provider, 'provider'), optionalString(req.query.outcome, 'outcome')));
   }));
+  router.get('/import-operations', d.requireOperator, asyncHandler(async (req, res) => {
+    const status = optionalString(req.query.status, 'status');
+    const statuses = ['active','awaiting_upload','pending_dispatch','queued','running','retrying','succeeded','failed','expired','superseded','cancelled'];
+    if (status !== undefined && !statuses.includes(status)) throw new ValidationError('Invalid import status', 'status');
+    const kind = optionalString(req.query.kind, 'kind');
+    const kinds = ['gmail_historical','outlook_historical','manual_tracking','scheduled_tracking','export_file'];
+    if (kind !== undefined && !kinds.includes(kind)) throw new ValidationError('Invalid import kind', 'kind');
+    res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    res.json(await d.management.importOperations({
+      query: optionalString(req.query.query, 'query'), status, kind,
+      limit: integer(req.query.limit, 50, 1, 100), offset: integer(req.query.offset, 0, 0, 1_000_000),
+    }));
+  }));
+  router.get('/import-operations/:id', d.requireOperator, asyncHandler(async (req, res) => {
+    res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    res.json(await d.management.importOperation(requireUuid(req.params.id, 'id')));
+  }));
   router.get('/users', d.requireOperator, asyncHandler(async (req, res) => {
     const query = optionalString(req.query.query, 'query');
     const verifiedRaw = optionalString(req.query.verified, 'verified');
@@ -204,7 +221,7 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
       limit: integer(req.query.limit, 50, 1, 100), offset: integer(req.query.offset, 0, 0, 1_000_000),
     }));
   }));
-  router.get('/users/:id', d.requireOperator, asyncHandler(async (req, res) => res.json(await d.management.getUser(requireUuid(req.params.id, 'id')))));
+  router.get('/users/:id', d.requireOperator, asyncHandler(async (req, res) => res.json(await d.management.getUser(requireUuid(req.params.id, 'id'), req.admin!.role === 'owner'))));
   router.get('/users/:id/timeline', d.requireOperator, asyncHandler(async (req, res) => {
     const category = optionalString(req.query.category, 'category');
     const categories: readonly AdminTimelineCategory[] = ['account', 'authentication', 'connection', 'import', 'tracking', 'administration'];
@@ -221,6 +238,17 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
     res.json({ mailboxSecurity: await d.management.updateMailboxSecurityPolicy({
       userId: requireUuid(req.params.id, 'id'),
       allowForwardedReceipts: body.allowForwardedReceipts,
+      reason: string(body, 'reason'),
+      actorAdminId: req.admin!.id,
+      requestId: req.requestId,
+    }) });
+  }));
+  router.patch('/users/:id/test-scenarios/gmail-long-running', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
+    const body = requireObject(req.body);
+    if (typeof body.enabled !== 'boolean') throw new ValidationError('Must be true or false', 'enabled');
+    res.json({ testScenarios: await d.management.updateGmailLongRunningScenario({
+      userId: requireUuid(req.params.id, 'id'),
+      enabled: body.enabled,
       reason: string(body, 'reason'),
       actorAdminId: req.admin!.id,
       requestId: req.requestId,

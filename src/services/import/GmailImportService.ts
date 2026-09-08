@@ -42,6 +42,7 @@ export interface GmailImportResult {
   updatedOrders: number;
   unchangedOrders: number;
   errorCode: string | null;
+  failureDetails?: Readonly<Record<string, unknown>> | null;
 }
 
 type AcquisitionPort = Pick<GmailImportAcquisitionService, 'acquire'>;
@@ -74,7 +75,7 @@ export const filterReceiptsAfterExportCutoffs = (
   return !cutoff || Boolean(receipt.orderDate && receipt.orderDate > cutoff);
 });
 
-const resultFromState = (state: MailboxImportState, success = true, errorCode: string | null = null, errors: string[] = []): GmailImportResult => ({
+const resultFromState = (state: MailboxImportState, success = true, errorCode: string | null = null, errors: string[] = [], failureDetails: Readonly<Record<string, unknown>> | null = null): GmailImportResult => ({
   success,
   totalEmailsFound: state.counters.matchedMessages,
   totalReceiptsProcessed: state.counters.receiptsProcessed,
@@ -91,9 +92,10 @@ const resultFromState = (state: MailboxImportState, success = true, errorCode: s
   updatedOrders: state.counters.updatedOrders,
   unchangedOrders: state.counters.unchangedOrders,
   errorCode,
+  failureDetails,
 });
 
-/** Processes and commits one mailbox page at a time, checkpointing only after durable writes. */
+/** Processes and commits one mailbox batch at a time, checkpointing only after durable writes. */
 export class GmailImportService {
   constructor(
     private readonly acquisition: AcquisitionPort,
@@ -172,7 +174,13 @@ export class GmailImportService {
       await this.lifecycle.fail(syncRunId, user.id, errorCode, trigger);
       if (errorCode === 'GMAIL_RECONNECT_REQUIRED') await this.lifecycle.markReconnectRequired(user.id);
       this.logger.error('Gmail paged import failed', { userId: user.id, importId: syncRunId, provider: 'gmail', operation: 'gmail_import', outcome: 'failure', errorCode, error });
-      return resultFromState(state, false, errorCode, [error instanceof Error ? error.message : 'Unknown error']);
+      return resultFromState(
+        state,
+        false,
+        errorCode,
+        [error instanceof Error ? error.message : 'Unknown error'],
+        error instanceof AppError ? error.details ?? null : null,
+      );
     }
   }
 }

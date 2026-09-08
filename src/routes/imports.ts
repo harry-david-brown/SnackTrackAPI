@@ -29,16 +29,21 @@ export const createImportsRouter = (dependencies: ImportsRouterDependencies): Ro
   const router = Router();
   router.use(dependencies.authenticate);
 
+  const liveStatus = (response: Response): Response => response
+    .set('Cache-Control', 'private, no-cache, no-store, must-revalidate')
+    .set('Pragma', 'no-cache')
+    .set('Expires', '0');
+
   router.get('/active', asyncHandler(async (request: Request, response: Response) => {
     const operation = await dependencies.operations.findActive(authenticatedUserId(request));
-    response.json({ operation: operation ? await dependencies.presentation.operation(operation) : null });
+    liveStatus(response).json({ operation: operation ? await dependencies.presentation.operation(operation) : null });
   }));
   router.get('/recent', asyncHandler(async (request: Request, response: Response) => {
     const operations = await dependencies.operations.listRecent(authenticatedUserId(request));
-    response.json({ operations: await Promise.all(operations.map((operation) => dependencies.presentation.operation(operation))) });
+    liveStatus(response).json({ operations: await Promise.all(operations.map((operation) => dependencies.presentation.operation(operation))) });
   }));
   router.get('/:id', asyncHandler(async (request: Request, response: Response) => {
-    response.json({ operation: await dependencies.presentation.operation(await dependencies.operations.findForUser(authenticatedUserId(request), request.params.id)) });
+    liveStatus(response).json({ operation: await dependencies.presentation.operation(await dependencies.operations.findForUser(authenticatedUserId(request), request.params.id)) });
   }));
 
   const uploadIntent = (provider: 'uber_eats' | 'doordash') => asyncHandler(async (request: Request, response: Response) => {

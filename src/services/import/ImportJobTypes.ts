@@ -28,12 +28,20 @@ export const isImportJourneyContext = (value: unknown): value is ImportJourneyCo
 export const EXPORT_PROVIDERS = ['uber_eats', 'doordash'] as const;
 export type ExportProvider = (typeof EXPORT_PROVIDERS)[number];
 
+export interface ImportTimeEstimate {
+  readonly kind: 'total' | 'remaining' | 'retry_wait' | 'finishing';
+  readonly minimumMinutes: number | null;
+  readonly maximumMinutes: number | null;
+  readonly revision: number;
+}
+
 export interface ImportOperationPresentation {
   readonly mode: 'foreground' | 'delayed';
   readonly expectedDurationBand: 'under_5_minutes' | 'over_5_minutes' | 'unknown';
   readonly reason: 'normal' | 'queue_backlog' | 'workers_unavailable' | 'queue_paused' | 'retrying' | 'elapsed_over_threshold';
   readonly stage: 'waiting' | 'discovering' | 'building_history' | 'preparing_recap';
   readonly discoveredOrderCount: number | null;
+  readonly timeEstimate: ImportTimeEstimate | null;
 }
 
 export interface ImportJob {
@@ -106,6 +114,7 @@ export const toImportOperation = (job: ImportJob): ImportOperation => ({
         reason: 'normal',
         stage: 'waiting',
         discoveredOrderCount: null,
+        timeEstimate: null,
       }
     : null,
   createdAt: job.createdAt,

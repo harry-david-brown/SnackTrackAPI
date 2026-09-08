@@ -72,6 +72,51 @@ test('job creation casts a reused status parameter consistently for PostgreSQL',
   assert.match(insertSql, /CASE WHEN \$5::VARCHAR\(24\)='awaiting_upload'/);
 });
 
+test('retry persistence verifies the running-to-retrying transition', async () => {
+  let retrySql = '';
+  const executor = {
+    query: async (sql) => {
+      if (sql.includes("status='retrying'")) {
+        retrySql = sql;
+        return { rows: [{ ...persistedJob, status: 'retrying', phase: 'retrying', error_code: 'GMAIL_RATE_LIMITED' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async operation => operation(executor) });
+
+  await repository.retry(persistedJob.id, 'GMAIL_RATE_LIMITED', 'Please try again later.');
+
+  assert.match(retrySql, /status='retrying'/);
+  assert.match(retrySql, /heartbeat_at=NULL/);
+  assert.match(retrySql, /status='running'/);
+});
+
+test('retry persistence rejects a lost state transition', async () => {
+  const executor = { query: async () => ({ rows: [], rowCount: 0 }) };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async operation => operation(executor) });
+
+  await assert.rejects(
+    repository.retry(persistedJob.id, 'GMAIL_RATE_LIMITED', 'Please try again later.'),
+    (error) => error.code === 'IMPORT_RETRY_STATE_CONFLICT',
+  );
+});
+
+test('retry history stores allowlisted diagnostics with the failed attempt', async () => {
+  const calls = [];
+  const executor = { query: async (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes("status='retrying'")) return { rows: [{ ...persistedJob, status: 'retrying', phase: 'retrying', attempts: 2, error_code: 'GMAIL_RATE_LIMITED' }], rowCount: 1 };
+    return { rows: [], rowCount: 1 };
+  } };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async operation => operation(executor) });
+  await repository.retry(persistedJob.id, 'GMAIL_RATE_LIMITED', 'Try later', { status: 403, quotaMetric: 'gmail.googleapis.com/total_query_cost' });
+  const event = calls.find(call => call.sql.includes('INSERT INTO import_job_events'));
+  assert.ok(event);
+  assert.equal(event.values[1], 'attempt_failed_retrying');
+  assert.deepEqual(JSON.parse(event.values[7]), { status: 403, quotaMetric: 'gmail.googleapis.com/total_query_cost' });
+});
+
 test('rejects an idempotency key reused for a different journey context', async () => {
   const executor = { query: async (sql) => sql.includes('idempotency_key') ? { rows: [persistedJob], rowCount: 1 } : { rows: [], rowCount: 0 } };
   const repository = new ImportJobRepository({ ...executor, withTransaction: async (operation) => operation(executor) });
@@ -82,12 +127,12 @@ test('rejects an idempotency key reused for a different journey context', async 
 });
 
 
-for (const consent of ['not_offered', 'granted', 'declined', 'revoked']) {
-  test(`onboarding auto imports preserve the ${consent} Settings choice`, async () => {
+for (const context of ['onboarding', 'post_onboarding']) for (const kind of ['gmail_historical', 'outlook_historical']) for (const consent of ['not_offered', 'granted', 'declined', 'revoked']) {
+  test(`${context} ${kind} preserves the ${consent} Settings choice`, async () => {
     let storedConsent = consent;
     const executor = { query: async sql => {
       if (sql.includes('SELECT import_generation')) return { rows: [{ import_generation: 1 }], rowCount: 1 };
-      if (sql.includes('INSERT INTO import_jobs')) return { rows: [{ ...persistedJob, journey_context: 'onboarding' }], rowCount: 1 };
+      if (sql.includes('INSERT INTO import_jobs')) return { rows: [{ ...persistedJob, journey_context: context }], rowCount: 1 };
       if (sql.includes('UPDATE user_import_preferences')) {
         assert.match(sql, /ongoing_tracking_consent_state='not_offered'/);
         if (storedConsent === 'not_offered') storedConsent = 'granted';
@@ -95,7 +140,7 @@ for (const consent of ['not_offered', 'granted', 'declined', 'revoked']) {
       return { rows: [], rowCount: 0 };
     }};
     const repository = new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) });
-    await repository.create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'onboarding', automaticUpdates: true });
+    await repository.create({ userId: persistedJob.user_id, kind, trigger: 'user', journeyContext: context, automaticUpdates: true });
     assert.equal(storedConsent, consent === 'not_offered' ? 'granted' : consent);
   });
 }
@@ -108,4 +153,54 @@ test('legacy onboarding imports do not grant automatic updates without the new d
     return { rows: [], rowCount: 0 };
   }};
   await new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) }).create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'onboarding' });
+});
+
+// Model the transaction boundary so no preference or dispatch can outlive a failed acceptance.
+for (const failAt of [null, 'consent', 'dispatch']) {
+  test(`job and consent commit together; failure at ${failAt ?? 'none'}`, async () => {
+    let committed = { jobs: 0, consent: 'not_offered', dispatches: 0 };
+    const database = {
+      query: async () => { throw new Error('Acceptance escaped its transaction'); },
+      withTransaction: async action => {
+        const draft = { ...committed };
+        const result = await action({ query: async sql => {
+          if (sql.includes('SELECT import_generation')) return { rows: [{ import_generation: 1 }], rowCount: 1 };
+          if (sql.includes('INSERT INTO import_jobs')) {
+            draft.jobs++;
+            return { rows: [{ ...persistedJob, journey_context: 'post_onboarding' }], rowCount: 1 };
+          }
+          if (sql.includes('UPDATE user_import_preferences')) {
+            if (failAt === 'consent') throw new Error('Consent save failed');
+            draft.consent = 'granted';
+          }
+          if (sql.includes('INSERT INTO import_job_outbox')) {
+            if (failAt === 'dispatch') throw new Error('Dispatch save failed');
+            draft.dispatches++;
+          }
+          return { rows: [], rowCount: 0 };
+        } });
+        committed = draft;
+        return result;
+      },
+    };
+    const acceptance = new ImportJobRepository(database).create({ userId: persistedJob.user_id, kind: 'outlook_historical', trigger: 'user', journeyContext: 'post_onboarding', automaticUpdates: true });
+    if (failAt) {
+      await assert.rejects(acceptance);
+      assert.deepEqual(committed, { jobs: 0, consent: 'not_offered', dispatches: 0 });
+    } else {
+      await acceptance;
+      assert.deepEqual(committed, { jobs: 1, consent: 'granted', dispatches: 1 });
+    }
+  });
+}
+test('idempotent retry returns the accepted job without changing a later opt-out', async () => {
+  let writes = 0;
+  const executor = { query: async sql => {
+    if (/UPDATE|INSERT/.test(sql)) writes++;
+    return sql.includes('idempotency_key') ? { rows: [{ ...persistedJob, journey_context: 'post_onboarding' }], rowCount: 1 } : { rows: [], rowCount: 0 };
+  } };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) });
+  const result = await repository.create({ userId: persistedJob.user_id, kind: 'gmail_historical', trigger: 'user', journeyContext: 'post_onboarding', automaticUpdates: true, idempotencyKey: 'accepted-earlier' });
+  assert.equal(result.id, persistedJob.id);
+  assert.equal(writes, 0);
 });

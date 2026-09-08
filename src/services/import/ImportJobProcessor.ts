@@ -8,14 +8,15 @@ import type { ManualTrackingCheckService } from './ManualTrackingCheckService';
 import type { OngoingTrackingService } from './OngoingTrackingService';
 import type { CsvImportUseCase } from './CsvImportUseCase';
 import type { ZipExtractor } from './ZipExtractor';
-import type { QueuePayload } from '../queue/ImportQueues';
+import { EXPORT_IMPORT_RETRY_DELAY_MS, MAILBOX_IMPORT_RETRY_DELAY_MS, type QueuePayload } from '../queue/ImportQueues';
 import { ImportLockService, type ImportLockHandle } from './ImportLockService';
 import type { ImportJob } from './ImportJobTypes';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
+import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
 
 const permanentCodes = new Set([
   'VALIDATION_ERROR','INVALID_CSV_FORMAT','UNKNOWN_EXPORT_PROVIDER','NO_VALID_EXPORT_ORDERS',
-  'GMAIL_RECONNECT_REQUIRED','OUTLOOK_RECONNECT_REQUIRED','TRACKING_NOT_AVAILABLE',
+  'GMAIL_ACCESS_BLOCKED','GMAIL_RECONNECT_REQUIRED','OUTLOOK_RECONNECT_REQUIRED','TRACKING_NOT_AVAILABLE',
   'MAILBOX_IMPORT_LIMIT_REACHED','OUTLOOK_RESULT_LIMIT',
   'IMPORT_CHECKPOINT_INVALID',
   'UPLOAD_PROVIDER_REQUIRED','UPLOAD_PROVIDER_MISMATCH','UPLOAD_CHANGED','UPLOAD_SIZE_MISMATCH',
@@ -35,6 +36,7 @@ export class ImportJobProcessor {
     private readonly outlook: Pick<HistoricalOutlookImportService, 'executeWithLock'>,
     private readonly manual: Pick<ManualTrackingCheckService, 'executeWithLock'>,
     private readonly tracking: Pick<OngoingTrackingService, 'checkUserWithLock'>,
+    private readonly testScenarios: Pick<ImportTestScenarioRepository, 'delayGmailImportIfEnabled'>,
   ) {}
 
   async process(queueJob: Job<QueuePayload>): Promise<void> {
@@ -56,6 +58,13 @@ export class ImportJobProcessor {
     try {
       operation = await this.jobs.claimForRun(queueJob.data.jobId);
       if (!operation) return;
+      if (operation.kind === 'gmail_historical' && operation.trigger === 'user') {
+        const resumeAt = await this.testScenarios.delayGmailImportIfEnabled(operation.id, operation.userId);
+        if (resumeAt) {
+          await queueJob.moveToDelayed(resumeAt.getTime(), queueJob.token);
+          throw new DelayedError();
+        }
+      }
       const execution: ImportExecutionCheckpoint = {
         checkpoint: operation.checkpoint,
         save: (checkpoint, phase, progress) => this.jobs.saveCheckpoint(operation!.id, checkpoint, phase, progress),
@@ -77,20 +86,26 @@ export class ImportJobProcessor {
         await this.storage.delete(operation.objectKey).catch(() => undefined);
       }
     } catch (error) {
+      if (error instanceof DelayedError) throw error;
       if (!operation) throw error;
       const code = error instanceof AppError ? error.code : 'IMPORT_WORKER_FAILED';
       const message = error instanceof AppError ? error.publicMessage : 'The import could not be completed.';
       if (code === 'LOCK_BACKEND_UNAVAILABLE' || code === 'LOCK_OWNERSHIP_LOST') {
-        await this.jobs.delayForInfrastructure(operation.id, code, message);
+        const retryAt = new Date(Date.now() + 30_000).toISOString();
+        await this.jobs.delayForInfrastructure(operation.id, code, message, {
+          ...(error instanceof AppError ? error.details : {}),
+          retryNotBefore: retryAt,
+          retryBy: retryAt,
+        });
         await queueJob.moveToDelayed(Date.now() + 30_000, queueJob.token);
         throw new DelayedError();
       }
       const canRetry = !permanentCodes.has(code) && queueJob.attemptsMade + 1 < (queueJob.opts.attempts ?? 1);
       if (canRetry) {
-        await this.jobs.retry(operation.id, code, message);
+        await this.jobs.retry(operation.id, code, message, this.retryDetails(operation, queueJob, error instanceof AppError ? error.details : undefined));
         throw error;
       }
-      await this.jobs.fail(operation, code, message);
+      await this.jobs.fail(operation, code, message, error instanceof AppError ? error.details : undefined);
       if (operation.kind === 'export_file' && operation.objectKey) {
         await this.storage.delete(operation.objectKey).catch(() => undefined);
       }
@@ -101,10 +116,26 @@ export class ImportJobProcessor {
   }
 
   private compactMailboxResult<T extends object>(result: T): Readonly<Record<string, unknown>> {
-    const { receipts: _receipts, errors, ...compact } = result as T & { receipts?: unknown; errors?: unknown };
+    const { receipts: _receipts, errors, failureDetails: _failureDetails, ...compact } = result as T & { receipts?: unknown; errors?: unknown; failureDetails?: unknown };
     return {
       ...compact,
       errorCount: Array.isArray(errors) ? errors.length : 0,
+    };
+  }
+
+  private retryDetails(
+    operation: ImportJob,
+    queueJob: Job<QueuePayload>,
+    details?: Readonly<Record<string, unknown>>,
+  ): Readonly<Record<string, unknown>> {
+    const base = operation.kind === 'export_file' ? EXPORT_IMPORT_RETRY_DELAY_MS : MAILBOX_IMPORT_RETRY_DELAY_MS;
+    const maximumMs = base * 2 ** Math.max(0, queueJob.attemptsMade);
+    const minimumMs = Math.round(maximumMs * 0.8);
+    const now = Date.now();
+    return {
+      ...(details ?? {}),
+      retryNotBefore: new Date(now + minimumMs).toISOString(),
+      retryBy: new Date(now + maximumMs).toISOString(),
     };
   }
 

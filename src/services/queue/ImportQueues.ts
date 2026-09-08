@@ -7,7 +7,37 @@ import { queueForImportKind, type ImportJobKind } from '../import/ImportJobTypes
 export const MAILBOX_IMPORT_QUEUE = 'mailbox-imports';
 export const EXPORT_IMPORT_QUEUE = 'export-imports';
 export const NOTIFICATION_QUEUE = 'notifications';
+export const MAILBOX_IMPORT_RETRY_DELAY_MS = 90_000;
+export const EXPORT_IMPORT_RETRY_DELAY_MS = 30_000;
 export interface QueuePayload { readonly jobId: string }
+
+export const importAttemptLimit = (
+  kind: ImportJobKind,
+  eventType: OutboxEvent['eventType'],
+): number => eventType === 'notify' || kind === 'gmail_historical' ? 5 : 3;
+
+export const importRetryBackoff = (
+  queueName: string,
+  eventType: OutboxEvent['eventType'],
+): { readonly type: 'exponential'; readonly delay: number; readonly jitter?: number } => {
+  if (eventType === 'notify') return { type: 'exponential', delay: 10_000 };
+  return {
+    type: 'exponential',
+    delay: queueName === MAILBOX_IMPORT_QUEUE ? MAILBOX_IMPORT_RETRY_DELAY_MS : EXPORT_IMPORT_RETRY_DELAY_MS,
+    jitter: 0.2,
+  };
+};
+
+export const queueAttemptFailureMessage = (
+  attempt: number,
+  attempts: number,
+  error: Error,
+): string => {
+  const code = typeof (error as Error & { code?: unknown }).code === 'string'
+    ? (error as Error & { code: string }).code
+    : null;
+  return `Queued task attempt ${attempt}/${attempts} failed${code ? ` (${code})` : ''}: ${error.message}`;
+};
 
 const consumerConnection = (url: string): IORedis => {
   const connection = new IORedis(url, { maxRetriesPerRequest: null, enableReadyCheck: true });
@@ -55,8 +85,11 @@ export class ImportQueuePublisher {
       : queueForImportKind(job.kind) === MAILBOX_IMPORT_QUEUE ? this.queues.mailbox : this.queues.exports;
     await queue.add(event.eventType, { jobId: event.jobId }, {
       jobId: `${event.eventType}-${event.jobId}`,
-      attempts: event.eventType === 'notify' ? 5 : 3,
-      backoff: { type: 'exponential', delay: event.eventType === 'notify' ? 10_000 : 30_000 },
+      attempts: importAttemptLimit(job.kind, event.eventType),
+      // Gmail enforces a per-user, per-project one-minute quota window. A mailbox
+      // retry must begin after that window instead of immediately consuming the
+      // same exhausted quota. Jitter avoids synchronized retries after an outage.
+      backoff: importRetryBackoff(queue.name, event.eventType),
       removeOnComplete: { age: 86_400, count: 1_000 },
       removeOnFail: { age: 604_800, count: 2_000 },
     });

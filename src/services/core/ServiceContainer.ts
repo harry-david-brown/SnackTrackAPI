@@ -87,6 +87,7 @@ import { ScheduledImportJobService } from '../import/ScheduledImportJobService';
 import { ImportObjectStorage } from '../storage/ImportObjectStorage';
 import { PushDeviceRepository } from '../notifications/PushDeviceRepository';
 import { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
+import { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
 import { AdConfigurationRepository } from '../data/AdConfigurationRepository';
 import { AdConfigurationService } from '../ads/AdConfigurationService';
 import { ExperienceStateRepository } from '../data/ExperienceStateRepository';
@@ -171,6 +172,7 @@ export class ServiceContainer {
   readonly importObjectStorage: ImportObjectStorage;
   readonly pushDeviceRepository: PushDeviceRepository;
   readonly mailboxSecurityPolicyRepository: MailboxSecurityPolicyRepository;
+  readonly importTestScenarioRepository: ImportTestScenarioRepository;
   readonly adConfigurationRepository: AdConfigurationRepository;
   readonly adConfigurationService: AdConfigurationService;
   readonly experienceStateRepository: ExperienceStateRepository;
@@ -209,6 +211,7 @@ export class ServiceContainer {
       config.getQueueConfig().maximumWaitingJobs,
     );
     this.mailboxSecurityPolicyRepository = new MailboxSecurityPolicyRepository(this.postgres);
+    this.importTestScenarioRepository = new ImportTestScenarioRepository(this.postgres);
     this.adConfigurationRepository = new AdConfigurationRepository(this.postgres);
     this.adConfigurationService = new AdConfigurationService(this.adConfigurationRepository);
     this.experienceStateRepository = new ExperienceStateRepository(this.postgres);
@@ -465,6 +468,7 @@ export class ServiceContainer {
       this.postgres,
       this.accountDeletionService,
       this.mailboxSecurityPolicyRepository,
+      this.importTestScenarioRepository,
     );
     this.adminAnalyticsQueryService = new AdminAnalyticsQueryService(this.postgres);
     this.adminAuthService = new AdminAuthService(this.adminRepository, this.emailSender, {

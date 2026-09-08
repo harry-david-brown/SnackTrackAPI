@@ -8,6 +8,7 @@ export interface AppConfig {
   gmail: {
     useRealApi: boolean;
     useMockData: boolean;
+    importQueryUnitsPerMinute: number;
     clientId?: string;
     clientSecret?: string;
     redirectUri?: string;
@@ -91,6 +92,18 @@ const integer = (
   if (!Number.isInteger(parsed) || parsed < minimum) {
     throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
   }
+  return parsed;
+};
+
+const boundedInteger = (
+  name: string,
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number => {
+  const parsed = integer(name, value, fallback, minimum);
+  if (parsed > maximum) throw new Error(`${name} must be less than or equal to ${maximum}`);
   return parsed;
 };
 
@@ -279,6 +292,13 @@ class ConfigManager {
       gmail: {
         useRealApi: !useMockData,
         useMockData,
+        importQueryUnitsPerMinute: boundedInteger(
+          'GMAIL_IMPORT_QUERY_UNITS_PER_MINUTE',
+          process.env.GMAIL_IMPORT_QUERY_UNITS_PER_MINUTE,
+          1_600,
+          1,
+          6_000,
+        ),
         clientId: optional(process.env.GMAIL_CLIENT_ID),
         clientSecret: optional(process.env.GMAIL_CLIENT_SECRET),
         redirectUri: gmailRedirectUri,

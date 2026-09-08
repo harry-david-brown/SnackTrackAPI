@@ -65,13 +65,33 @@ test('upload submission verifies object size before dispatch', async () => {
 });
 
 
-test('onboarding email import carries the disclosed automatic update choice', async () => {
+for (const context of ['onboarding', 'post_onboarding']) {
+  for (const kind of ['gmail_historical', 'outlook_historical']) {
+    test(`${context} ${kind} carries the reviewed automatic-update choice`, async () => {
+      const inputs = [];
+      const service = new ImportJobService({ create: async input => { inputs.push(input); return job(); } }, {});
+      await service.start('user-1', kind, 'user', undefined, context, true);
+      assert.equal(inputs[0].automaticUpdates, true);
+      assert.equal(inputs[0].journeyContext, context);
+      await service.start('user-1', kind, 'user', undefined, context);
+      assert.equal(inputs[1].automaticUpdates, false);
+    });
+  }
+}
+test('rejects unsupported auto-update combinations without accepting a job', () => {
+  let accepted = false;
+  const service = new ImportJobService({ create: async () => { accepted = true; return job(); } }, {});
+  for (const [kind, trigger, context] of [
+    ['gmail_historical', 'user', 'legacy'], ['outlook_historical', 'user', 'routine'],
+    ['scheduled_tracking', 'scheduler', 'onboarding'], ['manual_tracking', 'user', 'post_onboarding'],
+    ['gmail_historical', 'scheduler', 'post_onboarding'],
+  ]) assert.throws(() => service.start('user-1', kind, trigger, undefined, context, true), error => error.code === 'VALIDATION_ERROR');
+  assert.equal(accepted, false);
+});
+test('older clients retain legacy behavior when automaticUpdates is omitted', async () => {
   const inputs = [];
   const service = new ImportJobService({ create: async input => { inputs.push(input); return job(); } }, {});
-  await service.start('user-1', 'gmail_historical', 'user', undefined, 'onboarding', true);
-  assert.equal(inputs[0].automaticUpdates, true);
-  await service.start('user-1', 'gmail_historical', 'user', undefined, 'legacy');
-  assert.equal(inputs[1].automaticUpdates, false);
-  assert.throws(() => service.start('user-1', 'gmail_historical', 'user', undefined, 'post_onboarding', true), error => error.code === 'VALIDATION_ERROR');
-  assert.throws(() => service.start('user-1', 'scheduled_tracking', 'scheduler', undefined, 'onboarding', true), error => error.code === 'VALIDATION_ERROR');
+  await service.start('user-1', 'gmail_historical', 'user');
+  assert.equal(inputs[0].journeyContext, 'legacy');
+  assert.equal(inputs[0].automaticUpdates, false);
 });

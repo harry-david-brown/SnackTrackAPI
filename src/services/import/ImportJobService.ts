@@ -32,8 +32,8 @@ export class ImportJobService {
   ) {}
 
   start(userId: string, kind: Exclude<ImportJobKind, 'export_file'>, trigger: ImportJobTrigger, idempotencyKey?: string, journeyContext: ImportJourneyContext = 'legacy', automaticUpdates = false): Promise<ImportJob> {
-    if (automaticUpdates && (journeyContext !== 'onboarding' || trigger !== 'user' || !['gmail_historical', 'outlook_historical'].includes(kind))) {
-      throw new ValidationError('Automatic updates can only be included in an onboarding email import.', 'automaticUpdates');
+    if (automaticUpdates && (!['onboarding', 'post_onboarding'].includes(journeyContext) || trigger !== 'user' || !['gmail_historical', 'outlook_historical'].includes(kind))) {
+      throw new ValidationError('Automatic updates can only be included in a reviewed email import.', 'automaticUpdates');
     }
     return this.jobs.create({ userId, kind, trigger, idempotencyKey, journeyContext, automaticUpdates });
   }

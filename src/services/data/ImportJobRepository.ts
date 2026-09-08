@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from '../../core/errors';
+import { AppError, ConflictError, NotFoundError } from '../../core/errors';
 import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
 import {
   IMPORT_JOB_KINDS,
@@ -42,6 +42,29 @@ const jsonObject = (value: unknown): Readonly<Record<string, unknown>> | null =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : null;
+
+const blockedEventDetailKey = /(?:token|cursor|authorization|cookie|body|subject|headers?|object_?key|etag|email_?content)/i;
+const redactEventText = (value: string): string => value
+  .replace(/[\w.+-]+@[\w.-]+/g, '[address]')
+  .replace(/https?:\/\/[^\s"<>]+/gi, '[url]')
+  .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+  .replace(/(?:ya29\.|1\/\/|GOCSPX-)[A-Za-z0-9_.\/-]+/g, '[redacted]')
+  .slice(0, 1_500);
+const safeEventDetailValue = (value: unknown, depth = 0): unknown => {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return redactEventText(value);
+  if (depth >= 4) return '[truncated]';
+  if (Array.isArray(value)) return value.slice(0, 25).map((item) => safeEventDetailValue(item, depth + 1));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !blockedEventDetailKey.test(key))
+    .slice(0, 100)
+    .map(([key, item]) => [key, safeEventDetailValue(item, depth + 1)]));
+  return redactEventText(String(value));
+};
+const safeEventDetails = (value?: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
+  const safe = safeEventDetailValue(value ?? {});
+  return safe && typeof safe === 'object' && !Array.isArray(safe) ? safe as Readonly<Record<string, unknown>> : {};
+};
 
 const selectColumns = `id,user_id,kind,trigger_type,journey_context,status,phase,progress,result,error_code,
   error_message,attempts,heartbeat_at,object_key,original_filename,content_type,content_length,
@@ -153,11 +176,12 @@ export class ImportJobRepository {
       if (active.rows[0]) {
         const activeJob = decode(active.rows[0]);
         if (input.awaitingUpload && activeJob.status === 'awaiting_upload') {
-          await transaction.query(
+          const superseded = await transaction.query<Row>(
             `UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW()
-             WHERE id=$1 AND status='awaiting_upload'`,
+             WHERE id=$1 AND status='awaiting_upload' RETURNING ${selectColumns}`,
             [activeJob.id],
           );
+          if (superseded.rows[0]) await this.insertEvent(transaction, decode(superseded.rows[0]), 'superseded');
         } else {
           throw new ConflictError('IMPORT_IN_PROGRESS', 'Another import is already active for this account.');
         }
@@ -193,17 +217,18 @@ export class ImportJobRepository {
         [input.userId,input.kind,input.trigger,input.journeyContext ?? 'legacy',status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
       );
       const job = decode(inserted.rows[0]);
-      // The new onboarding UI discloses this choice before import. Older clients omit it.
+      await this.insertEvent(transaction, job, 'accepted');
+      // The reviewed first-email UI discloses this choice before import. Older clients omit it.
       // Keep consent and job acceptance atomic; never overwrite a Settings opt-out.
       // The scheduler still requires a completed historical baseline before checking receipts.
-      if (input.automaticUpdates && input.journeyContext === 'onboarding' && ['gmail_historical', 'outlook_historical'].includes(input.kind)) {
+      if (input.automaticUpdates && input.trigger === 'user' && (input.journeyContext === 'onboarding' || input.journeyContext === 'post_onboarding') && ['gmail_historical', 'outlook_historical'].includes(input.kind)) {
         await transaction.query(`INSERT INTO user_import_preferences (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, [input.userId]);
         await transaction.query(
           `UPDATE user_import_preferences SET ongoing_tracking_consent_state='granted',
-             ongoing_tracking_consent_version='onboarding-email-updates-v1', ongoing_tracking_consented_at=NOW(),
+             ongoing_tracking_consent_version=$2, ongoing_tracking_consented_at=NOW(),
              ongoing_tracking_revoked_at=NULL, tracking_status='setting_up', updated_at=NOW()
            WHERE user_id=$1 AND ongoing_tracking_consent_state='not_offered'`,
-          [input.userId],
+          [input.userId, input.journeyContext === 'onboarding' ? 'onboarding-email-updates-v1' : 'post-onboarding-email-updates-v1'],
         );
       }
       if (!input.awaitingUpload) await this.insertOutbox(transaction, job.id, 'dispatch');
@@ -223,7 +248,9 @@ export class ImportJobRepository {
       );
       if (!result.rows[0]) throw new ConflictError('UPLOAD_NOT_SUBMITTABLE', 'This upload is missing, expired, or was already submitted.');
       await this.insertOutbox(transaction, jobId, 'dispatch');
-      return decode(result.rows[0]);
+      const job = decode(result.rows[0]);
+      await this.insertEvent(transaction, job, 'upload_submitted');
+      return job;
     });
   }
 
@@ -253,20 +280,31 @@ export class ImportJobRepository {
   }
 
   async markQueued(jobId: string): Promise<void> {
-    await this.database.query(`UPDATE import_jobs SET status='queued',phase='waiting',queued_at=COALESCE(queued_at,NOW()),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','retrying')`, [jobId]);
+    await this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='queued',phase='waiting',queued_at=COALESCE(queued_at,NOW()),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','retrying') RETURNING ${selectColumns}`, [jobId]);
+      if (result.rows[0]) await this.insertEvent(transaction, decode(result.rows[0]), 'queued');
+    });
   }
 
   async claimForRun(jobId: string): Promise<ImportJob | null> {
-    const result = await this.database.query<Row>(
-      `UPDATE import_jobs j SET status='running',phase='starting',progress=1,attempts=attempts+1,
-         started_at=COALESCE(started_at,NOW()),heartbeat_at=NOW(),updated_at=NOW()
-       FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation
-         AND j.status IN ('pending_dispatch','queued','running','retrying') RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
-      [jobId],
-    );
-    if (result.rows[0]) return decode(result.rows[0]);
-    await this.database.query(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying')`, [jobId]);
-    return null;
+    return this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(
+        `UPDATE import_jobs j SET status='running',phase='starting',progress=1,attempts=attempts+1,
+           error_code=NULL,error_message=NULL,completed_at=NULL,
+           started_at=COALESCE(started_at,NOW()),heartbeat_at=NOW(),updated_at=NOW()
+         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation
+           AND j.status IN ('pending_dispatch','queued','running','retrying') RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
+        [jobId],
+      );
+      if (result.rows[0]) {
+        const job = decode(result.rows[0]);
+        await this.insertEvent(transaction, job, 'attempt_started');
+        return job;
+      }
+      const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying') RETURNING ${selectColumns}`, [jobId]);
+      if (superseded.rows[0]) await this.insertEvent(transaction, decode(superseded.rows[0]), 'superseded');
+      return null;
+    });
   }
 
   async progress(jobId: string, phase: string, progress: number): Promise<void> {
@@ -297,35 +335,55 @@ export class ImportJobRepository {
     await this.finish(job, 'succeeded', 'completed', result, null, null);
   }
 
-  async fail(job: ImportJob, code: string, message: string): Promise<void> {
-    await this.finish(job, 'failed', 'failed', null, code, message);
+  async fail(job: ImportJob, code: string, message: string, details?: Readonly<Record<string, unknown>>): Promise<void> {
+    await this.finish(job, 'failed', 'failed', null, code, message, details);
   }
 
-  async retry(jobId: string, code: string, message: string): Promise<void> {
-    await this.database.query(`UPDATE import_jobs SET status='retrying',phase='retrying',error_code=$2,error_message=$3,heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [jobId,code,message.slice(0,500)]);
+  async retry(jobId: string, code: string, message: string, details?: Readonly<Record<string, unknown>>): Promise<void> {
+    await this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(
+        `UPDATE import_jobs SET status='retrying',phase='retrying',error_code=$2,error_message=$3,
+           heartbeat_at=NULL,updated_at=NOW() WHERE id=$1 AND status='running' RETURNING ${selectColumns}`,
+        [jobId,code,message.slice(0,500)],
+      );
+      if (!result.rows[0]) {
+        throw new AppError({
+          code: 'IMPORT_RETRY_STATE_CONFLICT',
+          message: `Import job ${jobId} could not transition from running to retrying`,
+          publicMessage: 'The import retry could not be scheduled safely.',
+        });
+      }
+      await this.insertEvent(transaction, decode(result.rows[0]), 'attempt_failed_retrying', details);
+    });
   }
 
-  async delayForInfrastructure(jobId: string, code: string, message: string): Promise<void> {
-    await this.database.query(
-      `UPDATE import_jobs SET status='retrying',phase='waiting_for_infrastructure',
-         attempts=GREATEST(0,attempts-1),error_code=$2,error_message=$3,heartbeat_at=NULL,updated_at=NOW()
-       WHERE id=$1 AND status='running'`,
-      [jobId, code, message.slice(0, 500)],
-    );
+  async delayForInfrastructure(jobId: string, code: string, message: string, details?: Readonly<Record<string, unknown>>): Promise<void> {
+    await this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(
+        `UPDATE import_jobs SET status='retrying',phase='waiting_for_infrastructure',
+           attempts=GREATEST(0,attempts-1),error_code=$2,error_message=$3,heartbeat_at=NULL,updated_at=NOW()
+         WHERE id=$1 AND status='running' RETURNING ${selectColumns}`,
+        [jobId, code, message.slice(0, 500)],
+      );
+      if (result.rows[0]) await this.insertEvent(transaction, decode(result.rows[0]), 'infrastructure_wait', details);
+    });
   }
 
-  private async finish(job: ImportJob, status: 'succeeded'|'failed', phase: string, result: Readonly<Record<string, unknown>>|null, code: string|null, message: string|null): Promise<void> {
+  private async finish(job: ImportJob, status: 'succeeded'|'failed', phase: string, result: Readonly<Record<string, unknown>>|null, code: string|null, message: string|null, details?: Readonly<Record<string, unknown>>): Promise<void> {
     await this.database.withTransaction(async (transaction) => {
       const updated = await transaction.query(
         `UPDATE import_jobs j SET status=$2,phase=$3,progress=100,result=$4,error_code=$5,error_message=$6,
            completed_at=NOW(),heartbeat_at=NOW(),updated_at=NOW()
-         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND j.status='running'`,
+         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND j.status='running'
+         RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
         [job.id,status,phase,result ? JSON.stringify(result) : null,code,message?.slice(0,500) ?? null],
       );
-      if (!updated.rowCount) {
-        await transaction.query(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [job.id]);
+      if (!updated.rows[0]) {
+        const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running' RETURNING ${selectColumns}`, [job.id]);
+        if (superseded.rows[0]) await this.insertEvent(transaction, decode(superseded.rows[0]), 'superseded');
         return;
       }
+      await this.insertEvent(transaction, decode(updated.rows[0]), status === 'succeeded' ? 'completed' : 'attempt_failed_terminal', details);
       const changes = Number(result?.newOrders ?? 0)
         + Number(result?.updatedOrders ?? 0)
         + Number(result?.importedCount ?? 0);
@@ -360,10 +418,11 @@ export class ImportJobRepository {
       );
       const event = result.rows[0];
       if (event && event.event_type === 'dispatch') {
-        await transaction.query(
+        const waiting = await transaction.query<Row>(
           `UPDATE import_jobs SET phase='waiting_for_queue',updated_at=NOW()
-           WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying')`, [text(event, 'job_id')],
+           WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying') RETURNING ${selectColumns}`, [text(event, 'job_id')],
         );
+        if (waiting.rows[0]) await this.insertEvent(transaction, decode(waiting.rows[0]), 'queue_publication_failed', { message: error.slice(0, 500) });
       }
     });
   }
@@ -373,8 +432,11 @@ export class ImportJobRepository {
   }
 
   async expireUploads(): Promise<number> {
-    const result = await this.database.query(`UPDATE import_jobs SET status='expired',phase='expired',completed_at=NOW(),updated_at=NOW() WHERE status='awaiting_upload' AND expires_at<=NOW()`);
-    return result.rowCount ?? 0;
+    return this.database.withTransaction(async (transaction) => {
+      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='expired',phase='expired',completed_at=NOW(),updated_at=NOW() WHERE status='awaiting_upload' AND expires_at<=NOW() RETURNING ${selectColumns}`);
+      for (const row of result.rows) await this.insertEvent(transaction, decode(row), 'expired');
+      return result.rowCount ?? 0;
+    });
   }
 
   async listObjectCleanupCandidates(limit = 100): Promise<ImportObjectCleanupCandidate[]> {
@@ -440,10 +502,11 @@ export class ImportJobRepository {
       const jobs = selected.rows.map((row) => ({ id: text(row, 'id'), kind: enumValue(row, 'kind', IMPORT_JOB_KINDS) }));
       if (jobs.length > 0) {
         const ids = jobs.map((job) => job.id);
-        await transaction.query(
+        const cancelled = await transaction.query<Row>(
           `UPDATE import_jobs SET status='cancelled',phase='cancelled',completed_at=NOW(),heartbeat_at=NULL,updated_at=NOW()
-           WHERE id=ANY($1::uuid[]) AND status IN ('pending_dispatch','queued','retrying')`, [ids],
+           WHERE id=ANY($1::uuid[]) AND status IN ('pending_dispatch','queued','retrying') RETURNING ${selectColumns}`, [ids],
         );
+        for (const row of cancelled.rows) await this.insertEvent(transaction, decode(row), 'cancelled_by_admin', { reason: input.reason });
         await transaction.query(
           `UPDATE import_job_outbox SET published_at=COALESCE(published_at,NOW()),last_error='cancelled by administrator'
            WHERE event_type='dispatch' AND job_id=ANY($1::uuid[])`, [ids],
@@ -466,14 +529,16 @@ export class ImportJobRepository {
         `UPDATE import_jobs SET status='pending_dispatch',phase='recovered',queued_at=NULL,heartbeat_at=NULL,updated_at=NOW()
          WHERE status IN ('queued','running','retrying')
            AND COALESCE(heartbeat_at,queued_at,updated_at) < NOW()-($1::integer*INTERVAL '1 minute')
-         RETURNING id`,
+         RETURNING ${selectColumns}`,
         [Math.max(15, Math.min(staleMinutes, 240))],
       );
       for (const row of result.rows) {
+        const job = decode(row);
+        await this.insertEvent(transaction, job, 'stale_job_recovered');
         await transaction.query(
           `UPDATE import_job_outbox SET published_at=NULL,available_at=NOW(),last_error='stale job recovery'
            WHERE job_id=$1 AND event_type='dispatch'`,
-          [text(row, 'id')],
+          [job.id],
         );
       }
       return result.rowCount ?? 0;
@@ -482,5 +547,18 @@ export class ImportJobRepository {
 
   private async insertOutbox(executor: DatabaseQueryExecutor, jobId: string, eventType: 'dispatch'|'notify'): Promise<void> {
     await executor.query(`INSERT INTO import_job_outbox(job_id,event_type) VALUES($1,$2) ON CONFLICT(job_id,event_type) DO NOTHING`, [jobId,eventType]);
+  }
+
+  private async insertEvent(
+    executor: DatabaseQueryExecutor,
+    job: ImportJob,
+    eventType: string,
+    details?: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    await executor.query(
+      `INSERT INTO import_job_events(job_id,event_type,attempt,status,phase,progress,error_code,details)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+      [job.id,eventType,job.attempts,job.status,job.phase,job.progress,job.errorCode,JSON.stringify(safeEventDetails(details))],
+    );
   }
 }

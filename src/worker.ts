@@ -7,10 +7,10 @@ import { redisConfig, redisLockStore } from './config/redis';
 import { container } from './services/core/ServiceContainer';
 import { ImportJobProcessor } from './services/import/ImportJobProcessor';
 import { ImportPushNotificationService } from './services/notifications/ImportPushNotificationService';
-import { createQueueWorker, EXPORT_IMPORT_QUEUE, ImportQueuePublisher, MAILBOX_IMPORT_QUEUE, NOTIFICATION_QUEUE, OutboxDispatcher, type QueuePayload } from './services/queue/ImportQueues';
+import { createQueueWorker, EXPORT_IMPORT_QUEUE, ImportQueuePublisher, MAILBOX_IMPORT_QUEUE, NOTIFICATION_QUEUE, OutboxDispatcher, queueAttemptFailureMessage, type QueuePayload } from './services/queue/ImportQueues';
 
 const queueConfig = config.getQueueConfig();
-const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService);
+const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService, container.importTestScenarioRepository);
 const push = new ImportPushNotificationService(container.importJobRepository, container.pushDeviceRepository, config.getPushConfig().deliveryMode, logger);
 const publisher = new ImportQueuePublisher(container.importJobRepository, queueConfig);
 const dispatcher = new OutboxDispatcher(container.importJobRepository, publisher, logger);
@@ -20,7 +20,22 @@ let exportWorker: Worker<QueuePayload> | null = null;
 const notificationWorker = createQueueWorker(NOTIFICATION_QUEUE, queueConfig.redisUrl, queueConfig.notificationConcurrency, (job) => push.notify(job.data.jobId));
 const observe = (worker: Worker<QueuePayload>) => {
   worker.on('error', (error) => logger.error('Queue worker error', { operation: 'import_worker', queue: worker.name, error: error.message }));
-  worker.on('failed', (job, error) => logger.warn('Queued task attempt failed', { operation: 'import_worker', jobId: job?.data.jobId, queue: worker.name, attempt: job?.attemptsMade, error: error.message }));
+  worker.on('failed', (job, error) => {
+    const attempt = job?.attemptsMade ?? 0;
+    const attempts = job?.opts.attempts ?? 1;
+    const errorCode = typeof (error as Error & { code?: unknown }).code === 'string'
+      ? (error as Error & { code: string }).code
+      : undefined;
+    logger.warn(queueAttemptFailureMessage(attempt, attempts, error), {
+      operation: 'import_worker',
+      jobId: job?.data.jobId,
+      queue: worker.name,
+      attempt,
+      attempts,
+      errorCode,
+      error: error.message,
+    });
+  });
 };
 observe(notificationWorker);
 

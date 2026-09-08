@@ -19,6 +19,8 @@ import { launchAdsMigration } from './017_launch_ads';
 import { experienceAndFeeDetailsMigration } from './018_experience_and_fee_details';
 import { adPlacementsV2Migration } from './019_ad_placements_v2';
 import { importJourneyContextMigration } from './020_import_journey_context';
+import { importTestScenariosMigration } from './021_import_test_scenarios';
+import { importJobEventsMigration } from './022_import_job_events';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -41,4 +43,6 @@ export const migrations: readonly Migration[] = [
   experienceAndFeeDetailsMigration,
   adPlacementsV2Migration,
   importJourneyContextMigration,
+  importTestScenariosMigration,
+  importJobEventsMigration,
 ];
