@@ -37,6 +37,9 @@ interface AccountDeletionAudit {
     metadata?: Record<string, unknown>;
   }, executor: import('../ports/DatabasePort').DatabaseQueryExecutor): Promise<void>;
 }
+interface GmailWatchLifecycle {
+  stopForUser(userId: string): Promise<void>;
+}
 
 export interface AccountDeletionContext {
   readonly actorAdminId: string;
@@ -60,6 +63,7 @@ export class AccountDeletionService {
     private readonly accountLock: AccountDeletionLock = ImportLockService,
     private readonly logger: AccountDeletionLogger = silentLogger,
     private readonly audit?: AccountDeletionAudit,
+    private readonly gmailWatches?: GmailWatchLifecycle,
   ) {}
 
   async deleteAccount(
@@ -76,6 +80,9 @@ export class AccountDeletionService {
     }
 
     try {
+      await this.bestEffort('gmail_watch_stop', userId, async () => {
+        await this.gmailWatches?.stopForUser(userId);
+      });
       await this.postgres.withTransaction(async (transaction) => {
         const userResult = await transaction.query<{ email: unknown }>(
           'SELECT email FROM users WHERE id = $1 FOR UPDATE',

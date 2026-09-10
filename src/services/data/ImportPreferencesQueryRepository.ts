@@ -259,4 +259,28 @@ export class ImportPreferencesQueryRepository {
       databaseUuid(databaseRow(value, 'eligible tracking user'), 'user_id'),
     );
   }
+
+  async getEligibleOutlookTrackingUserIds(limit = 100): Promise<string[]> {
+    const result = await this.database.query(
+      `SELECT preferences.user_id
+       FROM user_import_preferences preferences
+       WHERE preferences.ongoing_tracking_consent_state='granted'
+         AND (
+           EXISTS (SELECT 1 FROM mailbox_import_states state
+             WHERE state.user_id=preferences.user_id AND state.provider='microsoft'
+               AND state.baseline_completed_at IS NOT NULL)
+           OR EXISTS (SELECT 1 FROM receipts receipt
+             WHERE receipt.user_id=preferences.user_id AND receipt.data_source='csv')
+         )
+         AND EXISTS (SELECT 1 FROM mailbox_connections mailbox
+           WHERE mailbox.user_id=preferences.user_id AND mailbox.provider='microsoft'
+             AND mailbox.status='connected' AND mailbox.connection_mode='offline')
+         AND (preferences.last_check_attempt_at IS NULL OR preferences.last_check_attempt_at<=NOW()-INTERVAL '15 minutes')
+       ORDER BY preferences.last_check_attempt_at ASC NULLS FIRST LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((value) =>
+      databaseUuid(databaseRow(value, 'eligible Outlook tracking user'), 'user_id'),
+    );
+  }
 }

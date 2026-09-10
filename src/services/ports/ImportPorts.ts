@@ -79,6 +79,17 @@ export interface ImportPreferencesQueryPort {
   getOrdersAddedThisWeek(userId: string, timezone: string): Promise<number>;
   getTrackingBaseline(userId: string): Promise<TrackingBaseline>;
   getEligibleTrackingUserIds(limit?: number): Promise<string[]>;
+  getEligibleOutlookTrackingUserIds(limit?: number): Promise<string[]>;
+}
+
+export interface ScheduledImportJobPort {
+  create(input: {
+    userId: string;
+    kind: 'scheduled_tracking';
+    trigger: 'scheduler';
+    journeyContext: 'routine';
+    idempotencyKey: string;
+  }): Promise<unknown>;
 }
 
 export interface GmailSyncRunPort {

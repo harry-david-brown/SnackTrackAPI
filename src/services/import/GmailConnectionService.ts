@@ -35,6 +35,10 @@ type SyncRunPort = Pick<GmailSyncRunPort, 'resetGmailImportStatus'>;
 interface ConnectionHealthCachePort {
   invalidate(userId: string): void;
 }
+interface GmailWatchLifecycle {
+  ensureForUser(userId: string): Promise<boolean>;
+  stopForUser(userId: string): Promise<void>;
+}
 
 export interface GmailOAuthCallbackResult {
   readonly redirectUri: string;
@@ -52,6 +56,7 @@ export class GmailConnectionService {
     private readonly syncRuns: SyncRunPort,
     private readonly connectionHealth: ConnectionHealthCachePort,
     private readonly mailboxConnections?: Pick<MicrosoftMailboxConnectionPort, 'findMicrosoft'>,
+    private readonly gmailWatches?: GmailWatchLifecycle,
   ) {}
 
   createAuthorizationUrl(
@@ -91,6 +96,7 @@ export class GmailConnectionService {
       connectionMode,
     });
     this.connectionHealth.invalidate(state.userId);
+    await this.gmailWatches?.ensureForUser(state.userId).catch(() => false);
     return {
       redirectUri: this.callbackRedirect(state, 'success', undefined, connectionMode),
       userId: state.userId,
@@ -122,6 +128,7 @@ export class GmailConnectionService {
       this.queries.get(userId),
       this.mailboxConnections?.findMicrosoft(userId),
     ]);
+    await this.gmailWatches?.stopForUser(userId);
     await this.users.disconnectGmail(userId);
     this.connectionHealth.invalidate(userId);
     const durableMicrosoft = Boolean(

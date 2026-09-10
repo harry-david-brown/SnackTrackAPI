@@ -21,6 +21,7 @@ import { adPlacementsV2Migration } from './019_ad_placements_v2';
 import { importJourneyContextMigration } from './020_import_journey_context';
 import { importTestScenariosMigration } from './021_import_test_scenarios';
 import { importJobEventsMigration } from './022_import_job_events';
+import { gmailPushAndQuotaMigration } from './023_gmail_push_and_quota';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -45,4 +46,5 @@ export const migrations: readonly Migration[] = [
   importJourneyContextMigration,
   importTestScenariosMigration,
   importJobEventsMigration,
+  gmailPushAndQuotaMigration,
 ];

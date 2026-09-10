@@ -1,6 +1,5 @@
 import { ConflictError } from '../../core/errors';
-import type { ImportJobRepository } from '../data/ImportJobRepository';
-import type { ImportPreferencesQueryPort } from '../ports/ImportPorts';
+import type { ImportPreferencesQueryPort, ScheduledImportJobPort } from '../ports/ImportPorts';
 
 export interface ScheduledImportBatchResult {
   readonly eligible: number;
@@ -10,12 +9,12 @@ export interface ScheduledImportBatchResult {
 
 export class ScheduledImportJobService {
   constructor(
-    private readonly preferences: Pick<ImportPreferencesQueryPort, 'getEligibleTrackingUserIds'>,
-    private readonly jobs: ImportJobRepository,
+    private readonly preferences: Pick<ImportPreferencesQueryPort, 'getEligibleOutlookTrackingUserIds'>,
+    private readonly jobs: ScheduledImportJobPort,
   ) {}
 
   async enqueueEligible(limit = 100): Promise<ScheduledImportBatchResult> {
-    const userIds = await this.preferences.getEligibleTrackingUserIds(Math.max(1, Math.min(limit, 500)));
+    const userIds = await this.preferences.getEligibleOutlookTrackingUserIds(Math.max(1, Math.min(limit, 500)));
     let queued = 0;
     let skipped = 0;
     for (const userId of userIds) {

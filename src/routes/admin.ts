@@ -30,6 +30,7 @@ interface AdminRouterDependencies {
   alerting: { getHealthStatus(): unknown };
   queues: Pick<AdminQueueOperationsService, 'status' | 'cancelPending'>;
   production: boolean;
+  gmailUsageLimits: { projectMinute: number; projectDay: number; userMinute: number };
 }
 
 const cookieOptions = (production: boolean) => `Path=/admin; Max-Age=${8 * 60 * 60}; SameSite=Strict${production ? '; Secure' : ''}`;
@@ -152,6 +153,10 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
   router.get('/operations/queues', d.requireOperator, asyncHandler(async (_req, res) => {
     res.json(await d.queues.status());
   }));
+  router.get('/operations/gmail-usage', d.requireOperator, asyncHandler(async (req, res) => {
+    const range = dateRange(req.query as Record<string, unknown>);
+    res.json(await d.management.gmailUsage(range.from, range.to, d.gmailUsageLimits));
+  }));
   router.post('/operations/queues/cancel-pending', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
     const reason = string(req.body, 'reason');
     if (reason.length < 10 || reason.length > 500) throw new ValidationError('Must be 10–500 characters', 'reason');
@@ -173,7 +178,7 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
     const statuses = ['active','awaiting_upload','pending_dispatch','queued','running','retrying','succeeded','failed','expired','superseded','cancelled'];
     if (status !== undefined && !statuses.includes(status)) throw new ValidationError('Invalid import status', 'status');
     const kind = optionalString(req.query.kind, 'kind');
-    const kinds = ['gmail_historical','outlook_historical','manual_tracking','scheduled_tracking','export_file'];
+    const kinds = ['gmail_historical','outlook_historical','manual_tracking','scheduled_tracking','gmail_push_tracking','export_file'];
     if (kind !== undefined && !kinds.includes(kind)) throw new ValidationError('Invalid import kind', 'kind');
     res.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
     res.json(await d.management.importOperations({

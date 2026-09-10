@@ -21,10 +21,15 @@ export class ImportPushNotificationService {
     const count = Number(job.result?.newOrders ?? 0)
       + Number(job.result?.updatedOrders ?? 0)
       + Number(job.result?.importedCount ?? 0);
-    const title = succeeded ? 'SnackTrack import complete' : 'SnackTrack import needs attention';
-    const body = succeeded
-      ? count > 0 ? `${count} ${count === 1 ? 'order was' : 'orders were'} added.` : 'Your receipt check finished with no new orders.'
-      : 'Open SnackTrack to review the issue and try again.';
+    const exportReady = succeeded && job.result?.exportReadyDetected === true;
+    const title = exportReady
+      ? 'Your Uber data is ready'
+      : succeeded ? 'SnackTrack import complete' : 'SnackTrack import needs attention';
+    const body = exportReady
+      ? 'Open SnackTrack to continue importing your history.'
+      : succeeded
+        ? count > 0 ? `${count} ${count === 1 ? 'order was' : 'orders were'} added.` : 'Your receipt check finished with no new orders.'
+        : 'Open SnackTrack to review the issue and try again.';
     if (this.mode === 'log') {
       this.logger.info('Push notification logged in development', { operation: 'import_push', jobId, userId: job.userId, deviceCount: devices.length, title, body });
       return;

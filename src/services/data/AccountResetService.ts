@@ -15,6 +15,9 @@ interface UserCacheInvalidator {
 interface ConnectionHealthInvalidator {
   invalidate(userId: string): void;
 }
+interface GmailWatchLifecycle {
+  stopForUser(userId: string): Promise<void>;
+}
 
 export interface AccountResetResult {
   deletedReceipts: number;
@@ -27,6 +30,7 @@ export class AccountResetService {
     private readonly cache: UserCacheInvalidator,
     private readonly connectionHealth: ConnectionHealthInvalidator,
     private readonly importLock: AccountResetLock = ImportLockService,
+    private readonly gmailWatches?: GmailWatchLifecycle,
   ) {}
 
   async resetForOnboarding(userId: string): Promise<AccountResetResult> {
@@ -40,6 +44,7 @@ export class AccountResetService {
 
     let result: AccountResetResult;
     try {
+      await this.gmailWatches?.stopForUser(userId);
       result = await this.resetInTransaction(userId, lockHandle);
     } finally {
       await this.importLock.releaseLock(lockHandle);
@@ -84,6 +89,7 @@ export class AccountResetService {
       await transaction.query('DELETE FROM mailbox_sync_runs WHERE user_id = $1', [userId]);
       await transaction.query('DELETE FROM mailbox_import_states WHERE user_id = $1', [userId]);
       await transaction.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
+      await transaction.query('DELETE FROM gmail_push_state WHERE user_id = $1', [userId]);
       await transaction.query('DELETE FROM user_import_preference_events WHERE user_id = $1', [
         userId,
       ]);

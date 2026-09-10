@@ -3,17 +3,16 @@ import { authenticatedUserId } from '../http/authenticatedUser';
 import { optionalIntegerField } from '../http/validation/requestValues';
 import { asyncHandler } from '../middleware/errorHandler';
 import type { ManualTrackingCheckService } from '../services/import/ManualTrackingCheckService';
-import type { OngoingTrackingService } from '../services/import/OngoingTrackingService';
 import type { ImportJobService } from '../services/import/ImportJobService';
 import { toImportOperation } from '../services/import/ImportJobTypes';
-import type { ScheduledImportJobService } from '../services/import/ScheduledImportJobService';
+import type { GmailPushMaintenanceService } from '../services/import/GmailPushMaintenanceService';
 
 export interface GmailTrackingRouterDependencies {
   readonly authenticate: RequestHandler;
   readonly validateScheduler: RequestHandler;
   readonly manualCheck: Pick<ManualTrackingCheckService, 'execute'>;
   readonly importJobs: Pick<ImportJobService, 'start'>;
-  readonly scheduledTracking: Pick<ScheduledImportJobService, 'enqueueEligible'>;
+  readonly pushMaintenance: Pick<GmailPushMaintenanceService, 'run'>;
 }
 
 export const createGmailTrackingRouter = (
@@ -38,7 +37,7 @@ export const createGmailTrackingRouter = (
         minimum: 1,
         maximum: 500,
       });
-      response.status(202).json(await dependencies.scheduledTracking.enqueueEligible(requestedLimit ?? 100));
+      response.status(202).json(await dependencies.pushMaintenance.run(requestedLimit ?? 100));
     }),
   );
   return router;

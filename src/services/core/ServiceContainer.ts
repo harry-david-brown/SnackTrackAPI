@@ -92,6 +92,13 @@ import { AdConfigurationRepository } from '../data/AdConfigurationRepository';
 import { AdConfigurationService } from '../ads/AdConfigurationService';
 import { ExperienceStateRepository } from '../data/ExperienceStateRepository';
 import { ExperienceStateService } from '../experience/ExperienceStateService';
+import { GmailUnitBudgetRepository } from '../data/GmailUnitBudgetRepository';
+import { GmailPushRepository } from '../data/GmailPushRepository';
+import { GmailPubSubVerifier } from '../email/GmailPubSubVerifier';
+import { GmailWatchService } from '../import/GmailWatchService';
+import { GmailPushDispatchService } from '../import/GmailPushDispatchService';
+import { GmailPushTrackingService } from '../import/GmailPushTrackingService';
+import { GmailPushMaintenanceService } from '../import/GmailPushMaintenanceService';
 
 /** The process-wide, typed composition root and resource owner. */
 export class ServiceContainer {
@@ -177,6 +184,13 @@ export class ServiceContainer {
   readonly adConfigurationService: AdConfigurationService;
   readonly experienceStateRepository: ExperienceStateRepository;
   readonly experienceStateService: ExperienceStateService;
+  readonly gmailUnitBudgetRepository: GmailUnitBudgetRepository;
+  readonly gmailPushRepository: GmailPushRepository;
+  readonly gmailPubSubVerifier: GmailPubSubVerifier;
+  readonly gmailWatchService: GmailWatchService;
+  readonly gmailPushDispatchService: GmailPushDispatchService;
+  readonly gmailPushTrackingService: GmailPushTrackingService;
+  readonly gmailPushMaintenanceService: GmailPushMaintenanceService;
 
   constructor() {
     this.postgres = new PostgresService({
@@ -206,6 +220,18 @@ export class ServiceContainer {
     this.mailboxSyncRunRepository = new MailboxSyncRunRepository(this.postgres);
     this.importPreferencesQueryRepository = new ImportPreferencesQueryRepository(this.postgres);
     this.importSourceCoverageRepository = new ImportSourceCoverageRepository(this.postgres);
+    const gmailConfig = config.getGmailConfig();
+    this.gmailUnitBudgetRepository = new GmailUnitBudgetRepository(this.postgres, {
+      projectMinute: gmailConfig.projectMinuteUnitLimit,
+      projectDay: gmailConfig.projectDailyUnitLimit,
+      userMinute: gmailConfig.userMinuteUnitLimit,
+    });
+    this.gmailPushRepository = new GmailPushRepository(this.postgres);
+    this.gmailPubSubVerifier = new GmailPubSubVerifier({
+      audience: gmailConfig.pubsubAudience,
+      serviceAccountEmail: gmailConfig.pubsubServiceAccountEmail,
+      subscription: gmailConfig.pubsubSubscription,
+    });
     this.importJobRepository = new ImportJobRepository(
       this.postgres,
       config.getQueueConfig().maximumWaitingJobs,
@@ -225,7 +251,6 @@ export class ServiceContainer {
     this.analyticsEventService = new AnalyticsEventService(this.postgres);
     this.authenticationActivityService = new AuthenticationActivityService(this.analyticsEventService, logger);
     this.analyticsMaintenanceService = new AnalyticsMaintenanceService(this.postgres);
-    const gmailConfig = config.getGmailConfig();
     const googleAudiences = [
       gmailConfig.clientId,
       gmailConfig.iosClientId,
@@ -277,7 +302,15 @@ export class ServiceContainer {
       config.shouldSaveDebugEmails(),
       logger,
     );
-    this.gmailClient = new GmailClient(logger, this.emailDebugCapture);
+    this.gmailClient = new GmailClient(logger, this.emailDebugCapture, undefined, this.gmailUnitBudgetRepository);
+    this.gmailWatchService = new GmailWatchService(
+      this.userRepository,
+      this.importPreferencesQueryRepository,
+      this.gmailClient,
+      this.gmailPushRepository,
+      gmailConfig.pubsubTopic,
+      logger,
+    );
     this.gmailOAuthProvider = new GmailOAuthProvider({
       clientId: gmailConfig.clientId,
       clientSecret: gmailConfig.clientSecret,
@@ -391,6 +424,7 @@ export class ServiceContainer {
       this.gmailSyncRunRepository,
       this.gmailConnectionHealthService,
       this.mailboxConnectionRepository,
+      this.gmailWatchService,
     );
     this.importStatusService = new ImportStatusService(
       this.userRepository,
@@ -413,6 +447,21 @@ export class ServiceContainer {
       this.gmailClient,
       this.importSourceCoverageRepository,
       this.outlookExportReadyDetector,
+      this.gmailWatchService,
+    );
+    this.gmailPushDispatchService = new GmailPushDispatchService(
+      this.gmailPushRepository,
+      this.importJobRepository,
+    );
+    this.gmailPushMaintenanceService = new GmailPushMaintenanceService(
+      this.gmailPushDispatchService,
+      this.gmailWatchService,
+    );
+    this.gmailPushTrackingService = new GmailPushTrackingService(
+      this.importPreferencesService,
+      this.ongoingTrackingService,
+      this.gmailPushRepository,
+      this.gmailWatchService,
     );
     this.manualTrackingCheckService = new ManualTrackingCheckService(
       this.ongoingTrackingService,
@@ -432,6 +481,8 @@ export class ServiceContainer {
       this.postgres,
       this.cacheService,
       mailboxHealth,
+      ImportLockService,
+      this.gmailWatchService,
     );
     this.receiptClearService = new ReceiptClearService(this.postgres, this.cacheService);
     this.listReceiptsService = new ListReceiptsService(this.receiptRepository);
@@ -443,6 +494,7 @@ export class ServiceContainer {
       ImportLockService,
       logger,
       this.adminRepository,
+      this.gmailWatchService,
     );
     this.wrappedAnalyticsQueryRepository = new WrappedAnalyticsQueryRepository(this.postgres);
     this.wrappedAnalyticsService = new WrappedAnalyticsService(

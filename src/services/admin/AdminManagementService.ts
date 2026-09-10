@@ -488,6 +488,90 @@ export class AdminManagementService {
     };
   }
 
+  async gmailUsage(
+    from: Date,
+    to: Date,
+    limits: { projectMinute: number; projectDay: number; userMinute: number },
+  ) {
+    const [usage, methods, today, people, push] = await Promise.all([
+      this.database.query<DatabaseRow>(
+        `SELECT date_trunc('day',bucket_start) AS day,category,
+          SUM(units)::bigint AS units,SUM(request_count)::bigint AS requests
+         FROM gmail_api_usage_minute WHERE bucket_start>=$1 AND bucket_start<$2
+         GROUP BY day,category ORDER BY day,category`,
+        [from, to],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT category,method,SUM(units)::bigint AS units,SUM(request_count)::bigint AS requests
+         FROM gmail_api_usage_minute WHERE bucket_start>=$1 AND bucket_start<$2
+         GROUP BY category,method ORDER BY units DESC`,
+        [from, to],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT COALESCE((SELECT units FROM gmail_api_project_day_budget WHERE bucket_start=CURRENT_DATE),0)::bigint AS units,
+          COALESCE((SELECT MAX(units) FROM gmail_api_project_minute_budget WHERE bucket_start>=date_trunc('day',NOW())),0)::bigint AS peak_minute_units`,
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT
+          (SELECT COUNT(*)::int FROM users u JOIN user_import_preferences p ON p.user_id=u.id
+           WHERE u.gmail_connected AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL AND
+             (p.ongoing_tracking_consent_state='granted' OR (p.monitoring_consent_state='granted' AND EXISTS (
+               SELECT 1 FROM user_export_provider_preferences export
+               WHERE export.user_id=u.id AND export.provider='uber_eats' AND export.status='requested'
+             )))) AS monitored_users,
+          (SELECT COUNT(DISTINCT jobs.user_id)::int FROM import_jobs jobs
+           WHERE jobs.kind='gmail_historical' AND jobs.created_at>=$1 AND jobs.created_at<$2)
+           AS onboarding_import_users`,
+        [from, to],
+      ),
+      this.database.query<DatabaseRow>(
+        `SELECT COUNT(*) FILTER (WHERE pending)::int AS pending_mailboxes,
+          COUNT(*) FILTER (WHERE watch_expiration>NOW())::int AS active_watches,
+          COALESCE(SUM(notification_count),0)::bigint AS notifications,
+          COALESCE(SUM(coalesced_notification_count),0)::bigint AS coalesced_notifications,
+          COUNT(*) FILTER (WHERE consecutive_failures>0)::int AS failing_mailboxes
+         FROM gmail_push_state`,
+      ),
+    ]);
+    const categoryTotals = usage.rows.reduce<Record<string, { units: number; requests: number }>>((totals, row) => {
+      const key = String(row.category);
+      const previous = totals[key] ?? { units: 0, requests: 0 };
+      totals[key] = { units: previous.units + asNumber(row.units), requests: previous.requests + asNumber(row.requests) };
+      return totals;
+    }, {});
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      limits,
+      today: {
+        units: asNumber(today.rows[0]?.units),
+        percentOfSafetyLimit: Math.round(asNumber(today.rows[0]?.units) / limits.projectDay * 10_000) / 100,
+        peakMinuteUnits: asNumber(today.rows[0]?.peak_minute_units),
+      },
+      categoryTotals,
+      daily: usage.rows.map((row) => ({
+        date: asIso(row.day), category: String(row.category),
+        units: asNumber(row.units), requests: asNumber(row.requests),
+      })),
+      methods: methods.rows.map((row) => ({
+        category: String(row.category), method: String(row.method),
+        units: asNumber(row.units), requests: asNumber(row.requests),
+      })),
+      people: {
+        monitoredUsers: asNumber(people.rows[0]?.monitored_users),
+        onboardingImportUsers: asNumber(people.rows[0]?.onboarding_import_users),
+      },
+      push: {
+        pendingMailboxes: asNumber(push.rows[0]?.pending_mailboxes),
+        activeWatches: asNumber(push.rows[0]?.active_watches),
+        notifications: asNumber(push.rows[0]?.notifications),
+        coalescedNotifications: asNumber(push.rows[0]?.coalesced_notifications),
+        failingMailboxes: asNumber(push.rows[0]?.failing_mailboxes),
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   async auditEvents(limit: number, offset: number) {
     const result = await this.database.query<DatabaseRow>(
       `SELECT e.id, e.action, e.target_type, e.target_id, e.reason, e.outcome, e.created_at,

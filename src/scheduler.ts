@@ -20,14 +20,19 @@ const run = async (): Promise<void> => {
       }
     }
     const recoveredJobs = await container.importJobRepository.recoverStaleJobs();
-    const tracking = await container.scheduledImportJobService.enqueueEligible(500);
+    const gmailPush = await container.gmailPushMaintenanceService.run(500);
+    const outlookTracking = await container.scheduledImportJobService.enqueueEligible(500);
+    await container.gmailUnitBudgetRepository.cleanup();
     const pushReceipts = await new ImportPushNotificationService(
       container.importJobRepository,
       container.pushDeviceRepository,
       config.getPushConfig().deliveryMode,
       logger,
     ).processReceipts();
-    logger.info('Import scheduler completed', { operation: 'import_scheduler', expiredUploads, cleanedUploadObjects, recoveredJobs, pushReceipts, ...tracking });
+    logger.info('Import scheduler completed', {
+      operation: 'import_scheduler', expiredUploads, cleanedUploadObjects, recoveredJobs,
+      pushReceipts, gmailPush, outlookTracking,
+    });
   } finally {
     container.importObjectStorage.close();
     await container.postgres.close();

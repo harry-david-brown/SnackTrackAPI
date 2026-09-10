@@ -72,6 +72,76 @@ test('job creation casts a reused status parameter consistently for PostgreSQL',
   assert.match(insertSql, /CASE WHEN \$5::VARCHAR\(24\)='awaiting_upload'/);
 });
 
+for (const provider of ['uber_eats', 'doordash']) {
+  test(`allows the first submitted ${provider} upload independently of other import activity`, async () => {
+    let providerLimitSql = '';
+    let providerLimitValues = [];
+    const exportJob = {
+      ...persistedJob,
+      kind: 'export_file',
+      status: 'awaiting_upload',
+      phase: 'awaiting_upload',
+      object_key: `exports/${provider}/history.zip`,
+      original_filename: 'history.zip',
+      content_type: 'application/zip',
+      content_length: 1024,
+      export_provider: provider,
+    };
+    const executor = { query: async (sql, values = []) => {
+      if (sql.includes('SELECT COUNT(*) AS count')) return { rows: [{ count: '0' }], rowCount: 1 };
+      if (sql.includes('WITH submitted AS')) {
+        providerLimitSql = sql;
+        providerLimitValues = values;
+        return { rows: [{ submitted_daily: '0', retry_at: null }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT import_generation')) return { rows: [{ import_generation: '1' }], rowCount: 1 };
+      if (sql.includes('INSERT INTO import_jobs')) return { rows: [exportJob], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    } };
+
+    const created = await new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) }).create({
+      userId: persistedJob.user_id,
+      kind: 'export_file',
+      trigger: 'user',
+      awaitingUpload: true,
+      exportProvider: provider,
+    });
+
+    assert.equal(created.exportProvider, provider);
+    assert.equal(providerLimitValues[1], provider);
+    assert.match(providerLimitSql, /export_provider=\$2/);
+    assert.match(providerLimitSql, /submitted_content_length IS NOT NULL/);
+    assert.match(providerLimitSql, /status IN \('pending_dispatch','queued','running','retrying','succeeded'\)/);
+    assert.doesNotMatch(providerLimitSql, /gmail_historical|manual_tracking/);
+  });
+}
+
+test('returns a provider-specific retry contract after three submitted imports in one day', async () => {
+  let inserted = false;
+  const retryAt = '2026-09-10T14:30:00.000Z';
+  const executor = { query: async sql => {
+    if (sql.includes('SELECT COUNT(*) AS count')) return { rows: [{ count: '0' }], rowCount: 1 };
+    if (sql.includes('WITH submitted AS')) return { rows: [{ submitted_daily: '3', retry_at: retryAt }], rowCount: 1 };
+    if (sql.includes('INSERT INTO import_jobs')) inserted = true;
+    return { rows: [], rowCount: 0 };
+  } };
+
+  await assert.rejects(
+    new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) }).create({
+      userId: persistedJob.user_id,
+      kind: 'export_file',
+      trigger: 'user',
+      awaitingUpload: true,
+      exportProvider: 'uber_eats',
+    }),
+    error => error.code === 'EXPORT_UPLOAD_RATE_LIMITED'
+      && error.details.provider === 'uber_eats'
+      && error.details.retryAt === retryAt
+      && /Come back tomorrow/.test(error.publicMessage),
+  );
+  assert.equal(inserted, false);
+});
+
 test('retry persistence verifies the running-to-retrying transition', async () => {
   let retrySql = '';
   const executor = {

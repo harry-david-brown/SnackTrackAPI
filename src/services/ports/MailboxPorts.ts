@@ -31,10 +31,10 @@ export interface MailboxReadSafety {
 }
 
 export interface MailboxClient {
-  getEmails(user: User, options?: { after?: Date; safety?: MailboxReadSafety }): Promise<MailboxMessage[]>;
+  getEmails(user: User, options?: { after?: Date; safety?: MailboxReadSafety; readPurpose?: 'historical_import'|'monitoring' }): Promise<MailboxMessage[]>;
   getEmailPages(
     user: User,
-    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety },
+    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety; readPurpose?: 'historical_import'|'monitoring' },
   ): AsyncIterable<MailboxMessagePage>;
 }
 

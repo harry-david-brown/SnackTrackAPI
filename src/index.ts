@@ -16,6 +16,7 @@ import { createExperienceRouter } from './routes/experience';
 import { createAnalyticsEventsRouter } from './routes/analyticsEvents';
 import { createGmailRouter } from './routes/gmail';
 import { createOutlookRouter } from './routes/outlook';
+import { createGmailPubSubRouter } from './routes/gmailPubSub';
 import { config } from './config/AppConfig';
 import { asyncHandler, errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
@@ -102,6 +103,20 @@ app.use(securityHeaders);
 app.use(corsConfig);
 app.use(requestSizeLimit);
 app.use(securityLogger);
+
+// Pub/Sub authenticates with a Google-signed OIDC token. Keep this small,
+// authenticated endpoint outside public IP throttles so shared Google egress
+// cannot consume the user-facing rate-limit bucket.
+app.use(
+  '/webhooks/gmail/pubsub',
+  express.json({ limit: '16kb', type: 'application/json' }),
+  createGmailPubSubRouter({
+    verifier: container.gmailPubSubVerifier,
+    pushes: container.gmailPushRepository,
+    debounceSeconds: config.getGmailConfig().pushDebounceSeconds,
+    logger,
+  }),
+);
 
 // Rate limiting middleware
 app.use(apiRateLimit);
@@ -348,6 +363,11 @@ app.use(
     alerting: container.alertingService,
     queues: adminQueueOperations,
     production: config.isProduction(),
+    gmailUsageLimits: {
+      projectMinute: config.getGmailConfig().projectMinuteUnitLimit,
+      projectDay: config.getGmailConfig().projectDailyUnitLimit,
+      userMinute: config.getGmailConfig().userMinuteUnitLimit,
+    },
   }),
 );
 app.use(
@@ -368,7 +388,7 @@ app.use(
     connections: container.gmailConnectionService,
     preferences: container.importPreferencesService,
     manualCheck: container.manualTrackingCheckService,
-    scheduledTracking: container.scheduledImportJobService,
+    pushMaintenance: container.gmailPushMaintenanceService,
     importJobs: container.importJobService,
     status: container.importStatusService,
     historicalImport: container.historicalGmailImportService,

@@ -41,6 +41,10 @@ interface ExportReadyDetector {
 interface OutlookExportReadyDetector {
   hasUberExportReadyEmail(userId: string, requestedAt: string): Promise<boolean>;
 }
+interface GmailWatchLifecycle {
+  ensureForUser(userId: string): Promise<boolean>;
+  stopForUser(userId: string): Promise<void>;
+}
 
 export interface ExportReadyCheckResult {
   readonly detected: boolean;
@@ -56,6 +60,7 @@ export class ImportPreferencesService {
     private readonly exportReadyDetector: ExportReadyDetector,
     private readonly sourceCoverage: SourceCoveragePort,
     private readonly outlookExportReadyDetector?: OutlookExportReadyDetector,
+    private readonly gmailWatches?: GmailWatchLifecycle,
   ) {}
 
   get(userId: string, requestTimezone?: string): Promise<ImportPreferencesProjection> {
@@ -106,6 +111,7 @@ export class ImportPreferencesService {
     consentVersion?: string,
   ): Promise<ImportPreferencesProjection> {
     await this.lifecycle.setMonitoringConsent(userId, decision, consentVersion);
+    await this.syncGmailWatch(userId, decision);
     return this.status.getPreferences(userId);
   }
 
@@ -141,7 +147,29 @@ export class ImportPreferencesService {
     }
 
     await this.lifecycle.setOngoingTrackingConsent(userId, decision, consentVersion);
+    await this.syncGmailWatch(userId, decision);
     return this.status.getPreferences(userId);
+  }
+
+  private async syncGmailWatch(userId: string, decision: ConsentDecision): Promise<void> {
+    if (!this.gmailWatches) return;
+    if (decision === 'granted') {
+      await this.gmailWatches.ensureForUser(userId).catch(() => false);
+      return;
+    }
+    await this.syncGmailWatchForCurrentPurpose(userId);
+  }
+
+  private async syncGmailWatchForCurrentPurpose(userId: string): Promise<void> {
+    if (!this.gmailWatches) return;
+    const [current, exports] = await Promise.all([
+      this.queries.get(userId),
+      this.queries.getProviderExports(userId),
+    ]);
+    const active = current.ongoingTrackingConsentState === 'granted' ||
+      (current.monitoringConsentState === 'granted' && exports.uber_eats.status === 'requested');
+    if (active) await this.gmailWatches.ensureForUser(userId).catch(() => false);
+    else await this.gmailWatches.stopForUser(userId);
   }
 
   async markExportRequested(
@@ -149,6 +177,7 @@ export class ImportPreferencesService {
     provider: ExportProvider,
   ): Promise<ImportPreferencesProjection> {
     await this.lifecycle.markExportRequested(userId, provider);
+    if (provider === 'uber_eats') await this.gmailWatches?.ensureForUser(userId).catch(() => false);
     return this.status.getPreferences(userId);
   }
 
@@ -163,10 +192,22 @@ export class ImportPreferencesService {
         'This provider archive is already being processed.',
       );
     }
+    if (provider === 'uber_eats') await this.syncGmailWatchForCurrentPurpose(userId);
     return this.status.getPreferences(userId);
   }
 
   async checkExportReady(userId: string): Promise<ExportReadyCheckResult> {
+    return this.checkExportReadyWithProviders(userId, true);
+  }
+
+  checkGmailExportReady(userId: string): Promise<ExportReadyCheckResult> {
+    return this.checkExportReadyWithProviders(userId, false);
+  }
+
+  private async checkExportReadyWithProviders(
+    userId: string,
+    includeOutlook: boolean,
+  ): Promise<ExportReadyCheckResult> {
     const [preferences, providerExports] = await Promise.all([
       this.queries.get(userId),
       this.queries.getProviderExports(userId),
@@ -190,6 +231,7 @@ export class ImportPreferencesService {
       );
     }
     if (
+      includeOutlook &&
       !detected &&
       this.outlookExportReadyDetector &&
       projection.outlookConnection.connectionHealth === 'valid' &&

@@ -670,7 +670,7 @@ export const contractSchemas = {
     required: ['id', 'kind', 'trigger', 'journeyContext', 'status', 'phase', 'progress', 'result', 'errorCode', 'errorMessage', 'attempts', 'provider', 'presentation', 'createdAt', 'queuedAt', 'startedAt', 'completedAt', 'updatedAt'],
     properties: {
       id: { type: 'string', format: 'uuid' },
-      kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'export_file'] },
+      kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'gmail_push_tracking', 'export_file'] },
       trigger: { type: 'string', enum: ['user', 'scheduler'] },
       journeyContext: { type: 'string', enum: ['onboarding', 'post_onboarding', 'routine', 'legacy'] },
       status: { type: 'string', enum: ['awaiting_upload', 'pending_dispatch', 'queued', 'running', 'retrying', 'succeeded', 'failed', 'expired', 'superseded', 'cancelled'] },
@@ -785,14 +785,14 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
     post: {
       summary: 'Create an Uber Eats export upload intent', tags: ['Imports'], security: secured,
       requestBody: jsonBody('ExportUploadIntentRequest'),
-      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' }, '429': { description: 'Provider upload limit reached; response details include provider and retryAt' } },
     },
   },
   '/imports/exports/doordash/upload-intent': {
     post: {
       summary: 'Create a DoorDash export upload intent', tags: ['Imports'], security: secured,
       requestBody: jsonBody('ExportUploadIntentRequest'),
-      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' } },
+      responses: { '201': { description: 'Operation and signed upload URL' }, '400': { $ref: '#/components/responses/ValidationError' }, '401': { $ref: '#/components/responses/Unauthorized' }, '409': { $ref: '#/components/responses/Conflict' }, '429': { description: 'Provider upload limit reached; response details include provider and retryAt' } },
     },
   },
   '/imports/{id}/upload-url': {

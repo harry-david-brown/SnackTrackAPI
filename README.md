@@ -264,6 +264,7 @@ curl -X POST http://localhost:3000/auth/email/verify/confirm \
 Setup docs:
 - [GMAIL_INTEGRATION.md](./GMAIL_INTEGRATION.md)
 - [docs/GMAIL_OAUTH_SETUP.md](./docs/GMAIL_OAUTH_SETUP.md)
+- [docs/GMAIL_PUBSUB_SETUP.md](./docs/GMAIL_PUBSUB_SETUP.md)
 
 ### Users
 - `GET /users/:id/totalSpent` - Get total spending for user

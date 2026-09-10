@@ -14,6 +14,7 @@ import {
 } from '../import/ImportJobTypes';
 
 type Row = Record<string, unknown>;
+const MAX_SUBMITTED_EXPORTS_PER_PROVIDER_PER_DAY = 3;
 const text = (row: Row, key: string): string => {
   const value = row[key];
   if (typeof value !== 'string' || !value) throw new Error(`Invalid import job ${key}`);
@@ -120,6 +121,7 @@ export interface CreateImportJobInput {
   readonly contentType?: string;
   readonly contentLength?: number;
   readonly exportProvider?: ExportProvider;
+  readonly initialCheckpoint?: Readonly<Record<string, unknown>>;
 }
 
 export interface OutboxEvent {
@@ -192,17 +194,49 @@ export class ImportJobRepository {
       if (Number(globalCapacity.rows[0]?.count ?? 0) >= this.maximumActiveJobs) {
         throw new ConflictError('IMPORT_QUEUE_FULL', 'Imports are temporarily at capacity. Please try again shortly.');
       }
-      if (input.trigger === 'user') {
+      if (input.trigger === 'user' && input.kind === 'export_file' && input.awaitingUpload && input.exportProvider) {
+        const limits = await transaction.query<Row>(
+          `WITH submitted AS (
+             SELECT created_at
+             FROM import_jobs
+             WHERE user_id=$1
+               AND trigger_type='user'
+               AND kind='export_file'
+               AND export_provider=$2
+               AND submitted_content_length IS NOT NULL
+               AND status IN ('pending_dispatch','queued','running','retrying','succeeded')
+               AND created_at >= NOW()-INTERVAL '1 day'
+             ORDER BY created_at DESC
+           )
+           SELECT COUNT(*) AS submitted_daily,
+             (SELECT created_at + INTERVAL '1 day' FROM submitted OFFSET ($3 - 1) LIMIT 1) AS retry_at
+           FROM submitted`,
+          [input.userId, input.exportProvider, MAX_SUBMITTED_EXPORTS_PER_PROVIDER_PER_DAY],
+        );
+        const row = limits.rows[0] ?? {};
+        if (Number(row.submitted_daily) >= MAX_SUBMITTED_EXPORTS_PER_PROVIDER_PER_DAY) {
+          const providerName = input.exportProvider === 'uber_eats' ? 'Uber Eats' : 'DoorDash';
+          throw new AppError({
+            code: 'EXPORT_UPLOAD_RATE_LIMITED',
+            message: `${providerName} import limit reached for this account.`,
+            publicMessage: `You’ve started several ${providerName} imports recently. Come back tomorrow to try again.`,
+            details: {
+              provider: input.exportProvider,
+              retryAt: timestamp(row, 'retry_at'),
+            },
+          });
+        }
+      } else if (input.trigger === 'user') {
         const limits = await transaction.query<Row>(
           `SELECT
              COUNT(*) FILTER (WHERE created_at >= NOW()-INTERVAL '15 minutes') AS recent,
-             COUNT(*) FILTER (WHERE created_at >= NOW()-INTERVAL '1 day') AS daily,
-             COUNT(*) FILTER (WHERE kind='export_file' AND created_at >= NOW()-INTERVAL '1 hour') AS uploads
-           FROM import_jobs WHERE user_id=$1 AND trigger_type='user'`,
+             COUNT(*) FILTER (WHERE created_at >= NOW()-INTERVAL '1 day') AS daily
+           FROM import_jobs
+           WHERE user_id=$1 AND trigger_type='user' AND kind<>'export_file'`,
           [input.userId],
         );
         const row = limits.rows[0] ?? {};
-        if (Number(row.recent) >= 3 || Number(row.daily) >= 10 || (input.awaitingUpload && Number(row.uploads) >= 3)) {
+        if (Number(row.recent) >= 3 || Number(row.daily) >= 10) {
           throw new ConflictError('IMPORT_RATE_LIMITED', 'Too many imports were started recently. Please try again later.');
         }
       }
@@ -211,10 +245,10 @@ export class ImportJobRepository {
       const status = input.awaitingUpload ? 'awaiting_upload' : 'pending_dispatch';
       const inserted = await transaction.query<Row>(
         `INSERT INTO import_jobs
-         (user_id,kind,trigger_type,journey_context,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at)
-         VALUES ($1,$2,$3,$4,$5::VARCHAR(24),$6,0,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $5::VARCHAR(24)='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END)
+         (user_id,kind,trigger_type,journey_context,status,phase,progress,object_key,original_filename,content_type,content_length,export_provider,import_generation,idempotency_key,expires_at,checkpoint)
+         VALUES ($1,$2,$3,$4,$5::VARCHAR(24),$6,0,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $5::VARCHAR(24)='awaiting_upload' THEN NOW()+INTERVAL '1 hour' ELSE NULL END,$14::JSONB)
          RETURNING ${selectColumns}`,
-        [input.userId,input.kind,input.trigger,input.journeyContext ?? 'legacy',status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null],
+        [input.userId,input.kind,input.trigger,input.journeyContext ?? 'legacy',status,input.awaitingUpload ? 'awaiting_upload' : 'waiting_for_queue',input.objectKey ?? null,input.originalFilename ?? null,input.contentType ?? null,input.contentLength ?? null,input.exportProvider ?? null,Number(users.rows[0].import_generation),input.idempotencyKey ?? null,JSON.stringify(input.initialCheckpoint ?? {})],
       );
       const job = decode(inserted.rows[0]);
       await this.insertEvent(transaction, job, 'accepted');
@@ -387,7 +421,9 @@ export class ImportJobRepository {
       const changes = Number(result?.newOrders ?? 0)
         + Number(result?.updatedOrders ?? 0)
         + Number(result?.importedCount ?? 0);
-      if (job.trigger === 'user' || changes > 0) await this.insertOutbox(transaction, job.id, 'notify');
+      if (job.trigger === 'user' || changes > 0 || result?.exportReadyDetected === true) {
+        await this.insertOutbox(transaction, job.id, 'notify');
+      }
     });
   }
 

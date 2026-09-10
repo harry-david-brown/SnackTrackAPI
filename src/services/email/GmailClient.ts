@@ -22,6 +22,7 @@ import {
   GMAIL_MESSAGE_GET_QUERY_UNITS,
   GMAIL_MESSAGE_LIST_QUERY_UNITS,
 } from './GmailQuotaPacer';
+import type { GmailUsageCategory } from '../data/GmailUnitBudgetRepository';
 
 const MAX_IMPORT_MESSAGES = 20_000;
 const MAX_IMPORT_PAGES = 1_000;
@@ -95,6 +96,9 @@ interface GmailOAuthConfig {
 }
 
 type GmailApiClient = ReturnType<typeof google.gmail>;
+interface GmailUnitBudgetPort {
+  reserve(userId: string, category: GmailUsageCategory, method: string, units: number): Promise<void>;
+}
 
 export class GmailClient implements MailboxClient {
   private readonly contentGuard = new MailboxContentGuard();
@@ -102,7 +106,12 @@ export class GmailClient implements MailboxClient {
     private readonly logger: StructuredLogger = silentStructuredLogger,
     private readonly debugCapture: EmailDebugCapturePort = new DisabledEmailDebugCapture(),
     private readonly clientOverride?: GmailApiClient,
+    private readonly unitBudget?: GmailUnitBudgetPort,
   ) {}
+
+  private reserve(userId: string, category: GmailUsageCategory, method: string, units: number): Promise<void> {
+    return this.unitBudget?.reserve(userId, category, method, units) ?? Promise.resolve();
+  }
 
   private getRequiredOAuthConfig(): GmailOAuthConfig {
     const { clientId, clientSecret, redirectUri } = config.getGmailConfig();
@@ -167,7 +176,29 @@ export class GmailClient implements MailboxClient {
   async validateConnection(user: User): Promise<void> {
     if (config.shouldUseMockData() && !config.isProduction()) return;
     const gmail = await this.createAuthenticatedGmailClient(user);
+    await this.reserve(user.id, 'connection', 'getProfile', 1);
     decodeGmailProfile(await gmail.users.getProfile({ userId: 'me', fields: 'emailAddress' }));
+  }
+
+  async startMailboxWatch(user: User, topicName: string): Promise<{ historyId: string; expiration: Date }> {
+    const gmail = await this.createAuthenticatedGmailClient(user);
+    await this.reserve(user.id, 'monitoring', 'watch', 100);
+    const response = await gmail.users.watch({
+      userId: 'me',
+      requestBody: { topicName, labelIds: ['INBOX'], labelFilterBehavior: 'include' },
+    });
+    const historyId = response.data.historyId;
+    const expirationMs = Number(response.data.expiration);
+    if (typeof historyId !== 'string' || !/^\d{1,30}$/.test(historyId) || !Number.isFinite(expirationMs)) {
+      throw new AppError({ code: 'GMAIL_PROVIDER_PAYLOAD_INVALID', message: 'Invalid Gmail watch response' });
+    }
+    return { historyId, expiration: new Date(expirationMs) };
+  }
+
+  async stopMailboxWatch(user: User): Promise<void> {
+    const gmail = await this.createAuthenticatedGmailClient(user);
+    await this.reserve(user.id, 'monitoring', 'stop', 50);
+    await gmail.users.stop({ userId: 'me' });
   }
 
   /**
@@ -196,6 +227,7 @@ export class GmailClient implements MailboxClient {
     ].join(' ');
 
     try {
+      await this.reserve(user.id, 'monitoring', 'messages.list', GMAIL_MESSAGE_LIST_QUERY_UNITS);
       const candidates = decodeGmailMessageList(
         await gmail.users.messages.list({
           userId: 'me',
@@ -205,6 +237,7 @@ export class GmailClient implements MailboxClient {
       );
 
       for (const messageId of candidates.messageIds) {
+        await this.reserve(user.id, 'monitoring', 'messages.get', GMAIL_MESSAGE_GET_QUERY_UNITS);
         const message = decodeGmailMessage(
           await gmail.users.messages.get({
             userId: 'me',
@@ -213,14 +246,27 @@ export class GmailClient implements MailboxClient {
         );
         const payload = message.payload;
         let from = '';
+        let to = '';
         let subject = '';
+        const authenticationHeaders: string[] = [];
         for (const header of payload?.headers ?? []) {
-          if (header.name.toLowerCase() === 'from') from = header.value;
-          if (header.name.toLowerCase() === 'subject') subject = header.value;
+          const name = header.name.toLowerCase();
+          if (name === 'from') from = header.value;
+          if (name === 'to') to = header.value;
+          if (name === 'subject') subject = header.value;
+          if (name === 'authentication-results') authenticationHeaders.push(header.value);
         }
 
-        const body = `${message.snippet ?? ''}\n${this.extractBody(payload)}`;
-        if (this.isUberExportReadyMessage(from, subject, body)) {
+        const preflight = this.contentGuard.preflight({
+          provider: 'gmail', from, to, subject, providerBytes: message.sizeEstimate,
+          authenticationHeaders, allowForwardedReceipts: false,
+        });
+        if (!preflight.accepted) continue;
+        const guarded = this.contentGuard.acceptBody(
+          `${message.snippet ?? ''}\n${this.extractBody(payload)}`,
+          preflight,
+        );
+        if (guarded.accepted && this.isUberExportReadyMessage(from, subject, guarded.body)) {
           return true;
         }
       }
@@ -256,7 +302,7 @@ export class GmailClient implements MailboxClient {
     return matchesConfirmedEmail || (hasReadyLanguage && hasDownloadAction) || matchesKnownTemplate;
   }
 
-  async getEmails(user: User, options?: { after?: Date; safety?: MailboxReadSafety }): Promise<MailboxMessage[]> {
+  async getEmails(user: User, options?: { after?: Date; safety?: MailboxReadSafety; readPurpose?: 'historical_import'|'monitoring' }): Promise<MailboxMessage[]> {
     const safeMessages: MailboxMessage[] = [];
     for await (const page of this.getEmailPages(user, options)) {
       safeMessages.push(...page.messages);
@@ -274,7 +320,7 @@ export class GmailClient implements MailboxClient {
   /** Production import path: lists the bounded workload, then yields one processing batch at a time. */
   async *getEmailPages(
     user: User,
-    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety },
+    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety; readPurpose?: 'historical_import'|'monitoring' },
   ): AsyncIterable<MailboxMessagePage> {
     if (config.shouldUseMockData() && !config.isProduction()) {
       const emails = this.loadEmailsFromDebugFolder(user);
@@ -314,6 +360,9 @@ export class GmailClient implements MailboxClient {
     }
 
     const gmail = await this.createAuthenticatedGmailClient(user);
+    const usageCategory: GmailUsageCategory = options?.readPurpose === 'monitoring'
+      ? 'monitoring'
+      : 'onboarding_import';
     const isBufferedCursor = options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V1_PREFIX) ||
       options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX);
     const bufferedCursor = isBufferedCursor && options?.cursor
@@ -370,6 +419,7 @@ export class GmailClient implements MailboxClient {
           });
         }
         await quotaPacer.waitFor(GMAIL_MESSAGE_LIST_QUERY_UNITS);
+        await this.reserve(user.id, usageCategory, 'messages.list', GMAIL_MESSAGE_LIST_QUERY_UNITS);
         gmailRequestCount += 1;
         modeledQueryUnits += GMAIL_MESSAGE_LIST_QUERY_UNITS;
         const page = decodeGmailMessageList(await gmail.users.messages.list({
@@ -416,6 +466,7 @@ export class GmailClient implements MailboxClient {
         const fetched = await Promise.all(processingBatch.map((messageId) => limit(async () => {
           if (pageFailure) throw pageFailure;
           await quotaPacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
+          await this.reserve(user.id, usageCategory, 'messages.get', GMAIL_MESSAGE_GET_QUERY_UNITS);
           if (pageFailure) throw pageFailure;
           try {
             gmailRequestCount += 1;

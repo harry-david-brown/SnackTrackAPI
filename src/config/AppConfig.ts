@@ -14,6 +14,14 @@ export interface AppConfig {
     redirectUri?: string;
     iosClientId?: string;
     webClientId?: string;
+    pubsubTopic?: string;
+    pubsubSubscription?: string;
+    pubsubAudience?: string;
+    pubsubServiceAccountEmail?: string;
+    projectMinuteUnitLimit: number;
+    projectDailyUnitLimit: number;
+    userMinuteUnitLimit: number;
+    pushDebounceSeconds: number;
   };
   microsoftMailbox: {
     clientId?: string;
@@ -220,6 +228,28 @@ class ConfigManager {
     }
     const gmailRedirectUri = optional(process.env.GMAIL_REDIRECT_URI);
     if (gmailRedirectUri) url('GMAIL_REDIRECT_URI', gmailRedirectUri, ['http:', 'https:']);
+    const gmailPubsubTopic = optional(process.env.GMAIL_PUBSUB_TOPIC);
+    const gmailPubsubSubscription = optional(process.env.GMAIL_PUBSUB_SUBSCRIPTION);
+    const gmailPubsubAudience = optional(process.env.GMAIL_PUBSUB_AUDIENCE);
+    const gmailPubsubServiceAccountEmail = optional(process.env.GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL);
+    const gmailPubsubValues = [gmailPubsubTopic, gmailPubsubSubscription, gmailPubsubAudience, gmailPubsubServiceAccountEmail];
+    const gmailPubsubConfiguredValues = gmailPubsubValues.filter(Boolean).length;
+    if (gmailPubsubConfiguredValues !== 0 && gmailPubsubConfiguredValues !== gmailPubsubValues.length) {
+      throw new Error('All GMAIL_PUBSUB_* settings must be configured together');
+    }
+    if (isProduction && optional(process.env.GMAIL_CLIENT_ID) && gmailPubsubConfiguredValues === 0) {
+      throw new Error('GMAIL_PUBSUB_* settings are required in production when Gmail is configured');
+    }
+    if (gmailPubsubTopic && !/^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/topics\/[A-Za-z][A-Za-z0-9._~-]{2,254}$/.test(gmailPubsubTopic)) {
+      throw new Error('GMAIL_PUBSUB_TOPIC must be a full Google Cloud topic name');
+    }
+    if (gmailPubsubSubscription && !/^projects\/[a-z][a-z0-9-]{4,28}[a-z0-9]\/subscriptions\/[A-Za-z][A-Za-z0-9._~-]{2,254}$/.test(gmailPubsubSubscription)) {
+      throw new Error('GMAIL_PUBSUB_SUBSCRIPTION must be a full Google Cloud subscription name');
+    }
+    if (gmailPubsubAudience) url('GMAIL_PUBSUB_AUDIENCE', gmailPubsubAudience, isProduction ? ['https:'] : ['http:', 'https:']);
+    if (gmailPubsubServiceAccountEmail && !/^[^\s@]+@[^\s@]+\.iam\.gserviceaccount\.com$/.test(gmailPubsubServiceAccountEmail)) {
+      throw new Error('GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL must be a service-account email');
+    }
     const microsoftMailboxRedirectUri = optional(process.env.MICROSOFT_MAIL_REDIRECT_URI);
     if (microsoftMailboxRedirectUri) {
       url('MICROSOFT_MAIL_REDIRECT_URI', microsoftMailboxRedirectUri, ['http:', 'https:']);
@@ -304,6 +334,38 @@ class ConfigManager {
         redirectUri: gmailRedirectUri,
         iosClientId: optional(process.env.GMAIL_IOS_CLIENT_ID),
         webClientId: optional(process.env.GMAIL_WEB_CLIENT_ID),
+        pubsubTopic: gmailPubsubTopic,
+        pubsubSubscription: gmailPubsubSubscription,
+        pubsubAudience: gmailPubsubAudience,
+        pubsubServiceAccountEmail: gmailPubsubServiceAccountEmail,
+        projectMinuteUnitLimit: boundedInteger(
+          'GMAIL_PROJECT_QUERY_UNITS_PER_MINUTE',
+          process.env.GMAIL_PROJECT_QUERY_UNITS_PER_MINUTE,
+          600_000,
+          1,
+          1_200_000,
+        ),
+        projectDailyUnitLimit: boundedInteger(
+          'GMAIL_PROJECT_QUERY_UNITS_PER_DAY',
+          process.env.GMAIL_PROJECT_QUERY_UNITS_PER_DAY,
+          60_000_000,
+          1,
+          80_000_000,
+        ),
+        userMinuteUnitLimit: boundedInteger(
+          'GMAIL_USER_QUERY_UNITS_PER_MINUTE',
+          process.env.GMAIL_USER_QUERY_UNITS_PER_MINUTE,
+          4_000,
+          1,
+          6_000,
+        ),
+        pushDebounceSeconds: boundedInteger(
+          'GMAIL_PUSH_DEBOUNCE_SECONDS',
+          process.env.GMAIL_PUSH_DEBOUNCE_SECONDS,
+          30,
+          5,
+          300,
+        ),
       },
       microsoftMailbox: {
         clientId: optional(process.env.MICROSOFT_MAIL_CLIENT_ID),

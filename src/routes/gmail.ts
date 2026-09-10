@@ -7,7 +7,7 @@ import type { OngoingTrackingService } from '../services/import/OngoingTrackingS
 import type { ImportStatusService } from '../services/import/ImportStatusService';
 import type { HistoricalGmailImportService } from '../services/import/HistoricalGmailImportService';
 import type { ImportJobService } from '../services/import/ImportJobService';
-import type { ScheduledImportJobService } from '../services/import/ScheduledImportJobService';
+import type { GmailPushMaintenanceService } from '../services/import/GmailPushMaintenanceService';
 import { createGmailImportRouter } from './gmailImport';
 import { createGmailOAuthRouter } from './gmailOAuth';
 import { createGmailPreferencesRouter } from './gmailPreferences';
@@ -19,7 +19,7 @@ export interface GmailRouterDependencies {
   readonly connections: GmailConnectionService;
   readonly preferences: ImportPreferencesService;
   readonly manualCheck: ManualTrackingCheckService;
-  readonly scheduledTracking: ScheduledImportJobService;
+  readonly pushMaintenance: GmailPushMaintenanceService;
   readonly importJobs: ImportJobService;
   readonly status: ImportStatusService;
   readonly historicalImport: HistoricalGmailImportService;
@@ -48,7 +48,7 @@ export const createGmailRouter = (dependencies: GmailRouterDependencies): Router
       validateScheduler: dependencies.validateScheduler,
       manualCheck: dependencies.manualCheck,
       importJobs: dependencies.importJobs,
-      scheduledTracking: dependencies.scheduledTracking,
+      pushMaintenance: dependencies.pushMaintenance,
     }),
   );
   router.use(

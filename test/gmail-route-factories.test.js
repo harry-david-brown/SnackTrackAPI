@@ -138,7 +138,7 @@ test('Gmail tracking and import routers delegate each endpoint to one capability
     validateScheduler: passThrough,
     manualCheck: { execute: async (userId) => ({ userId, success: true }) },
     importJobs: { start: async (userId, kind) => importJob('job-1', userId, kind) },
-    scheduledTracking: { enqueueEligible: async (limit) => ({ limit }) },
+    pushMaintenance: { run: async (limit) => ({ limit }) },
   });
   assert.deepEqual(
     await invoke(tracking, '/tracking/check', 'post', {

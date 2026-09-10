@@ -96,6 +96,7 @@ export const statusForError = (error: AppError): number => {
       return 403;
     case 'RATE_LIMIT_EXCEEDED':
     case 'IMPORT_RATE_LIMITED':
+    case 'EXPORT_UPLOAD_RATE_LIMITED':
     case 'MICROSOFT_VERIFICATION_COOLDOWN':
       return 429;
     case 'PAYLOAD_TOO_LARGE':
@@ -186,7 +187,7 @@ export const logErrorToSentry = (error: Error, req?: Request) => {
     logMetadata.userId = userId;
   }
   if (error instanceof AppError && statusForError(error) < 500) {
-    logger.warn('Operational request failure', {
+    logger.warn('Request rejected', {
       ...logMetadata,
       errorCode: error.code,
       message: error.publicMessage,

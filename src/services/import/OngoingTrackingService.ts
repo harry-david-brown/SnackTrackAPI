@@ -6,29 +6,17 @@ import type {
   ReceiptWriterLockPort,
 } from '../ports/ImportPorts';
 import { GmailImportService, GmailImportResult } from './GmailImportService';
-import logger from '../../config/logger';
 import type { OutlookImportService } from './OutlookImportService';
 import type { ImportLockHandle } from './ImportLockService';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
 
-export interface TrackingBatchResult {
-  eligible: number;
-  checked: number;
-  skipped: number;
-  failed: number;
-  newOrders: number;
-  updatedOrders: number;
-}
-
 /** Runs consented receipt checks from either the app or an external scheduler. */
 export class OngoingTrackingService {
-  private batchRunning = false;
-
   constructor(
     private readonly users: Pick<MailboxUserPort, 'findById' | 'findByIdWithGmailTokens'>,
     private readonly queries: Pick<
       ImportPreferencesQueryPort,
-      'get' | 'getTrackingBaseline' | 'getEligibleTrackingUserIds'
+      'get' | 'getTrackingBaseline'
     >,
     private readonly lifecycle: Pick<
       ImportLifecyclePort,
@@ -51,6 +39,24 @@ export class OngoingTrackingService {
   }
 
   async checkUserWithLock(userId: string, lockHandle: ImportLockHandle, execution?: ImportExecutionCheckpoint): Promise<GmailImportResult | null> {
+    return this.checkUserProviders(userId, lockHandle, execution, { gmail: true, microsoft: true });
+  }
+
+  /** Gmail-only path used by Gmail push notifications; it never wakes Outlook. */
+  async checkGmailUserWithLock(userId: string, lockHandle: ImportLockHandle, execution?: ImportExecutionCheckpoint): Promise<GmailImportResult | null> {
+    return this.checkUserProviders(userId, lockHandle, execution, { gmail: true, microsoft: false });
+  }
+
+  async checkOutlookUserWithLock(userId: string, lockHandle: ImportLockHandle, execution?: ImportExecutionCheckpoint): Promise<GmailImportResult | null> {
+    return this.checkUserProviders(userId, lockHandle, execution, { gmail: false, microsoft: true });
+  }
+
+  private async checkUserProviders(
+    userId: string,
+    lockHandle: ImportLockHandle,
+    execution: ImportExecutionCheckpoint | undefined,
+    providers: { readonly gmail: boolean; readonly microsoft: boolean },
+  ): Promise<GmailImportResult | null> {
     const [user, preferences, microsoft] = await Promise.all([
       this.users.findByIdWithGmailTokens(userId),
       this.queries.get(userId),
@@ -66,17 +72,17 @@ export class OngoingTrackingService {
     const durableMicrosoft = Boolean(
       microsoft && microsoft.state === 'connected' && microsoft.connectionMode === 'offline',
     );
-    if (!durableGmail && !durableMicrosoft) {
+    if ((!providers.gmail || !durableGmail) && (!providers.microsoft || !durableMicrosoft)) {
       await this.lifecycle.markTrackingReconnectRequired(userId);
       return null;
     }
 
     const results: GmailImportResult[] = [];
       const scopedExecutions = this.providerExecutions(execution);
-      if (durableGmail) {
+      if (providers.gmail && durableGmail) {
         results.push(await this.gmailImport.importFromGmail(user, lockHandle, 'background', scopedExecutions.gmail));
       }
-      if (durableMicrosoft && this.outlookImport) {
+      if (providers.microsoft && durableMicrosoft && this.outlookImport) {
         results.push(await this.outlookImport.importFromOutlook(user, lockHandle, 'background', scopedExecutions.microsoft));
       }
       const combined = this.combineResults(results);
@@ -138,54 +144,4 @@ export class OngoingTrackingService {
     };
   }
 
-  async runEligibleBatch(limit = 100): Promise<TrackingBatchResult> {
-    if (this.batchRunning) {
-      return { eligible: 0, checked: 0, skipped: 1, failed: 0, newOrders: 0, updatedOrders: 0 };
-    }
-    this.batchRunning = true;
-    try {
-      const userIds = await this.queries.getEligibleTrackingUserIds(
-        Math.max(1, Math.min(limit, 500)),
-      );
-      const summary: TrackingBatchResult = {
-        eligible: userIds.length,
-        checked: 0,
-        skipped: 0,
-        failed: 0,
-        newOrders: 0,
-        updatedOrders: 0,
-      };
-
-      // Deliberately sequential to stay within mailbox-provider and database rate limits.
-      for (const userId of userIds) {
-        try {
-          const result = await this.checkUser(userId);
-          if (!result) {
-            summary.skipped++;
-            continue;
-          }
-          summary.checked++;
-          summary.newOrders += result.newOrders;
-          summary.updatedOrders += result.updatedOrders;
-          if (!result.success) summary.failed++;
-        } catch (error) {
-          summary.failed++;
-          logger.warn('Background mailbox tracking failed for user', {
-            userId,
-            operation: 'mailbox_tracking',
-            outcome: 'failure',
-            error,
-          });
-        }
-      }
-      logger.info('Background mailbox tracking batch finished', {
-        operation: 'mailbox_tracking_batch',
-        outcome: summary.failed > 0 ? 'partial_failure' : 'success',
-        ...summary,
-      });
-      return summary;
-    } finally {
-      this.batchRunning = false;
-    }
-  }
 }

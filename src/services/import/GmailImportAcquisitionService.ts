@@ -67,7 +67,12 @@ export class GmailImportAcquisitionService {
         : undefined;
     const safety = await this.securityPolicies.get(user.id);
     return {
-      pages: this.mailbox.getEmailPages(user, { after: searchAfter, cursor, safety }),
+      pages: this.mailbox.getEmailPages(user, {
+        after: searchAfter,
+        cursor,
+        safety,
+        readPurpose: trigger === 'manual' ? 'historical_import' : 'monitoring',
+      }),
       exportCutoffs,
       searchAfter,
     };

@@ -3,6 +3,7 @@ export const IMPORT_JOB_KINDS = [
   'outlook_historical',
   'manual_tracking',
   'scheduled_tracking',
+  'gmail_push_tracking',
   'export_file',
 ] as const;
 export type ImportJobKind = (typeof IMPORT_JOB_KINDS)[number];

@@ -13,6 +13,7 @@ import { ImportLockService, type ImportLockHandle } from './ImportLockService';
 import type { ImportJob } from './ImportJobTypes';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
 import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
+import type { GmailPushTrackingService } from './GmailPushTrackingService';
 
 const permanentCodes = new Set([
   'VALIDATION_ERROR','INVALID_CSV_FORMAT','UNKNOWN_EXPORT_PROVIDER','NO_VALID_EXPORT_ORDERS',
@@ -35,8 +36,9 @@ export class ImportJobProcessor {
     private readonly gmail: Pick<HistoricalGmailImportService, 'executeWithLock'>,
     private readonly outlook: Pick<HistoricalOutlookImportService, 'executeWithLock'>,
     private readonly manual: Pick<ManualTrackingCheckService, 'executeWithLock'>,
-    private readonly tracking: Pick<OngoingTrackingService, 'checkUserWithLock'>,
+    private readonly tracking: Pick<OngoingTrackingService, 'checkUserWithLock'|'checkOutlookUserWithLock'>,
     private readonly testScenarios: Pick<ImportTestScenarioRepository, 'delayGmailImportIfEnabled'>,
+    private readonly gmailPush: Pick<GmailPushTrackingService, 'executeWithLock'>,
   ) {}
 
   async process(queueJob: Job<QueuePayload>): Promise<void> {
@@ -77,7 +79,8 @@ export class ImportJobProcessor {
         case 'gmail_historical': result = this.compactMailboxResult(await this.gmail.executeWithLock(operation.userId, lock, execution)); break;
         case 'outlook_historical': result = this.compactMailboxResult(await this.outlook.executeWithLock(operation.userId, lock, execution)); break;
         case 'manual_tracking': result = this.requireTrackingSuccess(await this.manual.executeWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>>); break;
-        case 'scheduled_tracking': result = this.requireTrackingSuccess((await this.tracking.checkUserWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>> | null) ?? { success: true, newOrders: 0, updatedOrders: 0, skipped: true }); break;
+        case 'scheduled_tracking': result = this.requireTrackingSuccess((await this.tracking.checkOutlookUserWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>> | null) ?? { success: true, newOrders: 0, updatedOrders: 0, skipped: true }); break;
+        case 'gmail_push_tracking': result = await this.gmailPush.executeWithLock(operation.userId, lock, execution); break;
         case 'export_file': result = await this.processExport(operation, lock); break;
       }
       await this.jobs.progress(operation.id, 'finalizing', 95);
