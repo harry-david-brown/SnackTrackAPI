@@ -109,6 +109,16 @@ const parserOptions = {
   mapHeaders: ({ header }: { header: string }) => header.replace(/^\uFEFF/, '').trim(),
 };
 
+const normalizeCsvHeader = (header: string): string => {
+  const trimmed = header.replace(/^\uFEFF/, '').trim();
+  return trimmed.startsWith('"') && trimmed.endsWith('"')
+    ? trimmed.slice(1, -1).replace(/""/g, '"').trim()
+    : trimmed;
+};
+
+const readCsvHeaders = (content: string): string[] =>
+  content.split(/\r?\n/, 1)[0].split(',').map(normalizeCsvHeader);
+
 const boundedText = (value: string, maximum: number): string => {
   const normalized = value.replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim();
   if (normalized.length > maximum) throw new ValidationError('CSV field exceeds the safe length limit', 'file');
@@ -154,7 +164,7 @@ export class CsvImportService {
    */
   detectCsvFormat(csvBuffer: Buffer): 'uber' | 'doordash' | 'unknown' {
     const content = csvBuffer.toString();
-    const headers = new Set(content.split(/\r?\n/, 1)[0].replace(/^\uFEFF/, '').split(',').map((header) => header.trim().toLowerCase()));
+    const headers = new Set(readCsvHeaders(content).map((header) => header.toLowerCase()));
 
     // Check for DoorDash order headers
     if (
@@ -688,8 +698,8 @@ export class CsvImportService {
       return { valid: false, errors };
     }
 
-    const firstLine = content.split(/\r?\n/, 1)[0].toLowerCase();
-    const headers = firstLine.split(',').map((header) => header.trim());
+    const firstLine = content.split(/\r?\n/, 1)[0];
+    const headers = readCsvHeaders(firstLine).map((header) => header.toLowerCase());
     if (headers.length > MAX_CSV_COLUMNS) return { valid: false, errors: ['CSV contains too many columns'] };
     if (new Set(headers).size !== headers.length) return { valid: false, errors: ['CSV contains duplicate headers'] };
     const format = this.detectCsvFormat(Buffer.from(firstLine));

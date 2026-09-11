@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  CsvImportService,
   decodeUberCsvRow,
   decodeDoorDashCsvRow,
 } = require('../dist/services/import/CsvImportService');
@@ -35,6 +36,16 @@ test('CSV boundary decoders normalize missing optional strings and reject non-st
 
   assert.throws(() => decodeUberCsvRow({ Restaurant_Name: 42 }), /must be a string/);
   assert.throws(() => decodeDoorDashCsvRow(['not', 'a', 'record']), /must be an object/);
+});
+
+test('CSV format validation accepts DoorDash exports with quoted headers', () => {
+  const csv = Buffer.from(
+    '"ITEM","CATEGORY","STORE_NAME","UNIT_PRICE","QUANTITY","SUBTOTAL","CREATED_AT","DELIVERY_TIME","DELIVERY_ADDRESS"\n',
+  );
+  const service = new CsvImportService();
+
+  assert.equal(service.detectCsvFormat(csv), 'doordash');
+  assert.deepEqual(service.validateCsvFormat(csv), { valid: true, errors: [] });
 });
 
 const extraction = (overrides = {}) => ({

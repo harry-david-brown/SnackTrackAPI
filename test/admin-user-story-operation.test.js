@@ -39,3 +39,35 @@ test('user timeline rejects malformed cursors before querying data', async () =>
   await assert.rejects(service.userTimeline('user-1', { cursor: 'not-a-cursor', limit: 30 }), error => error.code === 'VALIDATION_ERROR');
   assert.equal(queried, false);
 });
+
+test('owner Gmail expiry uses the reconnect transition and records an audit reason', async () => {
+  const queries = [];
+  const database = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return queries.length === 1 ? { rows: [{ gmail_connected: true }] } : { rows: [] };
+    },
+  };
+  const expired = [];
+  const service = new AdminManagementService(
+    database,
+    {},
+    {},
+    {},
+    { expireForTesting: async id => expired.push(id) },
+  );
+
+  const result = await service.expireGmailConnection({
+    userId: 'user-1',
+    actorAdminId: 'admin-1',
+    reason: 'Testing the reconnect experience',
+    requestId: 'request-1',
+  });
+
+  assert.deepEqual(result, { gmailStatus: 'reconnect_required' });
+  assert.deepEqual(expired, ['user-1']);
+  assert.match(queries[1].sql, /gmail_connection\.expired_for_testing/);
+  assert.deepEqual(queries[1].params.slice(0, 4), [
+    'admin-1', 'user-1', 'Testing the reconnect experience', 'request-1',
+  ]);
+});

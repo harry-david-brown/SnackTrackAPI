@@ -3,6 +3,7 @@ import type { AccountDeletionService } from '../account/AccountDeletionService';
 import type { DatabaseQueryExecutor, DatabaseRow } from '../ports/DatabasePort';
 import type { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
 import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
+import type { GmailConnectionService } from '../import/GmailConnectionService';
 
 const asNumber = (value: unknown): number => Number(value ?? 0);
 const asIso = (value: unknown): string | null => {
@@ -143,6 +144,7 @@ export class AdminManagementService {
     private readonly accountDeletion: Pick<AccountDeletionService, 'deleteAccount'>,
     private readonly mailboxSecurityPolicies: MailboxSecurityPolicyRepository,
     private readonly importTestScenarios: ImportTestScenarioRepository,
+    private readonly gmailConnections: Pick<GmailConnectionService, 'expireForTesting'>,
   ) {}
 
   async listUsers(filters: AdminUserFilters) {
@@ -200,6 +202,7 @@ export class AdminManagementService {
     const userResult = await this.database.query<DatabaseRow>(
       `SELECT u.id, u.email, u.email_verified, u.timezone, u.created_at,
          COALESCE(u.gmail_connected, false) AS gmail_connected,
+         (u.gmail_refresh_token IS NOT NULL OR u.gmail_access_token IS NOT NULL) AS gmail_has_credentials,
          (SELECT status FROM mailbox_connections WHERE user_id=u.id AND provider='microsoft') AS microsoft_status,
          p.gmail_import_status, p.tracking_status, p.ongoing_tracking_consent_state,
          p.last_successful_check_at, p.last_tracking_error_code
@@ -246,7 +249,13 @@ export class AdminManagementService {
     return {
       user: { id: String(user.id), email: String(user.email), emailVerified: Boolean(user.email_verified),
         timezone: String(user.timezone), createdAt: asIso(user.created_at) },
-      connections: { gmail: Boolean(user.gmail_connected), microsoft: user.microsoft_status ?? 'disconnected' },
+      connections: {
+        gmail: Boolean(user.gmail_connected),
+        gmailStatus: !user.gmail_connected
+          ? 'disconnected'
+          : user.gmail_has_credentials ? 'connected' : 'reconnect_required',
+        microsoft: user.microsoft_status ?? 'disconnected',
+      },
       importState: { gmail: user.gmail_import_status ?? 'never_started' },
       tracking: {
         status: user.tracking_status ?? 'inactive',
@@ -366,6 +375,33 @@ export class AdminManagementService {
 
   updateGmailLongRunningScenario(input: { userId: string; enabled: boolean; reason: string; actorAdminId: string; requestId?: string }) {
     return this.importTestScenarios.setGmailLongRunning(input);
+  }
+
+  async expireGmailConnection(input: { userId: string; reason: string; actorAdminId: string; requestId?: string }) {
+    const reason = input.reason.trim();
+    if (reason.length < 10 || reason.length > 500) throw new ValidationError('Must be 10–500 characters', 'reason');
+    const result = await this.database.query<DatabaseRow>(
+      'SELECT COALESCE(gmail_connected, false) AS gmail_connected FROM users WHERE id=$1',
+      [input.userId],
+    );
+    const user = result.rows[0];
+    if (!user) throw new NotFoundError('User', input.userId);
+    if (!user.gmail_connected) throw new ValidationError('This user does not have a Gmail connection to expire');
+
+    await this.gmailConnections.expireForTesting(input.userId);
+    await this.database.query(
+      `INSERT INTO admin_audit_events
+       (actor_admin_id,action,target_type,target_id,reason,request_id,outcome,metadata)
+       VALUES ($1,'gmail_connection.expired_for_testing','user',$2,$3,$4,'success',$5::jsonb)`,
+      [
+        input.actorAdminId,
+        input.userId,
+        reason,
+        input.requestId ?? null,
+        JSON.stringify({ provider: 'gmail', resultingState: 'reconnect_required' }),
+      ],
+    );
+    return { gmailStatus: 'reconnect_required' as const };
   }
 
   async importOperations(filters: AdminImportOperationFilters) {

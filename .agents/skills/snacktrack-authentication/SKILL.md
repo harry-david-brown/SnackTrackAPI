@@ -27,6 +27,8 @@ Preserve one coherent identity and session contract across SnackTrackAPI and Sna
 - Refresh atomically consumes the presented refresh token before issuing its replacement. Distinguish absent, expired, malformed, revoked/replayed, and session-store-unavailable outcomes with stable codes.
 - Refresh-token consumption and logout revocation fail closed when the Redis-backed session store is unavailable. `SESSION_STORE_UNAVAILABLE` is retryable and must preserve local credentials; only terminal session failures clear credentials and query state.
 - Authentication identity belongs in `UserContext`; receipts, analytics, import preferences, and other server resources remain in TanStack Query.
+- `SnackTrackApp/app/_layout.tsx` is the only authenticated-route guard. Keep protected screens under its root `Stack.Protected`; retain protected deep links while session hydration is unresolved, and do not add competing redirects in tabs or individual protected screens.
+- Mount notification, import-background, export-ready, and similar session-global controllers only for a fully resolved authenticated user. Logout must remove their listeners and protected navigation history through the root ownership boundary.
 - Verification-code consumption and the protected mutation share one transaction. Do not verify a code in one operation and mutate the account later.
 - Account deletion clears local auth state only after the authoritative server deletion commits.
 - Never log passwords, tokens, OAuth codes, raw identity claims, verification codes, or provider credentials.
@@ -36,7 +38,7 @@ Preserve one coherent identity and session contract across SnackTrackAPI and Sna
 - API ports: `SnackTrackAPI/src/services/ports/AuthPorts.ts`.
 - API capabilities: `SnackTrackAPI/src/services/auth/`, including `SessionService.ts`, `TokenService.ts`, and `AuthenticationActivityService.ts`, plus `OtpService.ts` and focused auth route factories.
 - Persistence adapters: `UserRepository.ts`, `OAuthRepository.ts`, and migration `002_auth_and_provider_identity.ts`.
-- App boundary: `services/authApi.ts`, `services/normalizers/authNormalizers.ts`, `features/auth/contracts.ts`, `contexts/UserContext.tsx`, `services/authSessionCoordinator.ts`, and `utils/tokenManager.ts`.
+- App boundary: `services/authApi.ts`, `services/normalizers/authNormalizers.ts`, `features/auth/contracts.ts`, `contexts/UserContext.tsx`, `services/authSessionCoordinator.ts`, `utils/tokenManager.ts`, `app/_layout.tsx`, and `features/navigation/sessionNavigationState.ts`.
 
 ## Handoff
 

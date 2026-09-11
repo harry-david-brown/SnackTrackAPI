@@ -40,6 +40,7 @@ const dependencies = (overrides = {}) => ({
   lifecycle: {
     setMonitoringConsent: async () => {},
     setOngoingTrackingConsent: async () => {},
+    markTrackingReconnectRequired: async () => {},
     ...overrides.lifecycle,
   },
   syncRuns: { resetGmailImportStatus: async () => {}, ...overrides.syncRuns },
@@ -178,6 +179,19 @@ test('disconnect revokes granted lifecycle consent and optionally resets Gmail h
     'tracking:revoked',
     'reset',
   ]);
+});
+
+test('admin expiry simulation removes Gmail access and enters reconnect-required tracking', async () => {
+  const events = [];
+  const { service } = serviceFor({
+    users: { markGmailReconnectRequired: async () => events.push('expire') },
+    lifecycle: { markTrackingReconnectRequired: async () => events.push('tracking:reconnect_required') },
+    health: { invalidate: () => events.push('invalidate') },
+  });
+
+  await service.expireForTesting(userId);
+
+  assert.deepEqual(events, ['expire', 'invalidate', 'tracking:reconnect_required']);
 });
 
 test('Gmail OAuth state decoder rejects malformed signed payloads', () => {

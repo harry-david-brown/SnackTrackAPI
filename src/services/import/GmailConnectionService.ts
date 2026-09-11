@@ -25,11 +25,14 @@ const ALLOWED_APP_REDIRECT_SCHEMES = new Set([
   'http:',
 ]);
 
-type UserPort = Pick<MailboxUserPort, 'updateGmailTokens' | 'disconnectGmail'>;
+type UserPort = Pick<
+  MailboxUserPort,
+  'updateGmailTokens' | 'disconnectGmail' | 'markGmailReconnectRequired'
+>;
 type QueryPort = Pick<ImportPreferencesQueryPort, 'get'>;
 type LifecyclePort = Pick<
   ImportLifecyclePort,
-  'setMonitoringConsent' | 'setOngoingTrackingConsent'
+  'setMonitoringConsent' | 'setOngoingTrackingConsent' | 'markTrackingReconnectRequired'
 >;
 type SyncRunPort = Pick<GmailSyncRunPort, 'resetGmailImportStatus'>;
 interface ConnectionHealthCachePort {
@@ -141,6 +144,14 @@ export class GmailConnectionService {
       await this.lifecycle.setOngoingTrackingConsent(userId, 'revoked');
     }
     if (resetImportStatus) await this.syncRuns.resetGmailImportStatus(userId);
+  }
+
+  /** Simulates an invalid Gmail grant so clients exercise their normal reconnect flow. */
+  async expireForTesting(userId: string): Promise<void> {
+    await this.gmailWatches?.stopForUser(userId);
+    await this.users.markGmailReconnectRequired(userId);
+    this.connectionHealth.invalidate(userId);
+    await this.lifecycle.markTrackingReconnectRequired(userId);
   }
 
   private assertRequiredScope(grant: GmailOAuthGrant): void {

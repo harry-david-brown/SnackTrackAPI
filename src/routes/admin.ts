@@ -259,6 +259,15 @@ export const createAdminRouter = (d: AdminRouterDependencies): Router => {
       requestId: req.requestId,
     }) });
   }));
+  router.post('/users/:id/test-scenarios/gmail-expired', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
+    const body = requireObject(req.body);
+    res.json(await d.management.expireGmailConnection({
+      userId: requireUuid(req.params.id, 'id'),
+      reason: string(body, 'reason'),
+      actorAdminId: req.admin!.id,
+      requestId: req.requestId,
+    }));
+  }));
   router.delete('/users/:id', d.requireOwner, d.requireCsrf, asyncHandler(async (req, res) => {
     res.json(await d.management.deleteUser({ userId: requireUuid(req.params.id, 'id'), confirmationEmail: string(req.body, 'confirmationEmail'), reason: string(req.body, 'reason'), actorAdminId: req.admin!.id, requestId: req.requestId }));
   }));

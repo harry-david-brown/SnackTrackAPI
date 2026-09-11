@@ -33,6 +33,8 @@ Use this skill to preserve the distinctions between connection, import, export, 
 - `SnackTrackApp/hooks/useGmailImport.ts`: connect, reconnect, import, and error handling.
 - `SnackTrackApp/hooks/useOutlookImport.ts` and `useImportOperation.ts`: Outlook actions and durable operation polling/invalidation.
 - `SnackTrackApp/hooks/useImportFlowController.ts`: multi-step import-flow orchestration and OAuth resume outcomes.
+- `SnackTrackApp/features/navigation/NavigationPolicyProvider.tsx`: authenticated external import/export intents, live-route decisions, deduplication, and critical-flow blockers.
+- `SnackTrackApp/components/import/ImportBackgroundController.tsx`, `ImportNotificationController.tsx`, and `components/upload/ExportReadyNotifier.tsx`: authenticated asynchronous navigation sources.
 - `SnackTrackApp/app/(tabs)/upload.tsx`: three-step import checklist and export upload UX.
 - `SnackTrackApp/components/dashboard/dashboardTrackingState.ts`: dashboard next-step/tracking precedence.
 - `SnackTrackApp/components/wrapped/postWrappedState.ts`: post-summary proposition precedence.
@@ -69,6 +71,10 @@ Confirm paths with `rg --files` before editing; use `snacktrack-codebase-navigat
 - A completed one-time Gmail import does not imply credentials remain healthy or ongoing monitoring is enabled.
 - An accepted operation is not a completed import. PostgreSQL job/outbox state is authoritative; Redis/BullMQ downtime may leave it waiting for queue recovery.
 - Make dashboard, upload, and post-summary surfaces resolve the same server truth with intentionally different copy—not separate truth models.
+- Send background completion, notification taps, and export-ready actions through `dispatchExternalNavigation()`; these sources must not call Expo Router directly.
+- Background import completion may auto-open only from the actual Home tab. On History, Summary, Profile, Settings, import screens, and other routes, preserve the user's current task and rely on result/dashboard state or system notifications for discovery.
+- Evaluate notification and export-ready actions against the live route and authentication state when tapped. The same operation's current result is a no-op, and identical pending destinations are deduplicated.
+- Register upload/submission and request-saving critical sections with `useExternalNavigationBlocker()`. Blocked external actions are discarded, not queued, and must not record a handoff transition that did not occur.
 
 ## Verification focus
 
@@ -86,3 +92,4 @@ Cover at least:
 - duplicate, overlapping, and newer receipt preservation;
 - cache invalidation and refetch after every mutation.
 - reset during active Gmail sync or export upload, including lock timeout and post-reset scheduler eligibility.
+- background completion from Home versus non-Home routes, current-operation results, repeated notification taps, delayed export-alert taps, authentication loss, and blocker acquisition/release.

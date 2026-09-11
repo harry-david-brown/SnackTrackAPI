@@ -521,6 +521,7 @@ export class ServiceContainer {
       this.accountDeletionService,
       this.mailboxSecurityPolicyRepository,
       this.importTestScenarioRepository,
+      this.gmailConnectionService,
     );
     this.adminAnalyticsQueryService = new AdminAnalyticsQueryService(this.postgres);
     this.adminAuthService = new AdminAuthService(this.adminRepository, this.emailSender, {
