@@ -16,15 +16,16 @@ export class ImportPushNotificationService {
   async notify(jobId: string): Promise<void> {
     const job = await this.jobs.findById(jobId);
     if (!job || (job.status !== 'succeeded' && job.status !== 'failed')) return;
+    if (job.kind==='export_ready_check' && job.result?.exportReadyDetected!==true) return;
     const succeeded = job.status === 'succeeded';
     const completion = importCompletionResult(job.result);
     const exportReady = succeeded && job.result?.exportReadyDetected === true;
     const scheduledDetection = succeeded && job.trigger === 'scheduler' && completion.hasChanges && !exportReady;
     if (succeeded && job.trigger === 'scheduler' && !completion.hasChanges && !exportReady) return;
-    const devices = await this.devices.listEnabled(job.userId);
+    const devices = await this.devices.listPendingForJob(job.userId,job.id);
     if (!devices.length) return;
     const title = exportReady
-      ? 'Your Uber data is ready'
+      ? `Your ${job.exportProvider==='doordash'?'DoorDash':'Uber'} data is ready`
       : scheduledDetection ? completion.title
       : succeeded ? 'SnackTrack import complete' : 'SnackTrack import needs attention';
     const body = exportReady
@@ -42,12 +43,13 @@ export class ImportPushNotificationService {
       sound: 'default',
       title,
       body,
-      data: { type: 'import_operation', operationId: job.id, route: '/(tabs)/upload' },
+      data: job.kind==='export_ready_check' ? {type:'export_ready',provider:job.exportProvider,requestId:job.checkpoint.requestId} : { type: 'import_operation', operationId: job.id, route: '/(tabs)/upload' },
     }));
     const tickets: ExpoPushTicket[] = [];
     for (const chunk of this.expo.chunkPushNotifications(messages)) {
       tickets.push(...await this.expo.sendPushNotificationsAsync(chunk));
     }
+    let retryableFailure=false;
     for (let index = 0; index < eligible.length; index += 1) {
       const device = eligible[index];
       const ticket = tickets[index];
@@ -56,10 +58,12 @@ export class ImportPushNotificationService {
       } else {
         const code = ticket?.status === 'error' ? ticket.details?.error : 'PUSH_FAILED';
         const disabled = code === 'DeviceNotRegistered';
+        if (!disabled) retryableFailure=true;
         if (disabled) await this.devices.markDisabled(device.id);
         await this.devices.recordDelivery(job.id, device.id, disabled ? 'device_disabled' : 'failed', undefined, code);
       }
     }
+    if (retryableFailure) throw new Error('Push delivery needs retry');
   }
 
   async processReceipts(): Promise<number> {

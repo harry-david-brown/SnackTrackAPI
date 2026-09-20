@@ -24,7 +24,7 @@ export class ExportReadyAlertRepository {
        WHERE p.status='requested' AND p.requested_at IS NOT NULL AND p.alert_consent='granted'
          AND p.alert_consent_version=$1 AND ($2::uuid IS NULL OR p.user_id=$2)
          AND ($2::uuid IS NOT NULL OR COALESCE(p.alert_next_check_at,NOW())<=NOW())
-         AND (u.gmail_connected=TRUE OR EXISTS(SELECT 1 FROM mailbox_connections m WHERE m.user_id=p.user_id AND m.state='connected'))
+         AND ((u.gmail_connected=TRUE AND u.gmail_connection_mode='offline') OR EXISTS(SELECT 1 FROM mailbox_connections m WHERE m.user_id=p.user_id AND m.status='connected' AND m.connection_mode='offline'))
        ORDER BY p.alert_next_check_at NULLS FIRST LIMIT $3`, [BACKGROUND_ALERT_CONSENT_VERSION,userId ?? null,limit]);
     return result.rows.map(r=>({userId:r.user_id,provider:r.provider,requestId:r.request_id}));
   }

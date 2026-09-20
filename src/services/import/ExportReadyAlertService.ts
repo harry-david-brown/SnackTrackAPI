@@ -17,10 +17,11 @@ export class ExportReadyAlertService {
     readonly enabled: boolean,
   ) {}
 
-  async enqueueEligible(limit=500, userId?: string): Promise<number> {
+  async enqueueEligible(limit=500, userId?: string, provider?: ExportProvider): Promise<number> {
     if (!this.enabled) return 0;
     let queued=0;
     for (const candidate of await this.alerts.due(limit,userId)) {
+      if(provider && candidate.provider!==provider) continue;
       try {
         await this.jobs.create({userId:candidate.userId,kind:'export_ready_check',trigger:'scheduler',journeyContext:'routine',
           exportProvider:candidate.provider,initialCheckpoint:{requestId:candidate.requestId},

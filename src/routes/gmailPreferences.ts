@@ -16,6 +16,8 @@ export interface GmailPreferencesRouterDependencies {
   readonly authenticate: RequestHandler;
   readonly preferences: Pick<
     ImportPreferencesService,
+    | 'queueProviderReadyCheck'
+    | 'setProviderReadyAlertConsent'
     | 'get'
     | 'setMonitoringConsent'
     | 'setOngoingTrackingConsent'
@@ -59,6 +61,15 @@ export const createGmailPreferencesRouter = (
 ): Router => {
   const router = Router();
 
+  router.post('/preferences/check-provider-ready',dependencies.authenticate,
+    asyncHandler(async(request:Request,response:Response)=>{
+      response.json(await dependencies.preferences.queueProviderReadyCheck(authenticatedUserId(request),providerInput(request)));
+    }));
+  router.put('/preferences/provider-ready-alert-consent', dependencies.authenticate,
+    asyncHandler(async (request: Request,response: Response)=>{
+      const input=consentInput(request,'background ready alerts');
+      response.json(await dependencies.preferences.setProviderReadyAlertConsent(authenticatedUserId(request),providerInput(request),input.decision,input.consentVersion));
+    }));
   router.get(
     '/preferences/setup-guidance',
     dependencies.authenticate,

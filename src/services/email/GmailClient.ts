@@ -256,6 +256,7 @@ export class GmailClient implements MailboxClient {
             id: messageId,
           }),
         );
+        if (!message.internalDate || Number(message.internalDate)<requestedTimestamp) continue;
         const payload = message.payload;
         let from = '';
         let to = '';

@@ -173,9 +173,9 @@ export class ImportJobRepository {
       const active = await transaction.query<Row>(
         `SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1
          AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')
-         AND (kind<>'export_ready_check' OR $2='export_ready_check')
+         AND ((kind<>'export_ready_check' AND $2<>'export_ready_check') OR (kind='export_ready_check' AND $2='export_ready_check' AND export_provider=$3))
          ORDER BY created_at DESC LIMIT 1`,
-        [input.userId, input.kind],
+        [input.userId, input.kind, input.exportProvider ?? null],
       );
       if (active.rows[0]) {
         const activeJob = decode(active.rows[0]);

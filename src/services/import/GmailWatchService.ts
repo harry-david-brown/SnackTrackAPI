@@ -19,7 +19,8 @@ export class GmailWatchService {
       this.preferences.getProviderExports(userId),
     ]);
     const exportAlertActive = preferences.monitoringConsentState === 'granted' &&
-      exports.uber_eats.status === 'requested';
+      exports.uber_eats.status === 'requested' ||
+      Object.values(exports).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted');
     if (
       !user?.gmailConnected || user.gmailConnectionMode !== 'offline' || !user.gmailRefreshToken ||
       (!exportAlertActive && preferences.ongoingTrackingConsentState !== 'granted')

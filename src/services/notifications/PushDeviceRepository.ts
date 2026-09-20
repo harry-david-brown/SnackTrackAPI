@@ -43,6 +43,18 @@ export class PushDeviceRepository {
     );
   }
 
+  async listPendingForJob(userId: string, jobId: string): Promise<PushDevice[]> {
+    const result=await this.database.query<{id:string;expo_push_token:string;platform:'ios'|'android'}>(
+      `SELECT d.id,d.expo_push_token,d.platform FROM push_devices d
+       JOIN import_jobs j ON j.id=$2 JOIN users u ON u.id=j.user_id AND u.import_generation=j.import_generation
+       WHERE d.user_id=$1 AND j.user_id=$1 AND d.enabled
+         AND NOT EXISTS(SELECT 1 FROM push_deliveries delivery WHERE delivery.job_id=j.id AND delivery.push_device_id=d.id AND delivery.status IN ('sent','delivered','device_disabled'))
+         AND (j.kind<>'export_ready_check' OR EXISTS(SELECT 1 FROM user_export_provider_preferences p
+           WHERE p.user_id=j.user_id AND p.provider=j.export_provider AND p.request_id::text=j.checkpoint->>'requestId'
+             AND p.status='file_ready' AND p.alert_consent='granted'))`,[userId,jobId]);
+    return result.rows.map(row=>({id:row.id,token:row.expo_push_token,platform:row.platform}));
+  }
+
   async markDisabled(deviceId: string): Promise<void> {
     await this.database.query(`UPDATE push_devices SET enabled=FALSE,disabled_at=NOW(),updated_at=NOW() WHERE id=$1`, [deviceId]);
   }

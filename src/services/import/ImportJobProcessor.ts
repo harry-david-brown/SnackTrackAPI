@@ -60,6 +60,10 @@ export class ImportJobProcessor {
   async process(queueJob: Job<QueuePayload>): Promise<void> {
     const pending = await this.jobs.findById(queueJob.data.jobId);
     if (!pending || pending.status === 'cancelled') return;
+    if (pending.kind==='export_ready_check' && await this.jobs.findActive(pending.userId)) {
+      await queueJob.moveToDelayed(Date.now()+30_000,queueJob.token);
+      throw new DelayedError();
+    }
     let lock: ImportLockHandle | null;
     try {
       lock = await ImportLockService.acquireLockWithWait(pending.userId, 300_000);

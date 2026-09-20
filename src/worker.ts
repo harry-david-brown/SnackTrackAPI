@@ -11,7 +11,7 @@ import { ImportPushNotificationService } from './services/notifications/ImportPu
 import { createQueueWorker, EXPORT_IMPORT_QUEUE, ImportQueuePublisher, MAILBOX_IMPORT_QUEUE, NOTIFICATION_QUEUE, OutboxDispatcher, queueAttemptFailureMessage, type QueuePayload } from './services/queue/ImportQueues';
 
 const queueConfig = config.getQueueConfig();
-const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService, container.importTestScenarioRepository, container.gmailPushTrackingService, container.receiptRebuildService, container.receiptRepository);
+const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService, container.importTestScenarioRepository, container.gmailPushTrackingService, container.receiptRebuildService, container.receiptRepository, ACTIVE_RECEIPT_POLICY, container.exportReadyAlertService);
 const push = new ImportPushNotificationService(container.importJobRepository, container.pushDeviceRepository, config.getPushConfig().deliveryMode, logger);
 const publisher = new ImportQueuePublisher(container.importJobRepository, queueConfig);
 const dispatcher = new OutboxDispatcher(container.importJobRepository, publisher, logger);

@@ -1,3 +1,6 @@
+import type { ExportReadyAlertRepository } from '../data/ExportReadyAlertRepository';
+import { BACKGROUND_ALERT_CONSENT_VERSION } from '../data/ExportReadyAlertRepository';
+import { ImportLockService } from './ImportLockService';
 import { AppError, ConflictError } from '../../core/errors';
 import type { User } from '../../models/User';
 import type {
@@ -61,7 +64,26 @@ export class ImportPreferencesService {
     private readonly sourceCoverage: SourceCoveragePort,
     private readonly outlookExportReadyDetector?: OutlookExportReadyDetector,
     private readonly gmailWatches?: GmailWatchLifecycle,
+    private readonly readyAlerts?: Pick<ExportReadyAlertRepository,'setConsent'>,
+    private readonly backgroundAlertsEnabled=false,
+    private readonly enqueueReadyCheck?: (userId:string,provider:ExportProvider)=>Promise<void>,
   ) {}
+
+  async queueProviderReadyCheck(userId:string,provider:ExportProvider):Promise<ImportPreferencesProjection>{
+    if(this.backgroundAlertsEnabled) await this.enqueueReadyCheck?.(userId,provider);
+    return this.status.getPreferences(userId);
+  }
+
+  async setProviderReadyAlertConsent(userId: string, provider: ExportProvider, decision: ConsentDecision, version?: string): Promise<ImportPreferencesProjection> {
+    if (!this.readyAlerts || (decision==='granted' && !this.backgroundAlertsEnabled)) throw new ConflictError('EXPORT_ALERTS_UNAVAILABLE','Background ready alerts are not available yet.');
+    if (decision==='granted' && version!==BACKGROUND_ALERT_CONSENT_VERSION) throw new ConflictError('CONSENT_VERSION_REQUIRED','Review the current ready-alert consent.');
+    const lock=await ImportLockService.acquireLockWithWait(userId,5_000);
+    if (!lock) throw new ConflictError('IMPORT_IN_PROGRESS','Please try again when the current operation finishes.');
+    try { await this.readyAlerts.setConsent(userId,provider,decision); }
+    finally { await ImportLockService.releaseLock(lock); }
+    await this.syncGmailWatchForCurrentPurpose(userId);
+    return this.status.getPreferences(userId);
+  }
 
   get(userId: string, requestTimezone?: string): Promise<ImportPreferencesProjection> {
     return this.status.getPreferences(userId, requestTimezone);
@@ -167,7 +189,8 @@ export class ImportPreferencesService {
       this.queries.getProviderExports(userId),
     ]);
     const active = current.ongoingTrackingConsentState === 'granted' ||
-      (current.monitoringConsentState === 'granted' && exports.uber_eats.status === 'requested');
+      (current.monitoringConsentState === 'granted' && exports.uber_eats.status === 'requested') ||
+      Object.values(exports).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted');
     if (active) await this.gmailWatches.ensureForUser(userId).catch(() => false);
     else await this.gmailWatches.stopForUser(userId);
   }
@@ -213,7 +236,7 @@ export class ImportPreferencesService {
       this.queries.getProviderExports(userId),
     ]);
     const uberExport = providerExports.uber_eats;
-    if (!this.shouldCheckUberExport(preferences, uberExport)) {
+    if (uberExport.readyAlert?.consentState==='granted' || !this.shouldCheckUberExport(preferences, uberExport)) {
       return { detected: false, preferences: await this.status.getPreferences(userId) };
     }
 

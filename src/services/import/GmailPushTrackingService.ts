@@ -12,6 +12,7 @@ export class GmailPushTrackingService {
     private readonly tracking: Pick<OngoingTrackingService, 'checkGmailUserWithLock'>,
     private readonly pushes: Pick<GmailPushStatePort, 'markProcessed'|'releaseDispatch'>,
     private readonly watches: Pick<GmailWatchService, 'stopForUser'>,
+    private readonly exportAlerts?: {enqueueEligible(limit: number,userId: string):Promise<number>},
   ) {}
 
   async executeWithLock(
@@ -23,6 +24,7 @@ export class GmailPushTrackingService {
       ? execution.checkpoint.historyId
       : null;
     try {
+      await this.exportAlerts?.enqueueEligible(2,userId);
       const exportReady = await this.preferences.checkGmailExportReady(userId);
       const tracking = await this.tracking.checkGmailUserWithLock(userId, lock, execution);
       if (tracking && !tracking.success) {
@@ -32,7 +34,8 @@ export class GmailPushTrackingService {
         });
       }
       await this.pushes.markProcessed(userId);
-      if (exportReady.detected && exportReady.preferences.ongoingTracking.consentState !== 'granted') {
+      if (exportReady.detected && exportReady.preferences.ongoingTracking.consentState !== 'granted' &&
+        !Object.values(exportReady.preferences.export.providers).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted')) {
         await this.watches.stopForUser(userId);
       }
       return {

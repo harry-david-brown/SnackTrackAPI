@@ -1,3 +1,5 @@
+import { ExportReadyAlertRepository } from '../data/ExportReadyAlertRepository';
+import { ExportReadyAlertService } from '../import/ExportReadyAlertService';
 import { MarketHistoryRepository } from '../data/MarketHistoryRepository';
 import { FinazonMarketHistory } from '../market/FinazonMarketHistory';
 import { RefreshMarketHistoryService } from '../market/RefreshMarketHistoryService';
@@ -156,6 +158,8 @@ export class ServiceContainer {
   readonly outlookImportAcquisitionService: OutlookImportAcquisitionService;
   readonly outlookImportService: OutlookImportService;
   readonly historicalOutlookImportService: HistoricalOutlookImportService;
+  readonly exportReadyAlertRepository: ExportReadyAlertRepository;
+  readonly exportReadyAlertService: ExportReadyAlertService;
   readonly outlookExportReadyDetector: OutlookExportReadyDetector;
   readonly accountResetService: AccountResetService;
   readonly receiptClearService: ReceiptClearService;
@@ -438,6 +442,8 @@ export class ServiceContainer {
       this.mailboxConnectionRepository,
       this.gmailWatchService,
     );
+    const backgroundAlertsEnabled = process.env.EXPORT_READY_BACKGROUND_ENABLED === 'true';
+    this.exportReadyAlertRepository = new ExportReadyAlertRepository(this.postgres);
     this.importStatusService = new ImportStatusService(
       this.userRepository,
       this.gmailConnectionHealthService,
@@ -445,6 +451,7 @@ export class ServiceContainer {
       this.importSourceCoverageRepository,
       this.microsoftMailboxConnectionHealthService,
       this.mailboxConnectionRepository,
+      backgroundAlertsEnabled,
     );
     this.historicalGmailImportService = new HistoricalGmailImportService(
       this.importStatusService,
@@ -460,7 +467,11 @@ export class ServiceContainer {
       this.importSourceCoverageRepository,
       this.outlookExportReadyDetector,
       this.gmailWatchService,
+      this.exportReadyAlertRepository,
+      backgroundAlertsEnabled,
+      async (userId,provider)=>{ await this.exportReadyAlertService.enqueueEligible(2,userId,provider); },
     );
+    this.exportReadyAlertService = new ExportReadyAlertService(this.exportReadyAlertRepository,this.importJobRepository,this.importStatusService,this.gmailClient,this.outlookExportReadyDetector,backgroundAlertsEnabled);
     this.gmailPushDispatchService = new GmailPushDispatchService(
       this.gmailPushRepository,
       this.importJobRepository,
@@ -474,6 +485,7 @@ export class ServiceContainer {
       this.ongoingTrackingService,
       this.gmailPushRepository,
       this.gmailWatchService,
+      this.exportReadyAlertService,
     );
     this.manualTrackingCheckService = new ManualTrackingCheckService(
       this.ongoingTrackingService,
