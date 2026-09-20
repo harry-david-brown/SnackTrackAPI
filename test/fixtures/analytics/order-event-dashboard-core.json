@@ -1,0 +1,102 @@
+{
+  "localDate": "2023-12-11",
+  "timezone": "America/Toronto",
+  "generatedAt": "2023-12-11T18:00:00.000Z",
+  "nextRefreshAt": "2023-12-12T05:00:00.000Z",
+  "metricVersion": "daily-v17",
+  "availableCandidateCount": 22,
+  "partialExportProvider": "uber_eats",
+  "insights": [
+    {
+      "id": "order-outcomes",
+      "presentation": "timeline",
+      "category": "progress",
+      "icon": "receipt",
+      "eyebrow": "Your order picture",
+      "title": "Attempts and deliveries",
+      "detail": "Each established order counts once. Refunds change cost, not whether an order was delivered.",
+      "events": [
+        {
+          "label": "Order attempts",
+          "value": 5
+        },
+        {
+          "label": "Completed deliveries",
+          "value": 4
+        },
+        {
+          "label": "Canceled",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": "net-order-costs",
+      "presentation": "timeline",
+      "category": "progress",
+      "icon": "receipt",
+      "eyebrow": "Costs by currency",
+      "title": "Known net order costs",
+      "detail": "Includes wallet payments and charged cancellations, after refunds. Possible additional orders stay separate; this is not bank cash flow.",
+      "events": [
+        {
+          "label": "CAD",
+          "value": "157.02",
+          "detail": "5 priced attempts"
+        }
+      ]
+    },
+    {
+      "id": "refunds-and-cancellations",
+      "presentation": "timeline",
+      "category": "progress",
+      "icon": "receipt",
+      "eyebrow": "Order outcomes",
+      "title": "Refunds and cancellations",
+      "detail": "1 confirmed refunded orders; 0 likely refunds inferred from exports, kept separate.",
+      "events": [
+        {
+          "label": "Charged cancellations",
+          "value": 1
+        },
+        {
+          "label": "Zero-balance cancellations",
+          "value": 0
+        },
+        {
+          "label": "Fully refunded",
+          "value": 1
+        },
+        {
+          "label": "Partially refunded",
+          "value": 0
+        },
+        {
+          "label": "CAD",
+          "value": "43.26 cancellation cost; 22.48 known confirmed refunds"
+        }
+      ]
+    },
+    {
+      "id": "multi-order-day",
+      "presentation": "hero",
+      "category": "extremes",
+      "icon": "delivery",
+      "eyebrow": "Completed deliveries",
+      "title": "Most deliveries in a day",
+      "value": 4,
+      "valueFormat": "number",
+      "headline": "Dec 10, 2023",
+      "detail": "CAD 113.76 net cost. Refunded deliveries count once; canceled attempts are excluded. Includes every merchant category.",
+      "period": {
+        "startDate": "2023-12-10"
+      },
+      "methodology": {
+        "sampleSize": 4,
+        "estimated": false,
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      },
+      "currencyCode": "CAD"
+    }
+  ]
+}

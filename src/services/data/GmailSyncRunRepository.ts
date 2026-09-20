@@ -2,6 +2,7 @@ import type { GmailSyncTrigger, SyncRunCounts } from '../import/ImportLifecycleT
 import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
 import { databaseRow, databaseString } from './DatabaseRowDecoder';
 import type { ImportEventRepository } from './ImportEventRepository';
+import { ConflictError } from '../../core/errors';
 
 type EventPort = Pick<ImportEventRepository, 'record'>;
 
@@ -41,13 +42,21 @@ export class GmailSyncRunRepository {
     if (updated) await this.events.record(userId, 'gmail_import_reset');
   }
 
-  async startSyncRun(userId: string, triggerType: GmailSyncTrigger): Promise<string> {
+  async startSyncRun(userId: string, triggerType: GmailSyncTrigger, importJobId?: string): Promise<string> {
     await this.ensurePreferences(userId);
-    const result = await this.database.query(
+    const result = importJobId ? await this.database.query(
+      `INSERT INTO gmail_sync_runs(user_id,trigger_type,import_job_id)
+       SELECT j.user_id,$2,j.id FROM import_jobs j JOIN users u ON u.id=j.user_id
+       WHERE j.id=$3 AND j.user_id=$1 AND j.import_generation=u.import_generation AND j.status IN ('running','retrying')
+       ON CONFLICT(user_id,import_job_id) WHERE import_job_id IS NOT NULL
+       DO UPDATE SET outcome='running',error_code=NULL,completed_at=NULL RETURNING id`,
+      [userId, triggerType, importJobId],
+    ) : await this.database.query(
       `INSERT INTO gmail_sync_runs (user_id, trigger_type)
        VALUES ($1, $2) RETURNING id`,
       [userId, triggerType],
     );
+    if (!result.rows.length) throw new ConflictError('IMPORT_OUTCOME_STALE', 'Import no longer belongs to an active account generation');
     const runId = databaseString(databaseRow(result.rows[0], 'gmail sync run'), 'id');
     await this.database.query(
       triggerType === 'manual'
@@ -96,6 +105,10 @@ export class GmailSyncRunRepository {
           counts.decodedBytesExamined,
           userId,
         ],
+      );
+      if (counts.receiptOutcome) await transaction.query(
+        'UPDATE gmail_sync_runs SET receipt_outcome=$3::jsonb WHERE id=$1 AND user_id=$2',
+        [runId, userId, JSON.stringify(counts.receiptOutcome)],
       );
       await transaction.query(
         triggerType === 'manual'

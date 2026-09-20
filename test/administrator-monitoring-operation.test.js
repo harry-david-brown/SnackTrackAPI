@@ -16,6 +16,9 @@ const {
 } = require('../dist/http/validation/requestValues');
 
 const queryResult = (rows) => ({ rows, rowCount: rows.length });
+const { summarizeAdminReceipts } = require('../dist/services/admin/AdminReceiptSummary');
+const legacySummary = (amounts) =>
+  summarizeAdminReceipts(amounts.map((amountSpent) => ({ amountSpent, currencyCode: 'CAD' })));
 
 const explainRow = ({
   nodeType = 'Index Scan',
@@ -72,7 +75,7 @@ test('administrator user listing uses one paginated aggregate query instead of p
           timezone: 'America/Toronto',
           created_at: new Date('2026-08-01T00:00:00.000Z'),
           receipt_count: '4',
-          total_spent: '42.75',
+          receipt_summary: legacySummary([10, 10, 10, 12.75]),
           last_receipt_date: '2026-08-20T12:00:00.000Z',
           total_users: '7',
         },
@@ -84,11 +87,13 @@ test('administrator user listing uses one paginated aggregate query instead of p
   const result = await service.listUsers(25, 0);
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /LEFT JOIN receipts/);
-  assert.match(calls[0].sql, /COUNT\(r\.id\)/);
+  assert.match(calls[0].sql, /LEFT JOIN LATERAL/);
+  assert.match(calls[0].sql, /WHERE r\.user_id=page\.id/);
   assert.deepEqual(calls[0].params, [25, 0]);
   assert.equal(result.users[0].receiptCount, 4);
   assert.equal(result.users[0].totalSpent, 42.75);
+  assert.equal(result.users[0].currencyCode, 'CAD');
+  assert.equal(result.users[0].receiptSummary.legacyOrders, 4);
   assert.deepEqual(result.pagination, {
     total: 7,
     limit: 25,
@@ -102,13 +107,13 @@ test('administrator user listing still reports total count for an empty page', a
   const repository = new AdministratorQueryRepository({
     query: async () => {
       call += 1;
-      return call === 1 ? queryResult([]) : queryResult([{ count: '3' }]);
+      return queryResult([{ id: null, total_users: '3' }]);
     },
   });
 
   const result = await repository.listUsers(25, 100);
 
-  assert.equal(call, 2);
+  assert.equal(call, 1);
   assert.equal(result.total, 3);
   assert.deepEqual(result.users, []);
 });
@@ -120,8 +125,7 @@ test('administrator statistics adapter validates and maps aggregate database row
         total_users: '5',
         total_receipts: '12',
         users_with_receipts: '4',
-        total_amount: '155.50',
-        average_amount: '12.9583',
+        receipt_summary: legacySummary([...Array(11).fill(10), 45.5]),
       },
     ]),
     queryResult([{ tablename: 'receipts', size: '128 kB' }]),
@@ -140,6 +144,8 @@ test('administrator statistics adapter validates and maps aggregate database row
 
   assert.equal(result.database.totalUsers, 5);
   assert.equal(result.database.totalAmountAllUsers, 155.5);
+  assert.equal(result.database.averageReceiptAmount, 12.96);
+  assert.equal(result.database.currencyCode, 'CAD');
   assert.deepEqual(result.tableSizes, [{ table: 'receipts', size: '128 kB' }]);
   assert.equal(result.recentActivity[1].recentCount, 6);
   assert.deepEqual(result.health, {
@@ -155,8 +161,7 @@ test('administrator adapter rejects malformed database enum-like fields', async 
         total_users: 1,
         total_receipts: 0,
         users_with_receipts: 0,
-        total_amount: 0,
-        average_amount: 0,
+        receipt_summary: legacySummary([]),
       },
     ]),
     queryResult([]),

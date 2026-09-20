@@ -1,3 +1,4 @@
+require('./helpers/legacyReceiptPolicy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { WrappedAnalyticsCalculator } = require('../dist/services/analytics/WrappedAnalyticsService');

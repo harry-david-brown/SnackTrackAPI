@@ -1,4 +1,15 @@
-import { NormalizedReceipt, DashboardDataset, ItemFamily } from './normalization';
+import { calculateHistoricalInvestment, BENCHMARK_NAMES, INVESTMENT_METHODOLOGY, type InvestmentContext } from '../shared/historicalInvestment';
+import {
+  NormalizedReceipt,
+  DashboardDataset,
+  ItemFamily,
+  dashboardCohort,
+  hasExportSource,
+  normalizeItem,
+} from './normalization';
+import { orderMetricEligibility, summarizeOrderMetrics } from '../shared/orderMetrics';
+import { merchantIdentity } from '../../receipt/ReceiptResolutionService';
+import { matchesReceiptOutcome } from '../../receipt/ReceiptHistoryFilters';
 import { DashboardInsight, InsightCandidate, SuppressedCandidate } from './types';
 import { isLateNightHour } from '../shared/timeWindows';
 import {
@@ -31,9 +42,19 @@ const median = (values: number[]) => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
-const dateLabel = (date: string, timezone = 'UTC') =>
+const orderIds = (receipts: readonly NormalizedReceipt[]) =>
+  [...new Set(receipts.flatMap((receipt) => (receipt.source.id ? [receipt.source.id] : [])))];
+const evidenceItems = (receipt: NormalizedReceipt) => [
+  ...receipt.items,
+  ...receipt.source.items
+    .flatMap((item) => item.evidence?.components ?? [])
+    .map((component) => normalizeItem({ name: component.name, quantity: component.quantity, price: 0 }))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+];
+// These values are already event-local calendar days, not UTC instants to convert again.
+const dateLabel = (date: string) =>
   new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
+    timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -44,7 +65,7 @@ interface FoodflationStory {
   kind: 'meal' | 'item';
   name: string;
   restaurant?: string;
-  observations: Array<{ amount: number; date: string }>;
+  observations: Array<{ amount: number; date: string; orderId: string }>;
   relatedFamilies: string[];
 }
 
@@ -71,9 +92,8 @@ function foodflationCandidate(story: FoodflationStory): InsightCandidate | null 
     presentation: 'comparison',
     category: 'progress',
     icon: 'trend',
-    eyebrow: 'Foodflation',
+    eyebrow: 'Observed price change',
     title: `The same ${subjectLabel} costs ${Math.abs(percentDelta)}% ${direction === 'up' ? 'more' : 'less'}`,
-    detail: `Same ${subjectLabel}. Different price.`,
     period: { startDate: first.date, endDate: latest.date },
     comparison: {
       current: roundMoney(latest.amount),
@@ -95,9 +115,13 @@ function foodflationCandidate(story: FoodflationStory): InsightCandidate | null 
   };
   return {
     insight,
+    orderIds: [...new Set(story.observations.map((observation) => observation.orderId))],
     facts: extractFacts(insight),
     copy: { eyebrow: insight.eyebrow, title: insight.title, detail: insight.detail },
     family: 'foodflation',
+    // Price comparisons are self-explanatory; keep the evidence count and order drill-down
+    // without adding a rotating explanatory paragraph below the values.
+    copyVariants: [],
     relatedFamilies: story.relatedFamilies,
     score:
       86 +
@@ -154,6 +178,14 @@ function add(
   eligible.push({ insight, facts: extractFacts(insight), copy, family, score, ...options });
 }
 
+function rankedInsightId(id: string, index: number): string {
+  return index === 0 ? id : `${id}-rank-${index + 1}`;
+}
+
+function rankLabel(index: number): string {
+  return ['First', 'Second', 'Third'][index];
+}
+
 function restaurantStats(dataset: DashboardDataset) {
   return [...dataset.byRestaurant.entries()]
     .map(([key, receipts]) => ({
@@ -163,7 +195,12 @@ function restaurantStats(dataset: DashboardDataset) {
       count: receipts.length,
       amount: sum(receipts.map((receipt) => receipt.amount)),
     }))
-    .sort((a, b) => b.count - a.count || b.amount - a.amount || a.label.localeCompare(b.label));
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        (dataset.orderMetrics ? 0 : b.amount - a.amount) ||
+        a.label.localeCompare(b.label),
+    );
 }
 
 function describeDriver(
@@ -192,6 +229,7 @@ function comparisonCandidate(
   previous: NormalizedReceipt[],
   currentLabel: string,
   previousLabel: string,
+  costBasis: 'legacy' | 'net-cost',
 ): InsightCandidate | null {
   if (current.length < 3 || previous.length < 3) return null;
   const currentTotal = roundMoney(sum(current.map((receipt) => receipt.amount)));
@@ -203,19 +241,26 @@ function comparisonCandidate(
   const driver = describeDriver(current, previous);
   const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
   const driverCopy =
-    driver === 'frequency'
-      ? 'The number of orders moved the most.'
-      : driver === 'basket'
-        ? 'Your average order size did most of the moving.'
-        : driver === 'outlier'
-          ? 'One unusually large order had a starring role.'
-          : 'Both order frequency and basket size pitched in.';
+    costBasis === 'net-cost'
+      ? 'Describes net costs per established attempt, including any cancellations and refunds; it does not measure food quantity.'
+      : driver === 'frequency'
+        ? 'The number of orders moved the most.'
+        : driver === 'basket'
+          ? 'Your average order size did most of the moving.'
+          : driver === 'outlier'
+            ? 'One unusually large order had a starring role.'
+            : 'Both order frequency and basket size pitched in.';
   const insight: DashboardInsight = {
     id,
     presentation: 'comparison',
     category: 'progress',
     icon: 'trend',
-    eyebrow: direction === 'down' ? 'Plot twist: progress' : 'Spending momentum',
+    eyebrow:
+      costBasis === 'net-cost'
+        ? 'Net order costs'
+        : direction === 'down'
+          ? 'Plot twist: progress'
+          : 'Spending momentum',
     title,
     detail: `${Math.abs(percentDelta)}% ${direction === 'down' ? 'less' : 'more'} than the comparison period. ${driverCopy}`,
     comparison: {
@@ -236,6 +281,7 @@ function comparisonCandidate(
     relatedFamilies: ['order-frequency', 'average-basket'],
     score: direction === 'down' ? 96 : 91,
     timely: true,
+    orderIds: orderIds([...current, ...previous]),
     insight,
     facts: extractFacts(insight),
     copy: { eyebrow: insight.eyebrow, title: insight.title, detail: insight.detail },
@@ -277,7 +323,7 @@ function localPeriodWindows(dataset: DashboardDataset) {
   return { rollingCurrent, rollingPrevious, mtdCurrent, mtdPrevious, elapsedDay };
 }
 
-function addExistingCandidates(
+function addMerchantFavorites(
   dataset: DashboardDataset,
   eligible: InsightCandidate[],
   suppressed: SuppressedCandidate[],
@@ -293,18 +339,25 @@ function addExistingCandidates(
         icon: 'restaurant',
         eyebrow: 'Your regulars',
         title: 'The podium',
-        detail: 'Your three most-ordered restaurant brands, with the damage included.',
+        detail: dataset.orderMetrics
+          ? 'Your most frequent merchants among completed deliveries, including grocery and other categories.'
+          : 'Your three most-ordered restaurant brands, with the damage included.',
         rows: restaurants.slice(0, 3).map((restaurant) => ({
           label: restaurant.label,
           count: restaurant.count,
-          amount: roundMoney(restaurant.amount),
+          amount:
+            !dataset.orderMetrics ||
+            (dataset.currencyCode !== 'UNKNOWN' && restaurant.receipts.every((r) => r.amountKnown))
+              ? roundMoney(restaurant.amount)
+              : undefined,
         })),
       },
       'restaurant-ranking',
       68,
+      { orderIds: orderIds(restaurants.slice(0, 3).flatMap((restaurant) => restaurant.receipts)) },
     );
     const top = restaurants[0];
-    if (dataset.positive.length >= 3)
+    if ((dataset.orderMetrics ? dataset.receipts : dataset.positive).length >= 3)
       add(
         eligible,
         {
@@ -315,16 +368,22 @@ function addExistingCandidates(
           eyebrow: 'Creature of habit',
           title: 'Your number one',
           headline: top.label,
-          value: Math.round((top.count / dataset.positive.length) * 100),
+          value: Math.round((top.count / dataset.receipts.length) * 100),
           valueFormat: 'percent',
           detail: `${top.count} tracked orders. At this point, they may recognize your cart.`,
         },
         'restaurant-loyalty',
         72,
-        { relatedFamilies: ['restaurant-ranking'] },
+        { relatedFamilies: ['restaurant-ranking'], orderIds: orderIds(top.receipts) },
       );
   }
+}
 
+function addCalendarHabits(
+  dataset: DashboardDataset,
+  eligible: InsightCandidate[],
+  suppressed: SuppressedCandidate[],
+) {
   if (dataset.dated.length >= 3) {
     const weekdays = new Map<string, number>();
     const hours = new Map<number, number>();
@@ -332,7 +391,7 @@ function addExistingCandidates(
     let night = 0;
     for (const receipt of dataset.dated) {
       weekdays.set(receipt.weekday!, (weekdays.get(receipt.weekday!) ?? 0) + 1);
-      hours.set(receipt.hour!, (hours.get(receipt.hour!) ?? 0) + 1);
+      if (receipt.hour !== undefined) hours.set(receipt.hour, (hours.get(receipt.hour) ?? 0) + 1);
       months.set(receipt.localMonth!, (months.get(receipt.localMonth!) ?? 0) + 1);
       if (isLateNightHour(receipt.hour)) night += 1;
     }
@@ -355,7 +414,10 @@ function addExistingCandidates(
       },
       'weekday',
       55,
-      { subjectGroup: 'weekday-distribution' },
+      {
+        subjectGroup: 'weekday-distribution',
+        orderIds: orderIds(dataset.dated.filter((receipt) => receipt.weekday === favoriteDay[0])),
+      },
     );
     if (rankedWeekdays.length >= 2)
       add(
@@ -372,75 +434,88 @@ function addExistingCandidates(
         },
         'weekday',
         60,
-        { subjectGroup: 'weekday-distribution' },
+        {
+          subjectGroup: 'weekday-distribution',
+          orderIds: orderIds(dataset.dated.filter((receipt) => rankedWeekdays.slice(0, 3).some(([weekday]) => weekday === receipt.weekday))),
+        },
       );
     const peakHour = [...hours].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
     const rankedHours = [...hours].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-    const hourLabel = new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric',
-      hour12: true,
-      timeZone: 'UTC',
-    }).format(new Date(Date.UTC(2020, 0, 1, peakHour[0])));
-    const peakHourShare = Math.round((peakHour[1] / dataset.dated.length) * 100);
-    add(
-      eligible,
-      {
-        id: 'peak-hunger-hour',
-        presentation: 'hero',
-        category: 'habits',
-        icon: 'time',
-        eyebrow: 'Peak hunger',
-        title: 'The order o’clock',
-        headline: hourLabel,
-        value: peakHour[1],
-        valueFormat: 'number',
-        detail: `${peakHour[1]} tracked orders started in this hour—${peakHourShare}% of your dated history.`,
-      },
-      'order-time',
-      57,
-      { subjectGroup: 'hour-distribution' },
-    );
-    if (rankedHours.length >= 2)
+    const timedCount = sum([...hours.values()]);
+    if (peakHour && timedCount >= 3) {
+      const hourLabel = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: true,
+        timeZone: 'UTC',
+      }).format(new Date(Date.UTC(2020, 0, 1, peakHour[0])));
+      const peakHourShare = Math.round((peakHour[1] / timedCount) * 100);
       add(
         eligible,
         {
-          id: 'hunger-hour-podium',
-          presentation: 'ranking',
-          category: 'habits',
-          icon: 'time',
-          eyebrow: 'Peak hunger',
-          title: 'Your top ordering hours',
-          detail: 'Your three busiest clock hours for starting an order.',
-          rows: rankedHours.slice(0, 3).map(([hour, count]) => ({
-            label: new Intl.DateTimeFormat('en-US', {
-              hour: 'numeric',
-              hour12: true,
-              timeZone: 'UTC',
-            }).format(new Date(Date.UTC(2020, 0, 1, hour))),
-            count,
-          })),
-        },
-        'order-time',
-        61,
-        { subjectGroup: 'hour-distribution' },
-      );
-    if (night >= 3)
-      add(
-        eligible,
-        {
-          id: 'night-owl',
+          id: 'peak-hunger-hour',
           presentation: 'hero',
           category: 'habits',
-          icon: 'moon',
-          eyebrow: 'After hours',
-          title: 'Night owl energy',
-          value: Math.round((night / dataset.dated.length) * 100),
-          valueFormat: 'percent',
-          detail: `${night} orders were placed from 10 PM through 4 AM.`,
+          icon: 'time',
+          eyebrow: dataset.orderMetrics ? 'Ordering hours' : 'Peak hunger',
+          title: 'The order o’clock',
+          headline: hourLabel,
+          value: peakHour[1],
+          valueFormat: 'number',
+          detail: `${peakHour[1]} tracked orders started in this hour—${peakHourShare}% of orders with a recorded placement time.`,
         },
-        'late-night',
-        65,
+        'order-time',
+        57,
+        {
+          subjectGroup: 'hour-distribution',
+          orderIds: orderIds(dataset.dated.filter((receipt) => receipt.hour === peakHour[0])),
+        },
       );
+      if (rankedHours.length >= 2)
+        add(
+          eligible,
+          {
+            id: 'hunger-hour-podium',
+            presentation: 'ranking',
+            category: 'habits',
+            icon: 'time',
+            eyebrow: dataset.orderMetrics ? 'Ordering hours' : 'Peak hunger',
+            title: 'Your top ordering hours',
+            detail: 'Your three busiest clock hours for starting an order.',
+            rows: rankedHours.slice(0, 3).map(([hour, count]) => ({
+              label: new Intl.DateTimeFormat('en-US', {
+                hour: 'numeric',
+                hour12: true,
+                timeZone: 'UTC',
+              }).format(new Date(Date.UTC(2020, 0, 1, hour))),
+              count,
+            })),
+          },
+          'order-time',
+          61,
+          {
+            subjectGroup: 'hour-distribution',
+            orderIds: orderIds(dataset.dated.filter((receipt) => rankedHours.slice(0, 3).some(([hour]) => hour === receipt.hour))),
+          },
+        );
+      if (night >= 3)
+        add(
+          eligible,
+          {
+            id: 'night-owl',
+            presentation: 'hero',
+            category: 'habits',
+            icon: 'moon',
+            eyebrow: 'After hours',
+            title: 'Night owl energy',
+            value: Math.round((night / timedCount) * 100),
+            valueFormat: 'percent',
+            detail: `${night} orders were placed from 10 PM through 4 AM.`,
+          },
+          'late-night',
+          65,
+          { orderIds: orderIds(dataset.dated.filter((receipt) => isLateNightHour(receipt.hour))) },
+        );
+    }
     const busiest = [...months].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))[0];
     const rankedMonths = [...months].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]));
     const busiestShare = Math.round((busiest[1] / dataset.dated.length) * 100);
@@ -460,11 +535,16 @@ function addExistingCandidates(
         }).format(new Date(`${busiest[0]}-01T00:00:00.000Z`)),
         value: busiest[1],
         valueFormat: 'number',
-        detail: `${busiest[1]} tracked orders—${busiestShare}% of your dated history. The kitchen was closed, spiritually.`,
+        detail: dataset.orderMetrics
+          ? `${busiest[1]} completed deliveries—${busiestShare}% of your dated delivery history. Includes every merchant category.`
+          : `${busiest[1]} tracked orders—${busiestShare}% of your dated history. The kitchen was closed, spiritually.`,
       },
       'monthly-record',
       63,
-      { subjectGroup: 'month-distribution' },
+      {
+        subjectGroup: 'month-distribution',
+        orderIds: orderIds(dataset.dated.filter((receipt) => receipt.localMonth === busiest[0])),
+      },
     );
     if (rankedMonths.length >= 2)
       add(
@@ -488,18 +568,23 @@ function addExistingCandidates(
         },
         'monthly-record',
         67,
-        { subjectGroup: 'month-distribution' },
+        {
+          subjectGroup: 'month-distribution',
+          orderIds: orderIds(dataset.dated.filter((receipt) => rankedMonths.slice(0, 3).some(([month]) => month === receipt.localMonth))),
+        },
       );
   } else suppressed.push({ id: 'time-habits', reason: 'insufficient_history' });
+}
 
+function addCostRecords(dataset: DashboardDataset, eligible: InsightCandidate[]) {
   const expensiveOrders = [...dataset.positive]
     .filter((receipt) => receipt.restaurantLabel)
     .sort((a, b) => b.amount - a.amount || a.stableIndex - b.stableIndex)
     .slice(0, 3);
   const orderRankTitles = [
-    'Your biggest order',
-    'Your second-biggest order',
-    'Your third-biggest order',
+    dataset.orderMetrics ? 'Highest net order cost' : 'Your biggest order',
+    dataset.orderMetrics ? 'Second-highest net order cost' : 'Your second-biggest order',
+    dataset.orderMetrics ? 'Third-highest net order cost' : 'Your third-biggest order',
   ];
   const orderRankEyebrows = ['Heavyweight receipt', 'The runner-up receipt', 'Third-place splurge'];
   expensiveOrders.forEach((expensive, index) =>
@@ -512,10 +597,49 @@ function addExistingCandidates(
         icon: 'receipt',
         eyebrow: orderRankEyebrows[index],
         title: orderRankTitles[index],
-        detail:
-          index === 0
+        detail: dataset.orderMetrics
+          ? 'Net cost after refunds, including charged cancellations. This is not a delivery ranking.'
+          : index === 0
             ? 'One order entered the chat with main-character energy.'
             : `Ranked #${index + 1} by total spend—still worth a closer look.`,
+        period: expensive.localDate ? { startDate: expensive.localDate } : undefined,
+        order: {
+          restaurant: expensive.restaurantLabel!,
+          amount: roundMoney(expensive.amount),
+          orderedAt: expensive.source.orderDate?.toISOString(),
+          items: (dataset.orderMetrics && !orderMetricEligibility(expensive.source).delivered
+            ? []
+            : expensive.items
+          )
+            .slice(0, 4)
+            .map((item) => `${item.quantity > 1 ? `${item.quantity}× ` : ''}${item.label}`),
+        },
+      },
+      'order-record',
+      76 - index * 4,
+      { subjectGroup: 'biggest-orders', subjectRank: index + 1, orderIds: orderIds([expensive]) },
+    ),
+  );
+  const expensive = expensiveOrders[0];
+  if (
+    dataset.exportReceipts.length &&
+    expensive?.items.length &&
+    (!dataset.orderMetrics || orderMetricEligibility(expensive.source).delivered)
+  )
+    add(
+      eligible,
+      {
+        id: 'detailed-biggest-order',
+        presentation: 'order',
+        category: 'extremes',
+        icon: 'receipt',
+        eyebrow: 'Receipt archaeology',
+        title: dataset.orderMetrics
+          ? 'Inside your highest-cost delivery'
+          : 'Inside your heavyweight order',
+        detail: dataset.orderMetrics
+          ? 'Ordered items from the highest-net-cost order, which was delivered.'
+          : 'The supporting cast from your biggest detailed order.',
         period: expensive.localDate ? { startDate: expensive.localDate } : undefined,
         order: {
           restaurant: expensive.restaurantLabel!,
@@ -526,12 +650,17 @@ function addExistingCandidates(
             .map((item) => `${item.quantity > 1 ? `${item.quantity}× ` : ''}${item.label}`),
         },
       },
-      'order-record',
-      76 - index * 4,
-      { subjectGroup: 'biggest-orders', subjectRank: index + 1 },
-    ),
-  );
-  const expensive = expensiveOrders[0];
+      'order-detail',
+      67,
+      { relatedFamilies: ['order-record'], orderIds: orderIds([expensive]) },
+    );
+}
+
+function addItemFavorites(
+  dataset: DashboardDataset,
+  eligible: InsightCandidate[],
+  suppressed: SuppressedCandidate[],
+) {
   if (dataset.exportReceipts.length) {
     const topItems = [...dataset.itemTotals.values()]
       .sort(
@@ -561,35 +690,17 @@ function addExistingCandidates(
         },
         'item-favorite',
         70 - index * 4,
-        { subjectGroup: 'repeated-menu-items', subjectRank: index + 1 },
+        {
+          subjectGroup: 'repeated-menu-items',
+          subjectRank: index + 1,
+          orderIds: orderIds(dataset.exportReceipts.filter((receipt) => evidenceItems(receipt).some((candidate) => candidate.key === item.key))),
+        },
       ),
     );
-    if (expensive?.items.length)
-      add(
-        eligible,
-        {
-          id: 'detailed-biggest-order',
-          presentation: 'order',
-          category: 'extremes',
-          icon: 'receipt',
-          eyebrow: 'Receipt archaeology',
-          title: 'Inside your heavyweight order',
-          detail: 'The supporting cast from your biggest detailed order.',
-          period: expensive.localDate ? { startDate: expensive.localDate } : undefined,
-          order: {
-            restaurant: expensive.restaurantLabel!,
-            amount: roundMoney(expensive.amount),
-            orderedAt: expensive.source.orderDate?.toISOString(),
-            items: expensive.items
-              .slice(0, 4)
-              .map((item) => `${item.quantity > 1 ? `${item.quantity}× ` : ''}${item.label}`),
-          },
-        },
-        'order-detail',
-        67,
-        { relatedFamilies: ['order-record'] },
-      );
   } else suppressed.push({ id: 'export-details', reason: 'missing_export_items' });
+}
+
+function addDeliveryRecords(dataset: DashboardDataset, eligible: InsightCandidate[]) {
   const longestDeliveries = [...dataset.deliveryReceipts]
     .sort((a, b) => b.deliveryMinutes! - a.deliveryMinutes! || a.stableIndex - b.stableIndex)
     .slice(0, 3);
@@ -617,7 +728,7 @@ function addExistingCandidates(
       },
       'delivery-record',
       74 - index * 4,
-      { subjectGroup: 'longest-deliveries', subjectRank: index + 1 },
+      { subjectGroup: 'longest-deliveries', subjectRank: index + 1, orderIds: orderIds([delivery]) },
     ),
   );
 }
@@ -639,6 +750,7 @@ function addRecentMovement(
     windows.mtdPrevious,
     'This month so far',
     'Same days last month',
+    dataset.orderMetrics ? 'net-cost' : 'legacy',
   );
   const rolling = comparisonCandidate(
     'rolling-30-spending',
@@ -647,43 +759,13 @@ function addRecentMovement(
     windows.rollingPrevious,
     'Latest 30 days',
     'Previous 30 days',
+    dataset.orderMetrics ? 'net-cost' : 'legacy',
   );
   if (mtd) eligible.push(mtd);
   else suppressed.push({ id: 'month-to-date-spending', reason: 'low_sample' });
   if (rolling) eligible.push(rolling);
   else suppressed.push({ id: 'rolling-30-spending', reason: 'low_sample' });
   if (windows.rollingCurrent.length >= 3 && windows.rollingPrevious.length >= 3) {
-    const current = windows.rollingCurrent.length;
-    const previous = windows.rollingPrevious.length;
-    const delta = current - previous;
-    if (Math.abs(delta) >= 2)
-      add(
-        eligible,
-        {
-          id: 'rolling-order-frequency',
-          presentation: 'comparison',
-          category: 'progress',
-          icon: 'repeat',
-          eyebrow: delta < 0 ? 'A quieter month' : 'Doorbell activity',
-          title: 'Order frequency shifted',
-          detail: `${Math.abs(delta)} ${Math.abs(delta) === 1 ? 'order' : 'orders'} ${delta < 0 ? 'fewer' : 'more'} than the preceding 30 days.`,
-          comparison: {
-            current,
-            previous,
-            delta,
-            percentDelta: Math.round((delta / previous) * 100),
-            direction: delta > 0 ? 'up' : 'down',
-            valueFormat: 'number',
-            currentLabel: 'Latest 30 days',
-            previousLabel: 'Previous 30 days',
-            driver: 'frequency',
-          },
-        },
-        'order-frequency',
-        delta < 0 ? 93 : 86,
-        { timely: true, relatedFamilies: ['spending-movement'] },
-      );
-
     const currentAverage = roundMoney(
       sum(windows.rollingCurrent.map((receipt) => receipt.amount)) / windows.rollingCurrent.length,
     );
@@ -701,9 +783,15 @@ function addRecentMovement(
           presentation: 'comparison',
           category: 'progress',
           icon: 'trend',
-          eyebrow: averageDelta < 0 ? 'Smaller baskets' : 'Bigger baskets',
-          title: 'Your average order shifted',
-          detail: `The average tracked order was ${Math.abs(averagePercent)}% ${averageDelta < 0 ? 'lower' : 'higher'} than in the preceding 30 days.`,
+          eyebrow: dataset.orderMetrics
+            ? 'Net costs over time'
+            : averageDelta < 0
+              ? 'Smaller baskets'
+              : 'Bigger baskets',
+          title: dataset.orderMetrics
+            ? 'Average net order cost shifted'
+            : 'Your average order shifted',
+          detail: `The average ${dataset.orderMetrics ? 'net order cost' : 'tracked order'} was ${Math.abs(averagePercent)}% ${averageDelta < 0 ? 'lower' : 'higher'} than in the preceding 30 days.`,
           comparison: {
             current: currentAverage,
             previous: previousAverage,
@@ -721,9 +809,52 @@ function addRecentMovement(
         },
         'average-basket',
         averageDelta < 0 ? 92 : 84,
-        { timely: true, relatedFamilies: ['spending-movement', 'order-frequency'] },
+        {
+          timely: true,
+          relatedFamilies: ['spending-movement', 'order-frequency'],
+          orderIds: orderIds([...windows.rollingCurrent, ...windows.rollingPrevious]),
+        },
       );
   }
+}
+
+function addRecentFrequency(dataset: DashboardDataset, eligible: InsightCandidate[]) {
+  if (!dataset.latestDate || daysBetween(dataset.latestDate, dataset.localDate) > 14) return;
+  const windows = localPeriodWindows(dataset);
+  const current = windows.rollingCurrent.length;
+  const previous = windows.rollingPrevious.length;
+  const delta = current - previous;
+  if (current < 3 || previous < 3 || Math.abs(delta) < 2) return;
+  add(
+    eligible,
+    {
+      id: 'rolling-order-frequency',
+      presentation: 'comparison',
+      category: 'progress',
+      icon: 'repeat',
+      eyebrow: delta < 0 ? 'A quieter month' : 'Doorbell activity',
+      title: dataset.orderMetrics ? 'Delivery frequency shifted' : 'Order frequency shifted',
+      detail: `${Math.abs(delta)} ${dataset.orderMetrics ? 'completed deliveries' : 'orders'} ${delta < 0 ? 'fewer' : 'more'} than the preceding 30 days.`,
+      comparison: {
+        current,
+        previous,
+        delta,
+        percentDelta: Math.round((delta / previous) * 100),
+        direction: delta > 0 ? 'up' : 'down',
+        valueFormat: 'number',
+        currentLabel: 'Latest 30 days',
+        previousLabel: 'Previous 30 days',
+        driver: 'frequency',
+      },
+    },
+    'order-frequency',
+    delta < 0 ? 93 : 86,
+    {
+      timely: true,
+      relatedFamilies: ['spending-movement'],
+      orderIds: orderIds([...windows.rollingCurrent, ...windows.rollingPrevious]),
+    },
+  );
 }
 
 function addRestaurantStories(
@@ -738,44 +869,43 @@ function addRestaurantStories(
     suppressed.push({ id: 'restaurant-stories', reason: 'low_sample' });
     return;
   }
-  let bestRun: { label: string; count: number; startDate: string; endDate: string } | undefined;
-  let currentKey: string | undefined;
-  let currentCount = 0;
-  let currentStartDate: string | undefined;
+  const runs: NormalizedReceipt[][] = [];
   for (const receipt of dataset.dated) {
-    if (receipt.restaurantKey && receipt.restaurantKey === currentKey) currentCount += 1;
-    else {
-      currentKey = receipt.restaurantKey;
-      currentCount = receipt.restaurantKey ? 1 : 0;
-      currentStartDate = receipt.localDate;
-    }
-    if (currentKey && currentStartDate && receipt.localDate && currentCount > (bestRun?.count ?? 0))
-      bestRun = {
-        label: receipt.restaurantLabel!,
-        count: currentCount,
-        startDate: currentStartDate,
-        endDate: receipt.localDate,
-      };
+    const previous = runs.at(-1);
+    if (receipt.restaurantKey && previous?.[0].restaurantKey === receipt.restaurantKey)
+      previous.push(receipt);
+    else runs.push([receipt]);
   }
-  if (bestRun && bestRun.count >= 3)
-    add(
+  const bestRuns = new Map<string, NormalizedReceipt[]>();
+  for (const run of runs) {
+    const key = run[0].restaurantKey;
+    if (!key || run.length < 3 || run[0].merchantClass !== 'restaurant') continue;
+    // Runs are chronological, so retaining the first equal run resolves date ties.
+    if (run.length > (bestRuns.get(key)?.length ?? 0)) bestRuns.set(key, run);
+  }
+  [...bestRuns.entries()]
+    .sort(([aKey, a], [bKey, b]) => b.length - a.length ||
+      a[0].localDate!.localeCompare(b[0].localDate!) || aKey.localeCompare(bKey))
+    .slice(0, 3)
+    .forEach(([, run], index) => add(
       eligible,
       {
-        id: 'restaurant-tunnel-vision',
+        id: rankedInsightId('restaurant-tunnel-vision', index),
         presentation: 'hero',
         category: 'habits',
         icon: 'repeat',
-        eyebrow: 'Tunnel vision',
+        eyebrow: index === 0 ? 'Longest restaurant run' : `${rankLabel(index)}-longest restaurant run`,
         title: 'Same place. Again. Again.',
-        headline: bestRun.label,
-        value: bestRun.count,
+        headline: run[0].restaurantLabel,
+        value: run.length,
         valueFormat: 'number',
-        detail: `${bestRun.count} consecutive tracked orders from one restaurant. Commitment has entered the chat.`,
-        period: { startDate: bestRun.startDate, endDate: bestRun.endDate },
+        detail: `${run.length} consecutive tracked orders from one restaurant. Commitment has entered the chat.`,
+        period: { startDate: run[0].localDate!, endDate: run[run.length - 1].localDate },
       },
       'restaurant-run',
-      82,
-    );
+      82 - index * 4,
+      { subjectGroup: 'restaurant-runs', subjectRank: index + 1, orderIds: orderIds(run) },
+    ));
 
   const top = stats[0],
     second = stats[1];
@@ -801,7 +931,10 @@ function addRestaurantStories(
       },
       'restaurant-rivalry',
       78,
-      { relatedFamilies: ['restaurant-ranking', 'restaurant-loyalty'] },
+      {
+        relatedFamilies: ['restaurant-ranking', 'restaurant-loyalty'],
+        orderIds: orderIds([...top.receipts, ...second.receipts]),
+      },
     );
 
   const years = new Map<number, Map<string, number>>();
@@ -865,6 +998,10 @@ function addRestaurantStories(
       },
       'restaurant-era',
       90,
+      {
+        orderIds: orderIds(dataset.dated.filter((receipt) => yearlyChampions.some((champion) =>
+          champion.year === receipt.localYear && champion.winners.some((winner) => winner.key === receipt.restaurantKey)))),
+      },
     );
   }
   const yearWinners = yearlyChampions.flatMap((champion) =>
@@ -907,6 +1044,11 @@ function addRestaurantStories(
       },
       'restaurant-era',
       88,
+      {
+        orderIds: orderIds(dataset.dated.filter((receipt) =>
+          (receipt.localYear === firstWinner.year && receipt.restaurantKey === firstWinner.key) ||
+          (receipt.localYear === lastWinner.year && receipt.restaurantKey === lastWinner.key))),
+      },
     );
   const eraGroups = yearWinners.reduce<Array<typeof yearWinners>>((groups, winner) => {
     const latest = groups.at(-1);
@@ -916,33 +1058,40 @@ function addRestaurantStories(
     else groups.push([winner]);
     return groups;
   }, []);
-  const longestEra = eraGroups.sort((a, b) => b.length - a.length)[0];
-  const finalEraWinner = longestEra?.at(-1);
-  if (longestEra?.length >= 2 && finalEraWinner)
-    add(
-      eligible,
-      {
-        id: 'restaurant-era',
-        presentation: 'timeline',
-        category: 'favorites',
-        icon: 'trophy',
-        eyebrow: 'Dynasty detected',
-        title: `${longestEra[0].label} had an era`,
-        detail: `${longestEra.length} consecutive yearly crowns. That is less a phase and more a residency.`,
-        events: [
-          { label: 'Era began', value: String(longestEra[0].year) },
-          { label: 'Last crown', value: String(finalEraWinner.year) },
-          { label: 'Orders in crown years', value: sum(longestEra.map((winner) => winner.count)) },
-        ],
-      },
-      'restaurant-dynasty',
-      79,
-      { relatedFamilies: ['restaurant-era'] },
-    );
+  eraGroups.filter((era) => era.length >= 2)
+    .sort((a, b) => b.length - a.length || a[0].year - b[0].year || a[0].key.localeCompare(b[0].key))
+    .slice(0, 3).forEach((longestEra, index) => {
+      const finalEraWinner = longestEra[longestEra.length - 1];
+      add(
+        eligible,
+        {
+          id: rankedInsightId('restaurant-era', index),
+          presentation: 'timeline',
+          category: 'favorites',
+          icon: 'trophy',
+          eyebrow: index === 0 ? 'Longest restaurant era' : `${rankLabel(index)}-longest restaurant era`,
+          title: `${longestEra[0].label} had an era`,
+          detail: `${longestEra.length} consecutive yearly crowns. That is less a phase and more a residency.`,
+          events: [
+            { label: 'Era began', value: String(longestEra[0].year) },
+            { label: 'Last crown', value: String(finalEraWinner.year) },
+            { label: 'Orders in crown years', value: sum(longestEra.map((winner) => winner.count)) },
+          ],
+        },
+        'restaurant-dynasty',
+        79 - index * 4,
+        {
+          subjectGroup: 'restaurant-eras', subjectRank: index + 1,
+          relatedFamilies: ['restaurant-era'],
+          orderIds: orderIds(dataset.dated.filter((receipt) => longestEra.some((winner) =>
+            winner.year === receipt.localYear && winner.key === receipt.restaurantKey))),
+        },
+      );
+    });
 
   const recentCutoff = dateOrdinal(dataset.localDate) - 180;
   const formerYearWinners = new Set(yearWinners.map((winner) => winner.key));
-  const former = stats
+  const formerFavourites = stats
     .map((stat) => ({
       ...stat,
       recent: stat.receipts.filter(
@@ -950,63 +1099,63 @@ function addRestaurantStories(
       ).length,
     }))
     .filter((stat) => stat.count >= 5 && stat.recent === 0 && formerYearWinners.has(stat.key))
-    .sort((a, b) => b.count - a.count)[0];
-  const formerLatestDate = former?.receipts.at(-1)?.localDate;
-  if (former && formerLatestDate)
-    add(
-      eligible,
-      {
-        id: 'former-favourite',
-        presentation: 'timeline',
-        category: 'favorites',
-        icon: 'heart',
-        eyebrow: 'Former favourite',
-        title: `Whatever happened to ${former.label}?`,
-        detail: `${former.count} tracked orders historically, but none in the latest 180 days. No pressure—just receipt archaeology.`,
-        events: [
-          { label: 'All-time orders', value: former.count },
-          { label: 'Latest visit', value: dateLabel(formerLatestDate, dataset.timezone) },
-        ],
-      },
-      'former-favourite',
-      72,
-      { relatedFamilies: ['restaurant-comeback'] },
-    );
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)).slice(0, 3);
+  formerFavourites.forEach((former, index) => {
+    const formerLatestDate = former.receipts.at(-1)?.localDate;
+    if (formerLatestDate)
+      add(
+        eligible,
+        {
+          id: rankedInsightId('former-favourite', index),
+          presentation: 'timeline',
+          category: 'favorites',
+          icon: 'heart',
+          eyebrow: `Former favourite #${index + 1}`,
+          title: `Whatever happened to ${former.label}?`,
+          detail: `${former.count} tracked orders historically, but none recorded in the latest 180 days. Your imported history may be incomplete.`,
+          events: [
+            { label: 'All-time orders', value: former.count },
+            { label: 'Latest visit', value: dateLabel(formerLatestDate) },
+          ],
+        },
+        'former-favourite',
+        72 - index * 4,
+        { subjectGroup: 'former-favourites', subjectRank: index + 1, relatedFamilies: ['restaurant-comeback'], orderIds: orderIds(former.receipts) },
+      );
+  });
 
-  let comeback: { label: string; gap: number; returned: string } | undefined;
-  for (const stat of stats.filter((value) => value.receipts.length >= 3)) {
-    for (let index = 1; index < stat.receipts.length; index++) {
-      const previous = stat.receipts[index - 1].localDate;
-      const current = stat.receipts[index].localDate;
-      if (!previous || !current) continue;
-      const gap = daysBetween(previous, current);
-      if (
-        gap >= 90 &&
-        (!comeback || gap > comeback.gap) &&
-        daysBetween(current, dataset.localDate) <= 365
-      )
-        comeback = { label: stat.label, gap, returned: current };
-    }
-  }
-  if (comeback)
-    add(
+  const comebacks = stats.filter((stat) => stat.receipts.length >= 3).flatMap((stat) => {
+    const returns = stat.receipts.slice(1).flatMap((receipt, index) => {
+      const previous = stat.receipts[index];
+      if (!previous.localDate || !receipt.localDate) return [];
+      const gap = daysBetween(previous.localDate, receipt.localDate);
+      const sinceReturn = daysBetween(receipt.localDate, dataset.localDate);
+      if (gap < 90 || sinceReturn < 0 || sinceReturn > 365) return [];
+      return [{ key: stat.key, label: stat.label, gap, returned: receipt.localDate,
+        receipts: [previous, receipt] }];
+    });
+    return returns.sort((a, b) => b.gap - a.gap || b.returned.localeCompare(a.returned)).slice(0, 1);
+  });
+  comebacks.sort((a, b) => b.gap - a.gap || b.returned.localeCompare(a.returned) || a.key.localeCompare(b.key))
+    .slice(0, 3).forEach((comeback, index) => add(
       eligible,
       {
-        id: 'restaurant-comeback',
+        id: rankedInsightId('restaurant-comeback', index),
         presentation: 'timeline',
         category: 'favorites',
         icon: 'repeat',
-        eyebrow: 'Comeback tour',
+        eyebrow: `Comeback tour #${index + 1}`,
         title: `${comeback.label} returned`,
         detail: `After ${comeback.gap} days apart. Some relationships just need space.`,
         events: [
           { label: 'The gap', value: `${comeback.gap} days` },
-          { label: 'The reunion', value: dateLabel(comeback.returned, dataset.timezone) },
+          { label: 'The reunion', value: dateLabel(comeback.returned) },
         ],
       },
       'restaurant-comeback',
-      80,
-    );
+      80 - index * 4,
+      { subjectGroup: 'restaurant-comebacks', subjectRank: index + 1, orderIds: orderIds(comeback.receipts) },
+    ));
 
   const latest = dataset.dated.slice(-10);
   const recentUnique = new Set(latest.map((receipt) => receipt.restaurantKey).filter(Boolean)).size;
@@ -1026,7 +1175,7 @@ function addRestaurantStories(
       },
       'recent-variety',
       84,
-      { timely: true, relatedFamilies: ['restaurant-personality'] },
+      { timely: true, relatedFamilies: ['restaurant-personality'], orderIds: orderIds(latest) },
     );
 }
 
@@ -1085,7 +1234,11 @@ function addItemAndBasketStories(
       },
       `item-${family}`,
       79 + Math.min(8, Math.floor(total.units / profile.minimumUnits)),
-      { relatedFamilies: ['item-favorite'], copyVariants: profile.punchlines },
+      {
+        relatedFamilies: ['item-favorite'],
+        copyVariants: profile.punchlines,
+        orderIds: orderIds(dataset.exportReceipts.filter((receipt) => evidenceItems(receipt).some((item) => item.family === family))),
+      },
     );
   }
 
@@ -1105,7 +1258,13 @@ function addItemAndBasketStories(
       },
       'sauce-ranking',
       89,
-      { relatedFamilies: ['item-sauce', 'item-favorite'] },
+      {
+        relatedFamilies: ['item-sauce', 'item-favorite'],
+        orderIds: orderIds(dataset.exportReceipts.filter((receipt) => {
+          const sauces = new Set(receipt.items.flatMap(extractDippingSauceLabels));
+          return sauceRows.slice(0, 3).some((row) => sauces.has(row.label));
+        })),
+      },
     );
 
   // Unknown menu items still qualify when the same normalized item appears
@@ -1133,7 +1292,11 @@ function addItemAndBasketStories(
       },
       'item-generic',
       72 + Math.min(8, Math.floor(generic.appearances / 3)),
-      { relatedFamilies: ['item-favorite'], copyVariants: GENERIC_ITEM_PUNCHLINES },
+      {
+        relatedFamilies: ['item-favorite'],
+        copyVariants: GENERIC_ITEM_PUNCHLINES,
+        orderIds: orderIds(dataset.exportReceipts.filter((receipt) => evidenceItems(receipt).some((item) => item.key === generic.key))),
+      },
     );
   }
 
@@ -1153,7 +1316,9 @@ function addItemAndBasketStories(
       (stat) => stat.receipts[0]?.merchantClass === 'restaurant',
     );
     const oneOffRestaurants = restaurants.filter((stat) => stat.count === 1).length;
-    const uniqueRestaurantRate = restaurants.length / Math.max(dataset.positive.length, 1);
+    const uniqueRestaurantRate =
+      restaurants.length /
+      Math.max((dataset.orderMetrics ? dataset.receipts : dataset.positive).length, 1);
     const explorer =
       restaurants.length >= 10 && (uniqueRestaurantRate >= 0.25 || oneOffRestaurants >= 8);
     add(
@@ -1176,7 +1341,10 @@ function addItemAndBasketStories(
       },
       'restaurant-personality',
       75,
-      { relatedFamilies: ['restaurant-loyalty'] },
+      {
+        relatedFamilies: ['restaurant-loyalty'],
+        orderIds: orderIds(rankedBaskets.slice(0, 3).flat()),
+      },
     );
   }
 
@@ -1216,13 +1384,13 @@ function addItemAndBasketStories(
           relatedFamilies: ['item-favorite'],
           subjectGroup: 'exact-baskets',
           subjectRank: index + 1,
+          orderIds: orderIds(basket),
         },
       );
     });
     const restaurantOrders =
-      dataset.byRestaurant
-        .get(soulmate[0].restaurantKey!)
-        ?.filter((receipt) => receipt.source.dataSource === 'csv').length ?? soulmate.length;
+      dataset.byRestaurant.get(soulmate[0].restaurantKey!)?.filter(hasExportSource).length ??
+      soulmate.length;
     const predictableShare = soulmate.length / restaurantOrders;
     if (restaurantOrders >= 5 && predictableShare >= 0.5)
       add(
@@ -1240,25 +1408,43 @@ function addItemAndBasketStories(
         },
         'predictable-basket',
         76,
-        { relatedFamilies: ['exact-basket'] },
+        { relatedFamilies: ['exact-basket'], orderIds: orderIds(soulmate) },
       );
   } else suppressed.push({ id: 'exact-basket-soulmate', reason: 'low_sample' });
 
   const foodflationStories: FoodflationStory[] = [];
-  for (const [basketKey, receipts] of baskets) {
+  const priceBaskets = new Map<string, NormalizedReceipt[]>();
+  for (const [basketKey, receipts] of baskets)
+    for (const receipt of receipts) {
+      const key = dataset.orderMetrics
+        ? `${receipt.source.receiptType}:${merchantIdentity(receipt.source.restaurantName)}:${basketKey}`
+        : basketKey;
+      priceBaskets.set(key, [...(priceBaskets.get(key) ?? []), receipt]);
+    }
+  for (const [basketKey, receipts] of priceBaskets) {
     const datedReceipts = receipts.filter(
       (receipt): receipt is NormalizedReceipt & { localDate: string } => Boolean(receipt.localDate),
     );
-    if (datedReceipts.length < 2) continue;
+    if (
+      datedReceipts.length < 2 ||
+      (datedReceipts[0].source.monetaryDetails?.currencyCode ?? 'UNKNOWN') !== dataset.currencyCode
+    )
+      continue;
     foodflationStories.push({
       key: basketKey,
       kind: 'meal',
       name: basketSummary(datedReceipts[0]),
       restaurant: datedReceipts[0].restaurantLabel,
-      observations: datedReceipts.map((receipt) => ({
-        amount: receipt.amount,
-        date: receipt.localDate,
-      })),
+      observations: datedReceipts.flatMap((receipt) => {
+        // Menu-price comparisons cannot use a refunded net balance as a basket price.
+        const amount =
+          receipt.source.resolution?.reconstructedSubtotal ??
+          receipt.source.monetaryDetails?.subtotal ??
+          (dataset.orderMetrics ? undefined : receipt.amount);
+        return amount !== undefined && Number.isFinite(amount) && amount > 0 && receipt.source.id
+          ? [{ amount, date: receipt.localDate, orderId: receipt.source.id }]
+          : [];
+      }),
       relatedFamilies: ['exact-basket'],
     });
   }
@@ -1268,20 +1454,32 @@ function addItemAndBasketStories(
     {
       item: NormalizedReceipt['items'][number];
       restaurant?: string;
-      observations: Array<{ amount: number; date: string }>;
+      observations: Array<{ amount: number; date: string; orderId: string }>;
     }
   >();
   for (const receipt of dataset.exportReceipts) {
-    if (!receipt.localDate) continue;
+    if (
+      !receipt.source.id ||
+      !receipt.localDate ||
+      (receipt.source.monetaryDetails?.currencyCode ?? 'UNKNOWN') !== dataset.currencyCode
+    )
+      continue;
     const orderPrices = new Map<
       string,
       { item: NormalizedReceipt['items'][number]; amount: number }
     >();
     for (const item of receipt.items) {
-      if (item.price <= 0) continue;
-      const key = `${receipt.restaurantKey ?? 'unknown'}::${item.key}×${item.quantity}`;
+      if (!item.priceKnown || item.price <= 0) continue;
+      const merchantKey = dataset.orderMetrics
+        ? `${receipt.source.receiptType}:${merchantIdentity(receipt.source.restaurantName)}`
+        : (receipt.restaurantKey ?? 'unknown');
+      const key = `${merchantKey}::${receipt.source.monetaryDetails?.currencyCode ?? 'UNKNOWN'}::${item.key}::${item.customizations
+        .map((v) => v.toLowerCase())
+        .sort()
+        .join(';')}`;
       const current = orderPrices.get(key);
-      if (current) current.amount += item.price;
+      if (current)
+        continue; // One comparable unit-price observation per order, not a sum of unit prices.
       else orderPrices.set(key, { item, amount: item.price });
     }
     for (const [key, observation] of orderPrices) {
@@ -1290,7 +1488,7 @@ function addItemAndBasketStories(
         restaurant: receipt.restaurantLabel,
         observations: [],
       };
-      current.observations.push({ amount: observation.amount, date: receipt.localDate });
+      current.observations.push({ amount: observation.amount, date: receipt.localDate, orderId: receipt.source.id });
       itemPrices.set(key, current);
     }
   }
@@ -1299,7 +1497,7 @@ function addItemAndBasketStories(
     foodflationStories.push({
       key,
       kind: 'item',
-      name: `${item.item.quantity > 1 ? `${item.item.quantity}× ` : ''}${item.item.label}`,
+      name: `${item.item.label} (per item)`,
       restaurant: item.restaurant,
       observations: item.observations,
       relatedFamilies: ['item-favorite'],
@@ -1307,6 +1505,7 @@ function addItemAndBasketStories(
   }
 
   const foodflation = foodflationStories
+    .filter((story) => story.observations.length >= 2)
     .map(foodflationCandidate)
     .filter((candidate): candidate is InsightCandidate => Boolean(candidate))
     .sort((a, b) => b.score - a.score || a.insight.id.localeCompare(b.insight.id))
@@ -1340,6 +1539,7 @@ function addItemAndBasketStories(
         relatedFamilies: ['item-favorite'],
         subjectGroup: 'side-characters',
         subjectRank: index + 1,
+        orderIds: orderIds(dataset.exportReceipts.filter((receipt) => evidenceItems(receipt).some((candidate) => candidate.key === item.key))),
       },
     ),
   );
@@ -1355,52 +1555,46 @@ function addTimingStories(
     return;
   }
   const dates = [...dataset.byLocalDate.keys()].sort();
-  let longest = 1,
-    current = 1,
-    streakStart = dates[0],
-    bestStart = dates[0],
-    bestEnd = dates[0];
+  const streaks: string[][] = [[dates[0]]];
   let longestBreak = 0,
     breakStart = dates[0],
     breakEnd = dates[0];
   for (let index = 1; index < dates.length; index++) {
     const gap = daysBetween(dates[index - 1], dates[index]);
-    if (gap === 1) {
-      current += 1;
-      if (current > longest) {
-        longest = current;
-        bestStart = streakStart;
-        bestEnd = dates[index];
-      }
-    } else {
-      current = 1;
-      streakStart = dates[index];
-    }
+    if (gap === 1) streaks[streaks.length - 1].push(dates[index]);
+    else streaks.push([dates[index]]);
     if (gap - 1 > longestBreak) {
       longestBreak = gap - 1;
       breakStart = dates[index - 1];
       breakEnd = dates[index];
     }
   }
-  if (longest >= 3)
-    add(
-      eligible,
-      {
-        id: 'longest-order-streak',
-        presentation: 'timeline',
-        category: 'extremes',
-        icon: 'calendar',
-        eyebrow: 'Hot streak',
-        title: `${longest} delivery days in a row`,
-        detail: 'A calendar streak with absolutely no meal prep subplot.',
-        events: [
-          { label: 'Started', value: dateLabel(bestStart, dataset.timezone) },
-          { label: 'Made it through', value: dateLabel(bestEnd, dataset.timezone) },
-        ],
-      },
-      'order-streak',
-      86,
-    );
+  streaks.filter((streak) => streak.length >= 3)
+    .sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]))
+    .slice(0, 3).forEach((streak, index) => {
+      const bestStart = streak[0], bestEnd = streak[streak.length - 1];
+      add(
+        eligible,
+        {
+          id: rankedInsightId('longest-order-streak', index),
+          presentation: 'timeline',
+          category: 'extremes',
+          icon: 'calendar',
+          eyebrow: index === 0 ? 'Longest ordering streak' : `${rankLabel(index)}-longest ordering streak`,
+          title: `${streak.length} delivery days in a row`,
+          detail: dataset.orderMetrics
+            ? 'Consecutive local days with completed deliveries, across all merchant categories.'
+            : 'A calendar streak with absolutely no meal prep subplot.',
+          events: [
+            { label: 'Started', value: dateLabel(bestStart) },
+            { label: 'Made it through', value: dateLabel(bestEnd) },
+          ],
+        },
+        'order-streak',
+        86 - index * 4,
+        { subjectGroup: 'ordering-streaks', subjectRank: index + 1, orderIds: orderIds(dataset.dated.filter((receipt) => Boolean(receipt.localDate && receipt.localDate >= bestStart && receipt.localDate <= bestEnd))) },
+      );
+    });
   let activeStreak = 1;
   for (
     let index = dates.length - 1;
@@ -1429,7 +1623,11 @@ function addTimingStories(
       },
       'current-streak',
       95,
-      { timely: true, relatedFamilies: ['order-streak'] },
+      {
+        timely: true,
+        relatedFamilies: ['order-streak'],
+        orderIds: orderIds(dataset.dated.filter((receipt) => Boolean(receipt.localDate && receipt.localDate >= dates[dates.length - activeStreak] && receipt.localDate <= dataset.latestDate!))),
+      },
     );
   const currentBreak = dataset.latestDate ? daysBetween(dataset.latestDate, dataset.localDate) : 0;
   const detoxDays = Math.max(longestBreak, currentBreak);
@@ -1441,14 +1639,14 @@ function addTimingStories(
         presentation: 'hero',
         category: 'progress',
         icon: 'calendar',
-        eyebrow: currentBreak >= longestBreak ? 'Current quiet streak' : 'Delivery detox record',
-        title: 'The doorbell got a break',
+        eyebrow: currentBreak >= longestBreak ? 'Gap in tracked history' : 'Longest tracked gap',
+        title: 'Between tracked orders',
         value: detoxDays,
         valueFormat: 'days',
         detail:
           currentBreak >= longestBreak
             ? `It has been ${currentBreak} days since the latest tracked order.`
-            : 'Your longest delivery-free stretch.',
+            : 'Your longest gap between recorded orders; missing history may contribute.',
         period:
           currentBreak >= longestBreak && dataset.latestDate
             ? { startDate: shiftLocalDate(dataset.latestDate, 1), endDate: dataset.localDate }
@@ -1463,6 +1661,34 @@ function addTimingStories(
     .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
     .slice(0, 3);
   busiestDays.forEach((busyDay, index) => {
+    if (dataset.orderMetrics) {
+      const metrics = summarizeOrderMetrics(busyDay[1].map((r) => r.source));
+      const spending = metrics.currencies.flatMap((currency) =>
+        currency.currencyCode !== 'UNKNOWN' && currency.pricedOrders > 0 && currency.unknownPriceOrders === 0
+          ? [{ currencyCode: currency.currencyCode, amount: currency.netSpend }]
+          : [],
+      );
+      add(
+        eligible,
+        {
+          id: index === 0 ? 'multi-order-day' : `multi-order-day-rank-${index + 1}`,
+          presentation: 'hero',
+          category: 'extremes',
+          icon: 'delivery',
+          eyebrow: 'A busy doorbell',
+          title: `${metrics.deliveries} orders.`,
+          value: metrics.deliveries,
+          valueFormat: 'number',
+          detail: 'One busy day.',
+          busyDay: { date: busyDay[0], spending },
+          period: { startDate: busyDay[0] },
+        },
+        'daily-order-record',
+        83 - index * 6,
+        { subjectGroup: 'multi-order-days', subjectRank: index + 1, orderIds: orderIds(busyDay[1]) },
+      );
+      return;
+    }
     const restaurants = [
       ...new Set(
         busyDay[1].flatMap((receipt) => (receipt.restaurantLabel ? [receipt.restaurantLabel] : [])),
@@ -1492,7 +1718,7 @@ function addTimingStories(
       },
       'daily-order-record',
       83 - index * 6,
-      { subjectGroup: 'multi-order-days', subjectRank: index + 1 },
+      { subjectGroup: 'multi-order-days', subjectRank: index + 1, orderIds: orderIds(busyDay[1]) },
     );
   });
 
@@ -1501,48 +1727,58 @@ function addTimingStories(
     const minutes = receipt.hour! * 60 + (receipt.minute ?? 0);
     return receipt.hour! < 4 ? minutes + 24 * 60 : minutes;
   };
-  const latestClock = [...lateReceipts].sort(
+  const latestClocks = [...lateReceipts].sort(
     (a, b) => lateNightOrdinal(b) - lateNightOrdinal(a) || a.stableIndex - b.stableIndex,
-  )[0];
-  if (latestClock) {
+  ).slice(0, 3);
+  latestClocks.forEach((latestClock, index) => {
     const time = new Intl.DateTimeFormat('en-US', {
-      timeZone: dataset.timezone,
+      timeZone: latestClock.source.resolution?.timestamp?.timezone ?? dataset.timezone,
       hour: 'numeric',
       minute: '2-digit',
     }).format(latestClock.source.orderDate!);
     add(
       eligible,
       {
-        id: 'latest-ever-order',
+        id: rankedInsightId('latest-ever-order', index),
         presentation: 'timeline',
         category: 'extremes',
         icon: 'moon',
-        eyebrow: 'Latest checkout',
-        title: 'Your hunger stayed up late',
-        detail: 'The delivery apps were still awake too.',
+        eyebrow: index === 0 ? 'Latest checkout' : `${rankLabel(index)}-latest checkout`,
+        title: index === 0
+          ? (dataset.orderMetrics ? 'Latest recorded placement time' : 'Your hunger stayed up late')
+          : `Your ${rankLabel(index).toLowerCase()}-latest order time`,
+        detail: dataset.orderMetrics
+          ? undefined
+          : 'The delivery apps were still awake too.',
         period: latestClock.localDate ? { startDate: latestClock.localDate } : undefined,
         events: [
-          { label: 'Latest local order time', value: time },
+          { label: index === 0 ? 'Latest local order time' : 'Local order time', value: time },
           { label: 'Restaurant', value: latestClock.restaurantLabel ?? 'Unknown restaurant' },
         ],
       },
       'late-order-record',
-      77,
-      { relatedFamilies: ['late-night'] },
+      77 - index * 4,
+      { subjectGroup: 'latest-order-times', subjectRank: index + 1, relatedFamilies: ['late-night'], orderIds: orderIds([latestClock]) },
     );
-  }
+  });
 
   const lateRestaurants = new Map<string, NormalizedReceipt[]>();
-  const lateItems = new Map<string, { label: string; count: number; dates: string[] }>();
+  const lateItems = new Map<string, { key: string; label: string; count: number; dates: string[] }>();
   for (const lateReceipt of lateReceipts) {
-    if (lateReceipt.restaurantKey)
+    if (
+      lateReceipt.restaurantKey &&
+      (!dataset.orderMetrics || lateReceipt.merchantClass === 'restaurant')
+    )
       lateRestaurants.set(lateReceipt.restaurantKey, [
         ...(lateRestaurants.get(lateReceipt.restaurantKey) ?? []),
         lateReceipt,
       ]);
-    if (lateReceipt.source.dataSource === 'csv')
+    if (
+      hasExportSource(lateReceipt) &&
+      (!dataset.orderMetrics || lateReceipt.merchantClass === 'restaurant')
+    )
       for (const item of lateReceipt.items) {
-        const currentItem = lateItems.get(item.key) ?? { label: item.label, count: 0, dates: [] };
+        const currentItem = lateItems.get(item.key) ?? { key: item.key, label: item.label, count: 0, dates: [] };
         currentItem.count += item.quantity;
         if (lateReceipt.localDate) currentItem.dates.push(lateReceipt.localDate);
         lateItems.set(item.key, currentItem);
@@ -1583,6 +1819,7 @@ function addTimingStories(
           relatedFamilies: ['late-night'],
           subjectGroup: 'late-night-restaurants',
           subjectRank: index + 1,
+          orderIds: orderIds(favorite),
         },
       ),
     );
@@ -1616,6 +1853,7 @@ function addTimingStories(
           relatedFamilies: ['late-night', 'item-favorite'],
           subjectGroup: 'late-night-items',
           subjectRank: index + 1,
+          orderIds: orderIds(lateReceipts.filter((receipt) => receipt.items.some((candidate) => candidate.key === item.key))),
         },
       ),
     );
@@ -1654,6 +1892,7 @@ function addTimingStories(
       },
       'weekend',
       64,
+      { orderIds: orderIds(dataset.dated) },
     );
 
   if (dataset.earliestDate && daysBetween(dataset.earliestDate, dataset.localDate) >= 365)
@@ -1668,12 +1907,13 @@ function addTimingStories(
         title: 'Your first tracked order',
         detail: `${Math.floor(daysBetween(dataset.earliestDate, dataset.localDate) / 365.25)} years of delivery lore followed.`,
         events: [
-          { label: 'It began', value: dateLabel(dataset.earliestDate, dataset.timezone) },
+          { label: 'It began', value: dateLabel(dataset.earliestDate) },
           { label: 'Restaurant', value: dataset.dated[0].restaurantLabel ?? 'Unknown restaurant' },
         ],
       },
       'anniversary',
       58,
+      { orderIds: orderIds(dataset.dated.slice(0, 1)) },
     );
 }
 
@@ -1703,7 +1943,7 @@ function addDeliveryStories(
     },
     'delivery-lifetime',
     89,
-    { relatedFamilies: ['delivery-record'] },
+    { relatedFamilies: ['delivery-record'], orderIds: orderIds(dataset.deliveryReceipts) },
   );
   [...dataset.deliveryReceipts]
     .sort((a, b) => a.deliveryMinutes! - b.deliveryMinutes! || a.stableIndex - b.stableIndex)
@@ -1736,11 +1976,12 @@ function addDeliveryStories(
           relatedFamilies: ['delivery-record'],
           subjectGroup: 'fastest-deliveries',
           subjectRank: index + 1,
+          orderIds: orderIds([delivery]),
         },
       ),
     );
   const overallMedian = median(waits);
-  const restaurants = [...dataset.byRestaurant.values()].flatMap((receipts) => {
+  const restaurants = [...dataset.byBranch.entries()].flatMap(([key, receipts]) => {
     const valid = receipts.filter(
       (receipt) => receipt.deliveryMinutes !== undefined && receipt.merchantClass === 'restaurant',
     );
@@ -1750,84 +1991,110 @@ function addDeliveryStories(
     const deviations = restaurantWaits.map((wait) => Math.abs(wait - med));
     return [
       {
-        label: valid[0].restaurantLabel!,
+        key,
+        label: valid[0].source.restaurantName ?? valid[0].restaurantLabel!,
         count: valid.length,
         median: med,
         spread: median(deviations),
+        receipts: valid,
       },
     ];
   });
-  const fastestRegular = [...restaurants].sort(
-    (a, b) => a.median - b.median || b.count - a.count,
-  )[0];
-  if (fastestRegular)
+  [...restaurants].sort(
+    (a, b) => a.median - b.median || b.count - a.count || a.key.localeCompare(b.key),
+  ).slice(0, 3).forEach((fastestRegular, index) => {
     add(
       eligible,
       {
-        id: 'fastest-regular',
+        id: rankedInsightId('fastest-regular', index),
         presentation: 'hero',
         category: 'favorites',
         icon: 'delivery',
-        eyebrow: 'Fastest regular',
+        eyebrow: index === 0 ? 'Fastest regular' : `${rankLabel(index)}-fastest regular`,
         title: fastestRegular.label,
         value: Math.round(fastestRegular.median),
         valueFormat: 'minutes',
-        detail: `${Math.abs(Math.round(overallMedian - fastestRegular.median))} minutes ${fastestRegular.median <= overallMedian ? 'faster than' : 'from'} your overall median.`,
+        detail: `${Math.abs(Math.round(overallMedian - fastestRegular.median))} minutes ${fastestRegular.median <= overallMedian ? 'faster than' : 'slower than'} your overall median.`,
         methodology: { sampleSize: fastestRegular.count },
       },
       'delivery-restaurant-speed',
-      81,
-      { relatedFamilies: ['delivery-fastest'] },
+      81 - index * 4,
+      { subjectGroup: 'fastest-regulars', subjectRank: index + 1, relatedFamilies: ['delivery-fastest'], orderIds: orderIds(fastestRegular.receipts) },
     );
-  const reliable = [...restaurants].sort((a, b) => a.spread - b.spread || b.count - a.count)[0];
-  const unpredictable = [...restaurants].sort(
-    (a, b) => b.spread - a.spread || b.count - a.count,
-  )[0];
-  if (reliable && reliable.spread <= 12)
-    add(
-      eligible,
-      {
-        id: 'most-reliable-restaurant',
-        presentation: 'hero',
-        category: 'favorites',
-        icon: 'delivery',
-        eyebrow: 'Clockwork delivery',
-        title: reliable.label,
-        value: Math.round(reliable.spread),
-        valueFormat: 'minutes',
-        detail: `Its typical delivery varied by only ${Math.round(reliable.spread)} minutes.`,
-        methodology: { sampleSize: reliable.count },
-      },
-      'delivery-reliability',
-      76,
-      { relatedFamilies: ['delivery-restaurant-speed'] },
-    );
-  if (unpredictable && unpredictable.spread >= 15)
-    add(
-      eligible,
-      {
-        id: 'most-unpredictable-restaurant',
-        presentation: 'hero',
-        category: 'habits',
-        icon: 'delivery',
-        eyebrow: 'Mystery ETA',
-        title: unpredictable.label,
-        value: Math.round(unpredictable.spread),
-        valueFormat: 'minutes',
-        detail: 'Its delivery windows had the widest typical swing among your regulars.',
-        methodology: { sampleSize: unpredictable.count },
-      },
-      'delivery-unpredictable',
-      71,
-      { relatedFamilies: ['delivery-reliability'] },
-    );
+  });
+  restaurants.filter((restaurant) => restaurant.spread <= 12)
+    .sort((a, b) => a.spread - b.spread || b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, 3).forEach((reliable, index) => {
+      add(
+        eligible,
+        {
+          id: rankedInsightId('most-reliable-restaurant', index),
+          presentation: 'hero',
+          category: 'favorites',
+          icon: 'delivery',
+          eyebrow: index === 0 ? 'Most consistent delivery times' : `${rankLabel(index)}-most consistent delivery times`,
+          title: reliable.label,
+          value: Math.round(reliable.spread),
+          valueFormat: 'minutes',
+          detail: `Median absolute deviation: ${Math.round(reliable.spread)} minutes. Individual deliveries can vary more.`,
+          methodology: { sampleSize: reliable.count },
+        },
+        'delivery-reliability',
+        76 - index * 4,
+        { subjectGroup: 'consistent-restaurants', subjectRank: index + 1, relatedFamilies: ['delivery-restaurant-speed'], orderIds: orderIds(reliable.receipts) },
+      );
+    });
+  restaurants.filter((restaurant) => restaurant.spread >= 15)
+    .sort((a, b) => b.spread - a.spread || b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, 3).forEach((unpredictable, index) => {
+      add(
+        eligible,
+        {
+          id: rankedInsightId('most-unpredictable-restaurant', index),
+          presentation: 'hero',
+          category: 'habits',
+          icon: 'delivery',
+          eyebrow: index === 0 ? 'Most unpredictable delivery times' : `${rankLabel(index)}-most unpredictable delivery times`,
+          title: unpredictable.label,
+          value: Math.round(unpredictable.spread),
+          valueFormat: 'minutes',
+          detail: `Ranked #${index + 1} by typical delivery-time variation among your regulars. Median absolute deviation: ${Math.round(unpredictable.spread)} minutes.`,
+          methodology: { sampleSize: unpredictable.count },
+        },
+        'delivery-unpredictable',
+        71 - index * 4,
+        { subjectGroup: 'unpredictable-restaurants', subjectRank: index + 1, relatedFamilies: ['delivery-reliability'], orderIds: orderIds(unpredictable.receipts) },
+      );
+    });
 }
 
 function addInvestmentStory(
   dataset: DashboardDataset,
   eligible: InsightCandidate[],
   suppressed: SuppressedCandidate[],
+  market?: InvestmentContext,
 ) {
+  if (market?.mode === 'historical') {
+    const result = calculateHistoricalInvestment(dataset.dated.filter(r => r.amountKnown).map(r => ({ amount: r.amount, date: r.localDate! })), dataset.currencyCode, market);
+    const included = result ? dataset.dated.filter(r => r.amountKnown && r.amount > 0 && r.localDate! <= result.valuationDate) : [];
+    if (!result || included.length < 5 || daysBetween(included.map(r => r.localDate!).sort()[0], result.valuationDate) < 180) {
+      suppressed.push({ id: 'hypothetical-investment', reason: 'insufficient_history' }); return;
+    }
+    const chosen = result.outcomes[result.selectedBenchmark];
+    const other = result.selectedBenchmark === 'sp500' ? 'nasdaq' : 'sp500';
+    const money = (v: number) => new Intl.NumberFormat('en', { style: 'currency', currency: result.currencyCode }).format(v);
+    add(eligible, {
+      id: 'hypothetical-investment', presentation: 'comparison', category: 'progress', icon: 'trend',
+      eyebrow: 'Alternate universe', title: 'If your orders were investments', currencyCode: result.currencyCode,
+      historicalInvestment: result,
+      detail: `Based on ${BENCHMARK_NAMES[result.selectedBenchmark]} performance through ${result.valuationDate}. Higher of the Nasdaq and S&P 500 scenarios. ${BENCHMARK_NAMES[other]}: ${money(result.outcomes[other].value)}.`,
+      comparison: { variant: 'investment', current: chosen.value, previous: result.contributed, delta: chosen.gain,
+        percentDelta: Math.round(chosen.gain / result.contributed * 100), direction: 'up', valueFormat: 'currency', currentLabel: "You'd have", previousLabel: 'You spent' },
+      methodology: { sampleSize: result.contributionCount, assumption: INVESTMENT_METHODOLOGY },
+    }, 'alternate-universe', 74, { orderIds: orderIds(included) });
+    return;
+  }
+
   if (
     dataset.dated.length < 5 ||
     !dataset.earliestDate ||
@@ -1879,6 +2146,7 @@ function addInvestmentStory(
     },
     'alternate-universe',
     74,
+    { orderIds: orderIds(dataset.dated) },
   );
 }
 
@@ -1934,18 +2202,221 @@ function addLockedCandidate(dataset: DashboardDataset, eligible: InsightCandidat
   );
 }
 
-export function buildCandidateCatalogue(dataset: DashboardDataset): CandidateCatalogue {
+/** Descriptive insights use explicit populations; they do not claim causal effects. */
+function addCostDistributionStories(dataset: DashboardDataset, eligible: InsightCandidate[]) {
+  const paid = dataset.positive;
+  const total = paid.reduce((sum, r) => sum + r.amount, 0);
+  if (paid.length >= 10 && total > 0) {
+    const largest = [...paid]
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, Math.ceil(paid.length * 0.1));
+    add(
+      eligible,
+      {
+        id: 'spending-concentration',
+        presentation: 'hero',
+        category: 'habits',
+        icon: 'receipt',
+        eyebrow: 'The big orders',
+        title: 'Your largest orders',
+        value: Math.round((largest.reduce((sum, r) => sum + r.amount, 0) / total) * 100),
+        valueFormat: 'percent',
+        spendingConcentration: { orderCount: largest.length },
+        detail: `Your largest ${largest.length} orders account for this share of recorded spending.`,
+        methodology: { sampleSize: paid.length },
+      },
+      'spending-concentration',
+      75,
+      { orderIds: orderIds(largest) },
+    );
+  }
+  const currentMonth = dataset.localDate.slice(0, 7);
+  const previousMonth = shiftLocalDate(`${currentMonth}-01`, -1).slice(0, 7);
+  const lastPreviousDay = Number(shiftLocalDate(`${currentMonth}-01`, -1).slice(8, 10));
+  const day = Math.min(Number(dataset.localDate.slice(8, 10)), lastPreviousDay);
+  const a = dataset.dated.filter(
+    (r) => r.localMonth === previousMonth && Number(r.localDate!.slice(8, 10)) <= day,
+  );
+  const b = dataset.dated.filter(
+    (r) => r.localMonth === currentMonth && Number(r.localDate!.slice(8, 10)) <= day,
+  );
+  if (a.length && b.length) {
+    const av = a.reduce((s, r) => s + r.amount, 0) / a.length,
+      bv = b.reduce((s, r) => s + r.amount, 0) / b.length;
+    const countEffect = roundMoney(((b.length - a.length) * (av + bv)) / 2);
+    const totalChange = roundMoney(b.length * bv - a.length * av);
+    add(
+      eligible,
+      {
+        id: 'spending-change-decomposition',
+        presentation: 'hero',
+        category: 'progress',
+        icon: 'trend',
+        eyebrow: 'What changed',
+        title: 'Ordering frequency and average cost',
+        value: totalChange,
+        valueFormat: 'currency',
+        detail: `Frequency accounts for ${countEffect.toFixed(2)} ${dataset.currencyCode}; average order cost accounts for ${roundMoney(totalChange - countEffect).toFixed(2)} ${dataset.currencyCode}. Compared through day ${day}; descriptive, not causal.`,
+      },
+      'spending-decomposition',
+      77,
+      { orderIds: orderIds([...a, ...b]) },
+    );
+  }
+}
+
+function addDeliveryDistributionStories(dataset: DashboardDataset, eligible: InsightCandidate[]) {
+  const waits = dataset.deliveryReceipts.map((r) => r.deliveryMinutes!).sort((a, b) => a - b);
+  if (waits.length >= 10)
+    add(
+      eligible,
+      {
+        id: 'delivery-typical-slow',
+        presentation: 'comparison',
+        category: 'habits',
+        icon: 'delivery',
+        eyebrow: 'Delivery expectations',
+        title: 'Typical versus slow deliveries',
+        detail: 'Nine in ten recorded delivery windows were at or below the slow threshold.',
+        comparison: {
+          current: waits[Math.ceil(waits.length * 0.9) - 1],
+          previous: median(waits),
+          delta: waits[Math.ceil(waits.length * 0.9) - 1] - median(waits),
+          direction: 'up',
+          percentDelta: null,
+          valueFormat: 'number',
+          currentLabel: '90th percentile (min)',
+          previousLabel: 'Median (min)',
+        },
+        methodology: { sampleSize: waits.length },
+      },
+      'delivery-distribution',
+      75,
+      { orderIds: orderIds(dataset.deliveryReceipts) },
+    );
+}
+
+/** Each builder receives its named population; no receipt-row count is a delivery count. */
+function buildOrderEventCatalogue(dataset: DashboardDataset, market?: InvestmentContext): CandidateCatalogue {
   const eligible: InsightCandidate[] = [];
   const suppressed: SuppressedCandidate[] = [];
-  if (!dataset.positive.length)
+  const metrics = dataset.orderMetrics!;
+  const deliveries = dashboardCohort(dataset, 'deliveries');
+  const restaurants = dashboardCohort(dataset, 'restaurants');
+  const costs = dashboardCohort(dataset, 'net-cost');
+
+  // Eligibility belongs to each story's population. An unrelated uncertain
+  // receipt must not replace the catalogue with account-wide diagnostics.
+  const append = (cohort: DashboardDataset, build: (candidates: InsightCandidate[]) => void) => {
+    const candidates: InsightCandidate[] = [];
+    build(candidates);
+    for (const candidate of candidates) {
+      candidate.insight.currencyCode = dataset.currencyCode;
+      if (cohort.cohort === 'net-cost') {
+        candidate.insight.methodology = {
+          ...candidate.insight.methodology,
+          estimated: cohort.receipts.some((r) => orderMetricEligibility(r.source).estimatedAmount),
+          assumption: [candidate.insight.methodology?.assumption, 'Based on recorded order costs in the displayed currency, after refunds.'].filter(Boolean).join(' '),
+        };
+      }
+    }
+    eligible.push(...candidates);
+  };
+
+  append(deliveries, (candidates) => {
+    addMerchantFavorites(deliveries, candidates, suppressed);
+    addCalendarHabits(deliveries, candidates, suppressed);
+    addTimingStories(deliveries, candidates, suppressed);
+    addRecentFrequency(deliveries, candidates);
+    addDeliveryRecords(deliveries, candidates);
+    addDeliveryStories(deliveries, candidates, suppressed);
+    addDeliveryDistributionStories(deliveries, candidates);
+  });
+  append(restaurants, (candidates) => {
+    addRestaurantStories(restaurants, candidates, suppressed);
+    addItemFavorites(restaurants, candidates, suppressed);
+    addItemAndBasketStories(restaurants, candidates, suppressed);
+  });
+  if (dataset.currencyCode !== 'UNKNOWN') {
+    append(costs, (candidates) => {
+      addCostRecords(costs, candidates);
+      addRecentMovement(costs, candidates, suppressed);
+      addInvestmentStory(costs, candidates, suppressed, market);
+      addCostDistributionStories(costs, candidates);
+    });
+  }
+
+  // Outcomes are one optional insight among the existing families, not a
+  // permanent dashboard panel or a substitute for the user's other stories.
+  if (metrics.canceled || metrics.confirmedRefunds) {
+    add(
+      eligible,
+      {
+        id: 'refunds-and-cancellations',
+        presentation: 'timeline',
+        category: 'progress',
+        icon: 'receipt',
+        eyebrow: 'Along the way',
+        title: 'Refunds and cancellations',
+        detail: 'Not every order went to plan.',
+        events: [
+          ...(metrics.canceled ? [{ label: 'Canceled orders', value: metrics.canceled }] : []),
+          ...(metrics.confirmedRefunds ? [{ label: 'Refunded orders', value: metrics.confirmedRefunds }] : []),
+          ...metrics.currencies.flatMap((currency) =>
+            currency.currencyCode !== 'UNKNOWN' && currency.confirmedRefundAmount > 0
+              ? [{ label: `Refunded · ${currency.currencyCode}`, value: currency.confirmedRefundAmount.toFixed(2) }]
+              : [],
+          ),
+        ],
+      },
+      'refunds-cancellations',
+      65,
+      {
+        orderIds: orderIds(dataset.receipts.filter((receipt) =>
+          matchesReceiptOutcome(receipt.source, 'canceled') || matchesReceiptOutcome(receipt.source, 'refunded'))),
+      },
+    );
+  }
+  addLockedCandidate(dataset, eligible);
+  return { eligible, suppressed };
+}
+
+export function buildCandidateCatalogue(dataset: DashboardDataset, market?: InvestmentContext): CandidateCatalogue {
+  const eligible: InsightCandidate[] = [];
+  const suppressed: SuppressedCandidate[] = [];
+  if (!dataset.receipts.length)
     return { eligible, suppressed: [{ id: 'all', reason: 'insufficient_history' }] };
-  addExistingCandidates(dataset, eligible, suppressed);
+  if (dataset.orderMetrics) return buildOrderEventCatalogue(dataset, market);
+  addMerchantFavorites(dataset, eligible, suppressed);
+  addCalendarHabits(dataset, eligible, suppressed);
+  addCostRecords(dataset, eligible);
+  addItemFavorites(dataset, eligible, suppressed);
+  addDeliveryRecords(dataset, eligible);
   addRecentMovement(dataset, eligible, suppressed);
+  addRecentFrequency(dataset, eligible);
   addRestaurantStories(dataset, eligible, suppressed);
   addItemAndBasketStories(dataset, eligible, suppressed);
   addTimingStories(dataset, eligible, suppressed);
   addDeliveryStories(dataset, eligible, suppressed);
-  addInvestmentStory(dataset, eligible, suppressed);
+  addInvestmentStory(dataset, eligible, suppressed, market);
   addLockedCandidate(dataset, eligible);
+  addCostDistributionStories(dataset, eligible);
+  addDeliveryDistributionStories(dataset, eligible);
+  const estimated = dataset.receipts.some(
+    (r) => r.source.resolution?.amountBasis !== 'receipt_total',
+  );
+  for (const candidate of eligible) {
+    const insight = candidate.insight;
+    insight.currencyCode = dataset.currencyCode;
+    const currency =
+      (insight.presentation === 'hero' && insight.valueFormat === 'currency') ||
+      (insight.presentation === 'comparison' && insight.comparison.valueFormat === 'currency');
+    if (currency)
+      insight.methodology = {
+        ...insight.methodology,
+        estimated,
+        assumption: `${dataset.currencyCode}; ${estimated ? 'best available receipt/export amounts' : 'receipt totals'}. Other currencies are separate.`,
+      };
+  }
   return { eligible, suppressed };
 }

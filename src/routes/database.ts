@@ -58,11 +58,20 @@ export const createDatabaseRouter = (dependencies: DatabaseRouterDependencies): 
    *                         properties:
    *                           receiptCount:
    *                             type: integer
+   *                             description: Stored canonical records, including unresolved candidates and unlinked adjustments. Use receiptSummary for order counts.
    *                             example: 45
    *                           totalSpent:
    *                             type: number
+   *                             nullable: true
+   *                             deprecated: true
+   *                             description: Single-currency net order cost, or null when currencies or unresolved amounts prevent a single total.
    *                             format: float
    *                             example: 1250.75
+   *                           currencyCode:
+   *                             type: string
+   *                             nullable: true
+   *                           receiptSummary:
+   *                             $ref: '#/components/schemas/AdminReceiptSummary'
    *                 pagination:
    *                   type: object
    *                   properties:
@@ -124,18 +133,30 @@ export const createDatabaseRouter = (dependencies: DatabaseRouterDependencies): 
    *                       example: 1250
    *                     totalReceipts:
    *                       type: integer
+   *                       description: Physical canonical record count, not a count of delivered purchases or source documents.
    *                       example: 15420
    *                     usersWithReceipts:
    *                       type: integer
    *                       example: 1180
    *                     totalAmountAllUsers:
    *                       type: number
+   *                       nullable: true
+   *                       deprecated: true
+   *                       description: Single-currency known net order cost, or null for mixed currencies or unresolved amounts. Use receiptSummary.currencies.
    *                       format: float
    *                       example: 125000.75
    *                     averageReceiptAmount:
    *                       type: number
+   *                       nullable: true
+   *                       deprecated: true
+   *                       description: Average net cost per established attempt in currencyCode, not per source document. Null when a single total is unavailable.
    *                       format: float
    *                       example: 8.12
+   *                     currencyCode:
+   *                       type: string
+   *                       nullable: true
+   *                     receiptSummary:
+   *                       $ref: '#/components/schemas/AdminReceiptSummary'
    *                 tableSizes:
    *                   type: array
    *                   items:

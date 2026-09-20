@@ -43,6 +43,10 @@ export const RECEIPT_PAGE_FIXTURE = {
       items: [{ name: 'Dinner', quantity: 1, price: 25.99 }],
       receiptType: 'doordash',
       dataSource: 'email',
+        sources: ['email'],
+        currencyCode: 'UNKNOWN',
+        amountBasis: 'legacy',
+        evidenceSummary: 'Based on exported or legacy totals',
     },
   ],
   pageInfo: {

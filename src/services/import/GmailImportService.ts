@@ -10,6 +10,9 @@ import type { GmailImportLifecycleService } from './GmailImportLifecycleService'
 import type { ReceiptEmailBatchExtractor } from './ReceiptEmailBatchExtractor';
 import { deduplicateReceipts } from './ReceiptDeduplicator';
 import type { ReceiptImportPersistenceService } from './ReceiptImportPersistenceService';
+import { receiptImportOutcomeFields, type ReceiptImportOutcome } from './ReceiptImportOutcome';
+import { receiptImportAccounting } from './ReceiptImportExecution';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 import {
   restoreMailboxCheckpoint,
   saveMailboxCheckpoint,
@@ -35,10 +38,13 @@ export interface GmailImportResult {
   eligibleReceipts: number;
   deduplicatedReceipts: number;
   totalReceiptsImported: number;
-  totalAmount: number;
+  totalAmount: number | null;
+  receiptOutcome?: ReceiptImportOutcome;
+  currencyCode?: string | null;
   errors: string[];
   receipts: Receipt[];
   newOrders: number;
+  unresolvedOrders?: number;
   updatedOrders: number;
   unchangedOrders: number;
   errorCode: string | null;
@@ -47,7 +53,7 @@ export interface GmailImportResult {
 
 type AcquisitionPort = Pick<GmailImportAcquisitionService, 'acquire'>;
 type ExtractionPort = Pick<ReceiptEmailBatchExtractor, 'extract'>;
-type PersistencePort = Pick<ReceiptImportPersistenceService, 'persist'>;
+type PersistencePort = Pick<ReceiptImportPersistenceService, 'persist' | 'getOutcome'>;
 type LifecyclePort = Pick<GmailImportLifecycleService, 'start' | 'complete' | 'fail' | 'markReconnectRequired'>;
 
 export const isGmailReconnectError = (error: unknown): boolean => {
@@ -70,10 +76,11 @@ export const gmailImportErrorCode = (error: unknown): string => {
 export const filterReceiptsAfterExportCutoffs = (
   receipts: readonly Receipt[],
   cutoffs: ExportCutoffsByReceiptType,
-): Receipt[] => receipts.filter((receipt) => {
-  const cutoff = cutoffs[receipt.receiptType];
-  return !cutoff || Boolean(receipt.orderDate && receipt.orderDate > cutoff);
-});
+): Receipt[] => {
+  // Overlapping email receipts enrich export evidence; persistence owns order matching.
+  void cutoffs;
+  return [...receipts];
+};
 
 const resultFromState = (state: MailboxImportState, success = true, errorCode: string | null = null, errors: string[] = [], failureDetails: Readonly<Record<string, unknown>> | null = null): GmailImportResult => ({
   success,
@@ -89,6 +96,7 @@ const resultFromState = (state: MailboxImportState, success = true, errorCode: s
   errors,
   receipts: [],
   newOrders: state.counters.newOrders,
+  unresolvedOrders: state.counters.unresolvedOrders,
   updatedOrders: state.counters.updatedOrders,
   unchangedOrders: state.counters.unchangedOrders,
   errorCode,
@@ -103,6 +111,7 @@ export class GmailImportService {
     private readonly persistence: PersistencePort,
     private readonly lifecycle: LifecyclePort,
     private readonly logger: StructuredLogger = silentStructuredLogger,
+    private readonly receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
   ) {}
 
   async importFromGmail(
@@ -111,8 +120,9 @@ export class GmailImportService {
     trigger: 'manual' | 'background' = 'manual',
     execution?: ImportExecutionCheckpoint,
   ): Promise<GmailImportResult> {
-    const syncRunId = await this.lifecycle.start(user.id, trigger);
+    const accounting = receiptImportAccounting(this.receiptPolicy, execution?.accountingJobId, 'gmail');
     let state = restoreMailboxCheckpoint(execution, 'gmail');
+    const syncRunId = await this.lifecycle.start(user.id, trigger, execution?.accountingJobId);
     try {
       if (!state.done) {
         const acquired = await this.acquisition.acquire(user, trigger, state.cursor ?? undefined);
@@ -131,7 +141,7 @@ export class GmailImportService {
           const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
           const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
           const deduplicated = deduplicateReceipts(eligible);
-          const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock);
+          const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock, accounting);
           const counters = state.counters;
           counters.pages += 1;
           counters.matchedMessages += page.matchedCount;
@@ -145,6 +155,7 @@ export class GmailImportService {
           counters.totalAmount += deduplicated.receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
           counters.errorCount += extracted.errors.length;
           counters.newOrders += persisted.newOrders;
+          counters.unresolvedOrders = persisted.unresolvedOrders ?? 0;
           counters.updatedOrders += persisted.updatedOrders;
           counters.unchangedOrders += persisted.unchangedOrders;
           counters.rejectedMessages += page.rejectedCount ?? 0;
@@ -154,6 +165,10 @@ export class GmailImportService {
           await saveMailboxCheckpoint(execution, state, page.estimatedTotalCount);
         }
       }
+      const receiptOutcome = accounting ? await this.persistence.getOutcome(user.id, lock, accounting) : undefined;
+      if (receiptOutcome && state.counters.deduplicatedReceipts > 0 && receiptOutcome.sourceDocuments === 0)
+        throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Saved mailbox progress has no canonical accounting evidence', publicMessage: 'This saved import cannot be resumed safely. Your existing history is preserved; start a new import.' });
+      const result = { ...resultFromState(state), ...(receiptOutcome ? receiptImportOutcomeFields(receiptOutcome) : {}) };
       await this.lifecycle.complete(syncRunId, user.id, state.counters.errorCount ? 'partial' : 'success', {
         emailsScanned: state.counters.emailsExamined,
         receiptsProcessed: state.counters.receiptsProcessed,
@@ -161,14 +176,15 @@ export class GmailImportService {
         exportCoveredReceipts: state.counters.exportCoveredReceipts,
         eligibleReceipts: state.counters.eligibleReceipts,
         deduplicatedReceipts: state.counters.deduplicatedReceipts,
-        newOrders: state.counters.newOrders,
-        updatedOrders: state.counters.updatedOrders,
-        unchangedOrders: state.counters.unchangedOrders,
+        newOrders: result.newOrders,
+        updatedOrders: result.updatedOrders,
+        unchangedOrders: result.unchangedOrders,
+        ...(receiptOutcome ? { receiptOutcome } : {}),
         rejectedMessages: state.counters.rejectedMessages,
         decodedBytesExamined: state.counters.decodedBytesExamined,
       }, trigger);
       this.logger.info('Gmail paged import completed', { userId: user.id, importId: syncRunId, provider: 'gmail', operation: 'gmail_import', outcome: 'success', pages: state.counters.pages, emailsExamined: state.counters.emailsExamined });
-      return resultFromState(state);
+      return result;
     } catch (error) {
       const errorCode = gmailImportErrorCode(error);
       await this.lifecycle.fail(syncRunId, user.id, errorCode, trigger);

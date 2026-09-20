@@ -1,0 +1,229 @@
+[
+  {
+    "name": "burger-promotion",
+    "rows": [
+      {
+        "Item_Name": "Double smash cheese burger",
+        "Item_quantity": "2",
+        "Item_Price": "33.98",
+        "Customizations": "BBQ sauce, Lettuce",
+        "Customization_Cost_Local": "0"
+      },
+      {
+        "Item_Name": "Fries",
+        "Item_quantity": "1",
+        "Item_Price": "6.99",
+        "Customizations": "",
+        "Customization_Cost_Local": "0"
+      }
+    ],
+    "exportTotal": 31.19,
+    "emailTotal": 33.3,
+    "receiptSubtotal": 40.97,
+    "expectedExportSubtotal": 40.97,
+    "tip": 2
+  },
+  {
+    "name": "breakfast-components",
+    "rows": [
+      {
+        "Item_Name": "Hash Brown",
+        "Item_quantity": "3",
+        "Item_Price": "10.77",
+        "Customizations": "",
+        "Customization_Cost_Local": "0"
+      },
+      {
+        "Item_Name": "Sausage 'N Egg McMuffin Extra Value Meal",
+        "Item_quantity": "1",
+        "Item_Price": "9.19",
+        "Customizations": "2 Hash Browns [320.0 Cals]",
+        "Customization_Cost_Local": "1.20"
+      },
+      {
+        "Item_Name": "Sausage 'N Egg McMuffin Extra Value Meal",
+        "Item_quantity": "1",
+        "Item_Price": "9.19",
+        "Customizations": "Round Egg, English Muffin, Butter, Cheese, Sausage Patty, Not This Time, Juice/Milk/Water",
+        "Customization_Cost_Local": "0"
+      },
+      {
+        "Item_Name": "Sausage 'N Egg McMuffin Extra Value Meal",
+        "Item_quantity": "1",
+        "Item_Price": "9.19",
+        "Customizations": "Dasani Water [0.0 Cals]",
+        "Customization_Cost_Local": "1.50"
+      }
+    ],
+    "exportTotal": 27.4,
+    "emailTotal": 29.41,
+    "receiptSubtotal": 22.66,
+    "expectedExportSubtotal": 22.66,
+    "tip": 2
+  },
+  {
+    "name": "fries-size-substitution",
+    "rows": [
+      {
+        "Item_Name": "Med Fries [350.0 Cals]",
+        "Item_quantity": "1",
+        "Item_Price": "5.69",
+        "Customizations": "Salt [0.0 Cals]",
+        "Customization_Cost_Local": "0"
+      },
+      {
+        "Item_Name": "Junior Chicken [380.0 Cals]",
+        "Item_quantity": "2",
+        "Item_Price": "9.18",
+        "Customizations": "Mayo-Style Sauce, Bun, Chicken Patty, Shredded Lettuce",
+        "Customization_Cost_Local": "0"
+      },
+      {
+        "Item_Name": "Med Fries [350.0 Cals]",
+        "Item_quantity": "1",
+        "Item_Price": "5.69",
+        "Customizations": "Lrg Fries [560.0 Cals]",
+        "Customization_Cost_Local": "0.60"
+      }
+    ],
+    "exportTotal": 18.87,
+    "emailTotal": 20.87,
+    "receiptSubtotal": 15.47,
+    "expectedExportSubtotal": 15.47,
+    "tip": 2
+  },
+  {
+    "name": "tim-customization",
+    "rows": [
+      {
+        "Item_Name": "Farmer's Breakfast Sandwich",
+        "Item_quantity": "2",
+        "Item_Price": "11.98",
+        "Customizations": "Sausage",
+        "Customization_Cost_Local": "0.6"
+      },
+      {
+        "Item_Name": "Farmer's Breakfast Sandwich",
+        "Item_quantity": "2",
+        "Item_Price": "11.98",
+        "Customizations": "No, Regular, Homestyle Biscuit",
+        "Customization_Cost_Local": "0.0"
+      },
+      {
+        "Item_Name": "Hash Brown",
+        "Item_quantity": "1",
+        "Item_Price": "2.69",
+        "Customizations": "Hash Brown",
+        "Customization_Cost_Local": "0.0"
+      }
+    ],
+    "exportTotal": 19.87,
+    "emailTotal": 21.86,
+    "receiptSubtotal": 15.87,
+    "expectedExportSubtotal": 15.87,
+    "tip": 2
+  },
+  {
+    "name": "pizza-incomplete-price",
+    "rows": [
+      {
+        "Item_Name": "Special Garlic Sauce",
+        "Item_quantity": "2",
+        "Item_Price": "3.38",
+        "Customizations": "Garlic Dipping Sauce",
+        "Customization_Cost_Local": "0.0"
+      },
+      {
+        "Item_Name": "Create Your Own Pizza",
+        "Item_quantity": "2",
+        "Item_Price": "28.88",
+        "Customizations": "Original Pizza Sauce, Regular Sauce, Normal Cheese, Pepperoni, Pineapple, Normal Cut, Normal Bake, Right Half, Beef",
+        "Customization_Cost_Local": "0.0"
+      },
+      {
+        "Item_Name": "Create Your Own Pizza",
+        "Item_quantity": "2",
+        "Item_Price": "28.88",
+        "Customizations": "Medium (12\") Original Create Your Own",
+        "Customization_Cost_Local": "2.5"
+      },
+      {
+        "Item_Name": "Spicy Garlic Sauce",
+        "Item_quantity": "2",
+        "Item_Price": "3.38",
+        "Customizations": "Spicy Garlic Dipping Sauce",
+        "Customization_Cost_Local": "0.0"
+      }
+    ],
+    "exportTotal": 42.43,
+    "emailTotal": 44.52,
+    "receiptSubtotal": 48.44,
+    "expectedExportSubtotal": 40.64,
+    "tip": 2
+  },
+  {
+    "name": "chicken-customization",
+    "rows": [
+      {
+        "Item_Name": "2 Pieces of Chicken with Taters",
+        "Item_quantity": "2",
+        "Item_Price": "27.98",
+        "Customizations": "All Dark (Drums/Thighs)",
+        "Customization_Cost_Local": "1.49"
+      },
+      {
+        "Item_Name": "2 Pieces of Chicken with Taters",
+        "Item_quantity": "2",
+        "Item_Price": "27.98",
+        "Customizations": "Regular, Small Fries",
+        "Customization_Cost_Local": "0.0"
+      }
+    ],
+    "exportTotal": 21.63,
+    "emailTotal": 24.72,
+    "receiptSubtotal": 30.96,
+    "expectedExportSubtotal": 30.96,
+    "tip": 3
+  },
+  {
+    "name": "ten-rolls",
+    "rows": [
+      {
+        "Item_Name": "Chalet Dinner Roll",
+        "Item_quantity": "10",
+        "Item_Price": "5.9",
+        "Customizations": "White Roll",
+        "Customization_Cost_Local": "0.0"
+      }
+    ],
+    "exportTotal": 14.57,
+    "emailTotal": 16.57,
+    "receiptSubtotal": 5.9,
+    "expectedExportSubtotal": 5.9,
+    "tip": 2
+  },
+  {
+    "name": "portions",
+    "rows": [
+      {
+        "Item_Name": "Soy Garlic Chicken(12 pcs)",
+        "Item_quantity": "1",
+        "Item_Price": "24.49",
+        "Customizations": "Small (12-14 pcs)",
+        "Customization_Cost_Local": "0.0"
+      },
+      {
+        "Item_Name": "Mozzarella Cheese Sticks (2 pcs)",
+        "Item_quantity": "2",
+        "Item_Price": "13.98",
+        "Customizations": "",
+        "Customization_Cost_Local": ""
+      }
+    ],
+    "exportTotal": 29.91,
+    "emailTotal": 29.91,
+    "receiptSubtotal": 38.47,
+    "expectedExportSubtotal": 38.47,
+    "tip": 0
+  }
+]

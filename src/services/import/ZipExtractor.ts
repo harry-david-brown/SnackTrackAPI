@@ -50,8 +50,17 @@ export class ZipExtractor {
     const output = fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 });
     let combinedBytes = 0;
     let expectedHeader: string | null = null;
+    let lastWrittenByte: number | undefined;
     try {
       for (let index = 0; index < candidates.length; index += 1) {
+        // Each file is a complete CSV document. Its last row need not end in a newline;
+        // preserve the row boundary when removing the next shard's repeated header.
+        if (index > 0 && lastWrittenByte !== 0x0a) {
+          combinedBytes += 1;
+          if (combinedBytes > MAX_CSV_BYTES) throw this.error('ZIP_OUTPUT_TOO_LARGE', 'The extracted CSV exceeds the safe size limit.');
+          if (!output.write('\n')) await once(output, 'drain');
+          lastWrittenByte = 0x0a;
+        }
         const entry = candidates[index];
         const stream = await this.openEntry(zipfile, entry);
         let actualBytes = 0;
@@ -84,6 +93,7 @@ export class ZipExtractor {
             combinedBytes += writable.length;
             if (combinedBytes > MAX_CSV_BYTES) throw this.error('ZIP_OUTPUT_TOO_LARGE', 'The extracted CSV exceeds the safe size limit.');
             if (!output.write(writable)) await once(output, 'drain');
+            lastWrittenByte = writable[writable.length - 1];
           }
         }
         if (!headerComplete || actualBytes !== entry.uncompressedSize) {

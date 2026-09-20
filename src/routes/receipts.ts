@@ -1,20 +1,11 @@
 import { Router, Request, RequestHandler, Response } from 'express';
-import { ReceiptType } from '../models/Receipt';
-import type { ReceiptListFilters } from '../services/ports/ReceiptPorts';
 import { parsePagination } from '../middleware/pagination';
-import { asyncHandler, ValidationError } from '../middleware/errorHandler';
-import {
-  optionalQueryString,
-  parseQueryDate,
-  parseQueryNumber,
-} from '../http/validation/requestValues';
+import { asyncHandler } from '../middleware/errorHandler';
+import { parseReceiptListFilters } from '../http/validation/receiptListFilters';
 import { mapReceiptPageResponse } from '../http/mappers/receiptResponse';
 import { authenticatedUserId } from '../http/authenticatedUser';
 import type { ListReceiptsService } from '../services/receipt/ListReceiptsService';
 import type { ReceiptClearService } from '../services/account/ReceiptClearService';
-
-const receiptTypes = new Set<string>(Object.values(ReceiptType));
-const isReceiptType = (value: string): value is ReceiptType => receiptTypes.has(value);
 
 export interface ReceiptsRouterDependencies {
   readonly authenticate: RequestHandler;
@@ -64,25 +55,37 @@ export const createReceiptsRouter = (dependencies: ReceiptsRouterDependencies): 
    *         schema:
    *           type: string
    *           format: date
-   *         description: Filter receipts from this date
+   *         description: Inclusive local order day (YYYY-MM-DD), using the event timezone then account timezone. ISO timestamps with an explicit timezone filter instants instead.
    *       - in: query
    *         name: endDate
    *         schema:
    *           type: string
    *           format: date
-   *         description: Filter receipts until this date
+   *         description: Inclusive local order day, including the entire end day. Unlinked adjustments have no order day.
+   *       - in: query
+   *         name: outcome
+   *         schema:
+   *           type: string
+   *           enum: [delivered, canceled, refunded, possible_refund, failed, unfulfilled, needs_review, unknown_cost]
+   *         description: Canonical outcome filter. Confirmed and possible refunds are separate; unknown legacy outcomes are not inferred.
+   *       - in: query
+   *         name: currencyCode
+   *         schema:
+   *           type: string
+   *           enum: [CAD, USD, EUR, GBP, UNKNOWN]
+   *         description: Recorded currency; no conversion is performed.
    *       - in: query
    *         name: minAmount
    *         schema:
    *           type: number
    *           format: float
-   *         description: Minimum amount filter
+   *         description: Minimum known net order cost. Unknown costs and unlinked adjustments are excluded. Without currencyCode the threshold applies separately in each recorded currency.
    *       - in: query
    *         name: maxAmount
    *         schema:
    *           type: number
    *           format: float
-   *         description: Maximum amount filter
+   *         description: Maximum known net order cost, not export item subtotal or legacy compatibility zero.
    *     responses:
    *       200:
    *         description: Receipts retrieved successfully
@@ -109,27 +112,11 @@ export const createReceiptsRouter = (dependencies: ReceiptsRouterDependencies): 
     asyncHandler(async (req: Request, res: Response) => {
       const userId = authenticatedUserId(req);
 
-      const receiptType = optionalQueryString(req.query.receiptType, 'receiptType');
-      let normalizedReceiptType: ReceiptType | undefined;
-      if (receiptType) {
-        if (!isReceiptType(receiptType)) {
-          throw new ValidationError('Unsupported receipt type', 'receiptType');
-        }
-        normalizedReceiptType = receiptType;
-      }
-      const filters: ReceiptListFilters = {
-        userId,
-        receiptType: normalizedReceiptType,
-        restaurantName: optionalQueryString(req.query.restaurantName, 'restaurantName'),
-        startDate: parseQueryDate(req.query.startDate, 'startDate'),
-        endDate: parseQueryDate(req.query.endDate, 'endDate'),
-        minAmount: parseQueryNumber(req.query.minAmount, 'minAmount'),
-        maxAmount: parseQueryNumber(req.query.maxAmount, 'maxAmount'),
-      };
+      const filters = parseReceiptListFilters(userId, req.query);
       const { page, limit, offset } = parsePagination(req);
       const result = await dependencies.listReceipts.execute({ filters, limit, offset });
 
-      res.json(mapReceiptPageResponse(result.receipts, result.total, page, limit));
+      res.json(mapReceiptPageResponse(result.receipts, result.total, page, limit, result.timezone));
     }),
   );
 

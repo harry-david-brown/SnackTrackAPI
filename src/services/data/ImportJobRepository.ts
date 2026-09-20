@@ -1,4 +1,5 @@
 import { AppError, ConflictError, NotFoundError } from '../../core/errors';
+import { importCompletionResult } from '../import/ImportCompletionResult';
 import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
 import {
   IMPORT_JOB_KINDS,
@@ -172,8 +173,9 @@ export class ImportJobRepository {
       const active = await transaction.query<Row>(
         `SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1
          AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')
+         AND (kind<>'export_ready_check' OR $2='export_ready_check')
          ORDER BY created_at DESC LIMIT 1`,
-        [input.userId],
+        [input.userId, input.kind],
       );
       if (active.rows[0]) {
         const activeJob = decode(active.rows[0]);
@@ -302,6 +304,7 @@ export class ImportJobRepository {
   async findActive(userId: string): Promise<ImportJob | null> {
     const result = await this.database.query<Row>(
       `SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1
+       AND kind<>'export_ready_check'
        AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying') ORDER BY created_at DESC LIMIT 1`,
       [userId],
     );
@@ -405,6 +408,22 @@ export class ImportJobRepository {
 
   private async finish(job: ImportJob, status: 'succeeded'|'failed', phase: string, result: Readonly<Record<string, unknown>>|null, code: string|null, message: string|null, details?: Readonly<Record<string, unknown>>): Promise<void> {
     await this.database.withTransaction(async (transaction) => {
+      if (job.kind === 'export_ready_check') {
+        let detected = false;
+        if (status === 'succeeded' && result?.exportReadyDetected === true) {
+          const ready = await transaction.query(`UPDATE user_export_provider_preferences p
+            SET status='file_ready',ready_source='detected_email',updated_at=NOW(),alert_last_checked_at=NOW()
+            FROM users u, import_jobs j
+            WHERE p.user_id=$1 AND p.provider=$2 AND p.request_id=$3::uuid
+              AND p.status='requested' AND p.alert_consent='granted'
+              AND p.alert_consent_version='export-ready-background-v1'
+              AND u.id=p.user_id AND u.import_generation=$4
+              AND j.id=$5 AND j.status='running' AND j.import_generation=u.import_generation
+            RETURNING p.request_id`, [job.userId,job.exportProvider,job.checkpoint.requestId,job.importGeneration,job.id]);
+          detected = (ready.rowCount ?? 0)>0;
+        }
+        result = {...result, exportReadyDetected:detected};
+      }
       const updated = await transaction.query(
         `UPDATE import_jobs j SET status=$2,phase=$3,progress=100,result=$4,error_code=$5,error_message=$6,
            completed_at=NOW(),heartbeat_at=NOW(),updated_at=NOW()
@@ -418,10 +437,7 @@ export class ImportJobRepository {
         return;
       }
       await this.insertEvent(transaction, decode(updated.rows[0]), status === 'succeeded' ? 'completed' : 'attempt_failed_terminal', details);
-      const changes = Number(result?.newOrders ?? 0)
-        + Number(result?.updatedOrders ?? 0)
-        + Number(result?.importedCount ?? 0);
-      if (job.trigger === 'user' || changes > 0 || result?.exportReadyDetected === true) {
+      if (job.trigger === 'user' || importCompletionResult(result).hasChanges || result?.exportReadyDetected === true) {
         await this.insertOutbox(transaction, job.id, 'notify');
       }
     });

@@ -1,4 +1,8 @@
 import { Receipt, type ReceiptItem } from '../../models/Receipt';
+import type { CheckoutDifference } from '../../models/ReceiptResolution';
+import { mapReceiptOrderOutcome, type ReceiptOrderOutcomeResponse } from './receiptOrderOutcome';
+import { getLocalDateKey } from '../../utils/timezone';
+import { recordedItemPrice, usableItemUnitPrice } from '../../services/receipt/ItemPrice';
 
 export interface ReceiptResponseItem {
   readonly name: string;
@@ -6,9 +10,21 @@ export interface ReceiptResponseItem {
   readonly price: number;
   readonly category?: string;
   readonly customizations?: readonly string[];
+  readonly configuredLineTotal?: number;
+  readonly recordedPrice?: number;
+  readonly inferred?: boolean;
 }
 
 export interface ReceiptResponse {
+  readonly orderDay?: string | null;
+  readonly orderOutcome?: ReceiptOrderOutcomeResponse;
+  readonly reconciliation?: { status: 'merged' | 'standalone' | 'unresolved'; method: string; reason?: string };
+  readonly sources?: readonly string[];
+  readonly checkoutDifference?: CheckoutDifference;
+  readonly currencyCode?: string;
+  readonly amountBasis?: string;
+  readonly evidenceSummary?: string;
+  readonly resolutionVersion?: number;
   readonly id: string;
   readonly userId: string;
   readonly items: readonly ReceiptResponseItem[];
@@ -31,21 +47,43 @@ export interface ReceiptPageResponse {
   };
 }
 
-const mapItem = (item: ReceiptItem): ReceiptResponseItem => ({
-  name: item.name,
-  quantity: item.quantity,
-  price: item.price,
-  ...(item.category ? { category: item.category } : {}),
-  ...(item.customizations ? { customizations: item.customizations } : {}),
-});
+const mapItem = (item: ReceiptItem, receipt: Receipt): ReceiptResponseItem => {
+  const unitPrice = usableItemUnitPrice(item, { receiptType: receipt.receiptType, dataSource: receipt.dataSource });
+  const recorded = recordedItemPrice(item) ??
+    (unitPrice === undefined && receipt.receiptType === 'uber_eats' && receipt.dataSource === 'csv' && item.quantity > 1
+      ? item.price * item.quantity
+      : undefined);
+  return {
+    ...(unitPrice !== undefined && item.evidence && item.evidence.customizationPriceBasis !== 'unavailable'
+      ? { configuredLineTotal: item.evidence.configuredLineTotal }
+      : {}),
+    ...(unitPrice === undefined && recorded !== undefined ? { recordedPrice: recorded } : {}),
+    ...(item.evidence ? { inferred: item.evidence.method !== 'observed' } : {}),
+    name: item.name,
+    quantity: item.quantity,
+    price: unitPrice ?? 0,
+    ...(item.category ? { category: item.category } : {}),
+    ...(item.customizations ? { customizations: item.customizations } : {}),
+  };
+};
 
 /** Maps domain records to the canonical public receipt DTO. */
-export const mapReceiptResponse = (receipt: Receipt): ReceiptResponse => {
+export const mapReceiptResponse = (receipt: Receipt, context?: { accountTimezone?: string }): ReceiptResponse => {
   if (!receipt.id) throw new Error('Persisted receipt is missing its identity');
+  const orderOutcome = mapReceiptOrderOutcome(receipt, context?.accountTimezone);
   return {
+    ...(context?.accountTimezone === undefined ? {} : { orderDay: orderOutcome ? orderOutcome.orderDay : getLocalDateKey(receipt.orderDate ?? null, receipt.resolution?.timestamp?.timezone ?? context.accountTimezone) }),
+    ...(orderOutcome ? { orderOutcome } : {}),
+    ...(receipt.resolution?.reconciliation ? {reconciliation:{status:receipt.resolution.reconciliation.status,method:receipt.resolution.reconciliation.method,...(receipt.resolution.reconciliation.reason ? {reason:receipt.resolution.reconciliation.reason} : {})}} : {}),
+    sources: receipt.resolution?.sources ?? [receipt.dataSource],
+    ...(receipt.resolution?.checkoutDifference ? { checkoutDifference: receipt.resolution.checkoutDifference } : {}),
+    currencyCode: receipt.monetaryDetails?.currencyCode ?? 'UNKNOWN',
+    amountBasis: receipt.resolution?.amountBasis ?? 'legacy',
+    ...(receipt.resolution ? { resolutionVersion: receipt.resolution.version } : {}),
+    evidenceSummary: receipt.resolution?.amountBasis === 'receipt_total' ? 'Based on receipt total' : receipt.resolution?.amountBasis === 'item_subtotal' ? `Item subtotal; final charge unavailable${receipt.resolution?.currencyInference ? '; currency inferred' : ''}` : 'Based on exported or legacy totals',
     id: receipt.id,
     userId: receipt.userId,
-    items: receipt.items.map(mapItem),
+    items: receipt.items.map(item => mapItem(item, receipt)),
     amountSpent: receipt.amountSpent,
     receiptType: receipt.receiptType,
     restaurantName: receipt.restaurantName ?? null,
@@ -59,11 +97,12 @@ export const mapReceiptPageResponse = (
   total: number,
   page: number,
   limit: number,
+  accountTimezone?: string,
 ): ReceiptPageResponse => {
   const totalPages = Math.ceil(total / limit);
   const hasMore = page < totalPages;
   return {
-    items: receipts.map(mapReceiptResponse),
+    items: receipts.map(receipt => mapReceiptResponse(receipt, { accountTimezone })),
     pageInfo: {
       page,
       limit,

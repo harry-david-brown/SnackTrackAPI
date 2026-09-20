@@ -1,3 +1,4 @@
+import type { ItemEvidence, ReceiptResolution } from './ReceiptResolution';
 export enum ReceiptType {
   UBER_EATS = 'uber_eats',
   DOORDASH = 'doordash',
@@ -19,6 +20,7 @@ export interface ReceiptItem {
   price: number;
   category?: string;
   customizations?: string[];
+  evidence?: ItemEvidence;
 }
 
 export type ReceiptCurrencyCode = 'CAD' | 'USD' | 'EUR' | 'GBP' | 'UNKNOWN';
@@ -45,6 +47,7 @@ export interface ReceiptWriteCommand {
   deliveryTime?: Date;
   externalId?: string;
   monetaryDetails?: ReceiptMonetaryDetails;
+  resolution?: ReceiptResolution;
 }
 
 /**
@@ -67,6 +70,7 @@ export class Receipt implements ReceiptWriteCommand {
     public externalId?: string,
     public readonly id?: string,
     public monetaryDetails?: ReceiptMonetaryDetails,
+    public resolution?: ReceiptResolution,
   ) {}
 
   // Helper method to get total items count

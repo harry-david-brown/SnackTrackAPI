@@ -1,4 +1,5 @@
-export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v15';
+import type { HistoricalInvestmentResult } from '../shared/historicalInvestment';
+export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v23';
 
 import type { ExportProvider } from '../../import/ImportLifecycleTypes';
 
@@ -35,6 +36,10 @@ export interface InsightPeriod {
 }
 
 interface InsightBase {
+  historicalInvestment?: HistoricalInvestmentResult;
+  /** A drill-down is available without exposing receipt identities in the edition payload. */
+  orderEvidence?: { count: number };
+  currencyCode?: string;
   id: string;
   category: DashboardInsightCategory;
   icon: DashboardInsightIcon;
@@ -50,6 +55,11 @@ export interface HeroInsight extends InsightBase {
   value: number;
   valueFormat: InsightValueFormat;
   headline?: string;
+  spendingConcentration?: { orderCount: number };
+  busyDay?: {
+    date: string;
+    spending: Array<{ currencyCode: 'CAD' | 'USD' | 'EUR' | 'GBP'; amount: number }>;
+  };
 }
 
 export interface ComparisonInsight extends InsightBase {
@@ -125,6 +135,8 @@ export type DashboardInsight =
   | LockedInsight;
 
 export interface InsightCandidate {
+  /** Persisted receipt identities that directly support this observation. */
+  orderIds?: readonly string[];
   insight: DashboardInsight;
   facts: Record<string, string | number | boolean | null>;
   copy: Pick<DashboardInsight, 'eyebrow' | 'title' | 'detail'>;
@@ -147,7 +159,10 @@ export type SuppressionReason =
   | 'low_sample'
   | 'low_signal'
   | 'stale_coverage'
-  | 'unsafe_estimate';
+  | 'unsafe_estimate'
+  | 'unresolved_evidence'
+  | 'unknown_amounts'
+  | 'unknown_currency';
 
 export interface SuppressedCandidate {
   id: string;

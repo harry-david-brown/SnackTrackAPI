@@ -1,13 +1,45 @@
+require('./helpers/legacyReceiptPolicy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { GetUserSummaryService } = require('../dist/services/user/GetUserSummaryService');
 
+test('recap currency and rate snapshot scope caches without changing ordinary summary totals', async () => {
+  const keys = [], snapshots = [];
+  let rateId = 'rates-a';
+  const profile = { id: 'u', email: 'u@example.com', timezone: 'UTC', receiptProjectionRevision: '1' };
+  const service = new GetUserSummaryService(
+    { findProjectionProfileById: async () => profile },
+    { findByUserId: async () => [] },
+    { calculateWrappedAnalytics: async (_, snapshot) => { snapshots.push(snapshot); return {}; } },
+    { getUserSummary: async key => { keys.push(key); return null; }, cacheUserSummary: async () => {} },
+    { snapshot: async () => ({ id: rateId, date: '2023-12-10', rates: { CAD: 1.5, USD: 1 } }) },
+  );
+  await service.execute({ userId: 'u', includeWrapped: true, displayCurrency: 'CAD' });
+  await service.execute({ userId: 'u', includeWrapped: true, displayCurrency: 'USD' });
+  rateId = 'rates-b';
+  await service.execute({ userId: 'u', includeWrapped: true, displayCurrency: 'USD' });
+  await service.execute({ userId: 'u', includeWrapped: false });
+  assert.equal(new Set(keys.filter(k => k.includes('wrapped'))).size, 3);
+  assert.ok(keys.some(k => k === 'u:r1-v10-UTC'));
+  assert.deepEqual(snapshots.map(s => s.displayCurrency), ['CAD', 'USD', 'USD']);
+});
+
 test('user summary operation owns timezone repair, aggregation, and cache write', async () => {
   const events = [];
+  const profile = {
+    id: 'user-id',
+    email: 'user@example.com',
+    timezone: 'UTC',
+    receiptProjectionRevision: '0',
+  };
   const users = {
-    findById: async () => ({ id: 'user-id', email: 'user@example.com', timezone: 'UTC' }),
-    updateTimezone: async (_userId, timezone) => events.push(`timezone:${timezone}`),
+    findProjectionProfileById: async () => ({ ...profile }),
+    updateTimezone: async (_userId, timezone) => {
+      profile.timezone = timezone;
+      profile.receiptProjectionRevision = '1';
+      events.push(`timezone:${timezone}`);
+    },
   };
   const receipts = {
     findByUserId: async () => [
@@ -51,7 +83,12 @@ test('user summary operation owns timezone repair, aggregation, and cache write'
 test('user summary operation returns a valid cached projection without querying receipts', async () => {
   const cached = { user: { id: 'cached' } };
   const users = {
-    findById: async () => ({ id: 'user-id', email: 'user@example.com', timezone: 'UTC' }),
+    findProjectionProfileById: async () => ({
+      id: 'user-id',
+      email: 'user@example.com',
+      timezone: 'UTC',
+      receiptProjectionRevision: '0',
+    }),
   };
   const receipts = {
     findByUserId: async () => {

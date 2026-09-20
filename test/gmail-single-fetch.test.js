@@ -30,7 +30,10 @@ test('Gmail import fetches each matched message once in full format', async () =
                   { name: 'To', value: 'user@example.test' },
                   { name: 'Subject', value: 'Your Uber Eats order' },
                   { name: 'Date', value: 'Sun, 6 Sep 2026 12:00:00 +0000' },
-                  { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=uber.com' },
+                  {
+                    name: 'Authentication-Results',
+                    value: 'mx.google.com; dmarc=pass header.from=uber.com',
+                  },
                 ],
                 body: { data: encoded('<p>Receipt total: $24.00</p>') },
               },
@@ -46,7 +49,8 @@ test('Gmail import fetches each matched message once in full format', async () =
   for await (const page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { safety: { allowForwardedReceipts: false } },
-  )) pages.push(page);
+  ))
+    pages.push(page);
 
   assert.equal(getCalls.length, 1);
   assert.deepEqual(getCalls[0], { userId: 'me', id: 'message-1', format: 'full' });
@@ -61,17 +65,23 @@ test('single full response still runs sender and authentication checks before yi
       getProfile: async () => ({ data: { emailAddress: 'user@example.test' } }),
       messages: {
         list: async () => ({ data: { messages: [{ id: 'message-1' }] } }),
-        get: async () => ({ data: {
-          id: 'message-1', sizeEstimate: 500,
-          payload: {
-            mimeType: 'text/html',
-            headers: [
-              { name: 'From', value: 'Attacker <receipt@example.test>' },
-              { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=example.test' },
-            ],
-            body: { data: encoded('<p>Fake receipt</p>') },
+        get: async () => ({
+          data: {
+            id: 'message-1',
+            sizeEstimate: 500,
+            payload: {
+              mimeType: 'text/html',
+              headers: [
+                { name: 'From', value: 'Attacker <receipt@example.test>' },
+                {
+                  name: 'Authentication-Results',
+                  value: 'mx.google.com; dmarc=pass header.from=example.test',
+                },
+              ],
+              body: { data: encoded('<p>Fake receipt</p>') },
+            },
           },
-        } }),
+        }),
       },
     },
   };
@@ -81,7 +91,8 @@ test('single full response still runs sender and authentication checks before yi
   for await (const page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { safety: { allowForwardedReceipts: false } },
-  )) pages.push(page);
+  ))
+    pages.push(page);
 
   assert.equal(pages[0].messages.length, 0);
   assert.equal(pages[0].rejectedCount, 1);
@@ -120,17 +131,23 @@ test('Gmail import disables transport retries and uses the configured quota budg
         },
         get: async (_input, options) => {
           getOptions.push(options);
-          return { data: {
-            id: 'message-1', sizeEstimate: 500,
-            payload: {
-              mimeType: 'text/html',
-              headers: [
-                { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
-                { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=uber.com' },
-              ],
-              body: { data: encoded('<p>Receipt total: $24.00</p>') },
+          return {
+            data: {
+              id: 'message-1',
+              sizeEstimate: 500,
+              payload: {
+                mimeType: 'text/html',
+                headers: [
+                  { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
+                  {
+                    name: 'Authentication-Results',
+                    value: 'mx.google.com; dmarc=pass header.from=uber.com',
+                  },
+                ],
+                body: { data: encoded('<p>Receipt total: $24.00</p>') },
+              },
             },
-          } };
+          };
         },
       },
     },
@@ -140,7 +157,9 @@ test('Gmail import disables transport retries and uses the configured quota budg
   for await (const _page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { safety: { allowForwardedReceipts: false } },
-  )) { /* consume */ }
+  )) {
+    /* consume */
+  }
 
   assert.equal(listInputs[0].maxResults, 500);
   assert.match(listInputs[0].q, /subject:order/);
@@ -148,7 +167,7 @@ test('Gmail import disables transport retries and uses the configured quota budg
   assert.deepEqual(getOptions, [{ retry: false }]);
 });
 
-test('new forwarded-receipt searches also require order in the subject', async () => {
+test('policy 2 forwarded-receipt searches retain the original subject filter', async () => {
   const listInputs = [];
   const gmail = {
     users: {
@@ -157,7 +176,9 @@ test('new forwarded-receipt searches also require order in the subject', async (
           listInputs.push(input);
           return { data: { messages: [] } };
         },
-        get: async () => { throw new Error('No messages should be fetched'); },
+        get: async () => {
+          throw new Error('No messages should be fetched');
+        },
       },
     },
   };
@@ -166,7 +187,9 @@ test('new forwarded-receipt searches also require order in the subject', async (
   for await (const _page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { safety: { allowForwardedReceipts: true } },
-  )) { /* consume */ }
+  )) {
+    /* consume */
+  }
 
   assert.match(listInputs[0].q, /\(subject:Uber OR subject:DoorDash\)/);
   assert.match(listInputs[0].q, /subject:order/);
@@ -181,7 +204,9 @@ test('legacy provider cursors retain the original sender-only search', async () 
           listInputs.push(input);
           return { data: { messages: [] } };
         },
-        get: async () => { throw new Error('No messages should be fetched'); },
+        get: async () => {
+          throw new Error('No messages should be fetched');
+        },
       },
     },
   };
@@ -190,64 +215,147 @@ test('legacy provider cursors retain the original sender-only search', async () 
   for await (const _page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { cursor: 'legacy-provider-token', safety: { allowForwardedReceipts: false } },
-  )) { /* consume */ }
+  )) {
+    /* consume */
+  }
 
   assert.equal(listInputs[0].pageToken, 'legacy-provider-token');
   assert.doesNotMatch(listInputs[0].q, /subject:order/);
 });
 
-test('Gmail import checkpoints 500-ID listings in 20-message processing batches', async () => {
-  const listedIds = Array.from({ length: 21 }, (_, index) => `message-${index + 1}`);
-  const listInputs = [];
-  const getCalls = [];
-  const gmail = {
+test('versioned Gmail searches retain their original scope across the order-event rollout', async () => {
+  for (const version of [1, 2, 3]) {
+    for (const forwarded of [true, false]) {
+      const listInputs = [];
+      const api = {
+        users: {
+          messages: {
+            list: async (input) => {
+              listInputs.push(input);
+              return { data: { messages: [] } };
+            },
+            get: async () => {
+              throw new Error('No message details expected');
+            },
+          },
+        },
+      };
+      const cursor = `snacktrack:gmail-buffer:v${version}:${encoded(JSON.stringify({ pendingMessageIds: [], nextPageToken: 'provider-next-page' }))}`;
+      const client = new GmailClient(undefined, undefined, api, undefined, 3);
+      for await (const _page of client.getEmailPages(
+        { id: 'test-user' },
+        { cursor, safety: { allowForwardedReceipts: forwarded } },
+      )) {
+        /* consume */
+      }
+      assert.equal(listInputs[0].pageToken, 'provider-next-page');
+      if (version === 1) assert.doesNotMatch(listInputs[0].q, /subject:order/);
+      if (version === 2) {
+        assert.match(listInputs[0].q, /subject:order/);
+        assert.doesNotMatch(listInputs[0].q, /subject:refund|subject:receipt/);
+      }
+      if (version === 3) {
+        assert.match(
+          listInputs[0].q,
+          /\(subject:order OR subject:receipt OR subject:refund OR subject:canceled OR subject:cancelled OR subject:cancellation OR subject:adjustment\)/,
+        );
+        assert.equal(listInputs[0].q.includes('(subject:Uber OR subject:DoorDash)'), forwarded);
+      }
+    }
+  }
+});
+
+test('unsupported Gmail cursor versions and policy downgrade resumes fail before provider requests', async () => {
+  const api = {
     users: {
       messages: {
-        list: async (input) => {
-          listInputs.push(input);
-          return { data: { messages: listedIds.map((id) => ({ id })) } };
+        list: async () => {
+          throw new Error('Invalid checkpoints must not reach Gmail');
         },
-        get: async (input) => {
-          getCalls.push(input.id);
-          return { data: {
-            id: input.id, sizeEstimate: 500,
-            payload: {
-              mimeType: 'text/html',
-              headers: [
-                { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
-                { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=uber.com' },
-              ],
-              body: { data: encoded('<p>Receipt total: $24.00</p>') },
-            },
-          } };
+        get: async () => {
+          throw new Error('Invalid checkpoints must not reach Gmail');
         },
       },
     },
   };
-  const client = new GmailClient(undefined, undefined, gmail);
-
-  const firstIterator = client.getEmailPages(
-    { id: 'user-1', email: 'user@example.test' },
-    { safety: { allowForwardedReceipts: false } },
-  )[Symbol.asyncIterator]();
-  const first = await firstIterator.next();
-  await firstIterator.return();
-
-  assert.equal(first.value.matchedCount, 20);
-  assert.match(first.value.nextCursor, /^snacktrack:gmail-buffer:v2:/);
-  assert.equal(listInputs.length, 1);
-
-  const resumedIterator = client.getEmailPages(
-    { id: 'user-1', email: 'user@example.test' },
-    { cursor: first.value.nextCursor, safety: { allowForwardedReceipts: false } },
-  )[Symbol.asyncIterator]();
-  const resumed = await resumedIterator.next();
-  await resumedIterator.return();
-
-  assert.equal(resumed.value.matchedCount, 1);
-  assert.equal(listInputs.length, 1);
-  assert.deepEqual(getCalls, listedIds);
+  for (const [policy, cursor] of [
+    [3, 'snacktrack:gmail-buffer:v99:unknown'],
+    [3, 'snacktrack:gmail-buffer:v3:not-json'],
+    [
+      2,
+      `snacktrack:gmail-buffer:v3:${encoded(JSON.stringify({ pendingMessageIds: ['pending'], nextPageToken: null }))}`,
+    ],
+  ]) {
+    const iterator = new GmailClient(undefined, undefined, api, undefined, policy)
+      .getEmailPages({ id: 'test-user' }, { cursor })
+      [Symbol.asyncIterator]();
+    await assert.rejects(iterator.next(), (error) => error.code === 'IMPORT_CHECKPOINT_INVALID');
+  }
 });
+
+for (const policy of [2, 3])
+  test(`policy ${policy}: Gmail import checkpoints 500-ID listings in 20-message processing batches`, async () => {
+    const listedIds = Array.from({ length: 21 }, (_, index) => `message-${index + 1}`);
+    const listInputs = [];
+    const getCalls = [];
+    const gmail = {
+      users: {
+        messages: {
+          list: async (input) => {
+            listInputs.push(input);
+            return { data: { messages: listedIds.map((id) => ({ id })) } };
+          },
+          get: async (input) => {
+            getCalls.push(input.id);
+            return {
+              data: {
+                id: input.id,
+                sizeEstimate: 500,
+                payload: {
+                  mimeType: 'text/html',
+                  headers: [
+                    { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
+                    {
+                      name: 'Authentication-Results',
+                      value: 'mx.google.com; dmarc=pass header.from=uber.com',
+                    },
+                  ],
+                  body: { data: encoded('<p>Receipt total: $24.00</p>') },
+                },
+              },
+            };
+          },
+        },
+      },
+    };
+    const client = new GmailClient(undefined, undefined, gmail, undefined, policy);
+
+    const firstIterator = client
+      .getEmailPages(
+        { id: 'user-1', email: 'user@example.test' },
+        { safety: { allowForwardedReceipts: false } },
+      )
+      [Symbol.asyncIterator]();
+    const first = await firstIterator.next();
+    await firstIterator.return();
+
+    assert.equal(first.value.matchedCount, 20);
+    assert.match(first.value.nextCursor, new RegExp(`^snacktrack:gmail-buffer:v${policy}:`));
+    assert.equal(listInputs.length, 1);
+
+    const resumedIterator = client
+      .getEmailPages(
+        { id: 'user-1', email: 'user@example.test' },
+        { cursor: first.value.nextCursor, safety: { allowForwardedReceipts: false } },
+      )
+      [Symbol.asyncIterator]();
+    const resumed = await resumedIterator.next();
+    await resumedIterator.return();
+
+    assert.equal(resumed.value.matchedCount, 1);
+    assert.equal(listInputs.length, 1);
+    assert.deepEqual(getCalls, listedIds);
+  });
 
 test('Gmail import exhausts every list page before fetching message bodies', async () => {
   const events = [];
@@ -268,17 +376,23 @@ test('Gmail import exhausts every list page before fetching message bodies', asy
         },
         get: async (input) => {
           events.push(`get:${input.id}`);
-          return { data: {
-            id: input.id, sizeEstimate: 500,
-            payload: {
-              mimeType: 'text/html',
-              headers: [
-                { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
-                { name: 'Authentication-Results', value: 'mx.google.com; dmarc=pass header.from=uber.com' },
-              ],
-              body: { data: encoded('<p>Receipt total: $24.00</p>') },
+          return {
+            data: {
+              id: input.id,
+              sizeEstimate: 500,
+              payload: {
+                mimeType: 'text/html',
+                headers: [
+                  { name: 'From', value: 'Uber Receipts <noreply@uber.com>' },
+                  {
+                    name: 'Authentication-Results',
+                    value: 'mx.google.com; dmarc=pass header.from=uber.com',
+                  },
+                ],
+                body: { data: encoded('<p>Receipt total: $24.00</p>') },
+              },
             },
-          } };
+          };
         },
       },
     },
@@ -289,7 +403,8 @@ test('Gmail import exhausts every list page before fetching message bodies', asy
   for await (const page of client.getEmailPages(
     { id: 'user-1', email: 'user@example.test' },
     { safety: { allowForwardedReceipts: false } },
-  )) pages.push(page);
+  ))
+    pages.push(page);
 
   assert.deepEqual(events.slice(0, 2), ['list:first', 'list:second-page']);
   assert.deepEqual(events.slice(2).sort(), ['get:message-1', 'get:message-2', 'get:message-3']);

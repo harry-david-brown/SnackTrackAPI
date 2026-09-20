@@ -12,9 +12,12 @@ import type { ImportExecutionCheckpoint } from './ImportJobTypes';
 import type { OutlookImportAcquisitionService } from './OutlookImportAcquisitionService';
 import type { ReceiptEmailBatchExtractor } from './ReceiptEmailBatchExtractor';
 import type { ReceiptImportPersistenceService } from './ReceiptImportPersistenceService';
+import { receiptImportOutcomeFields } from './ReceiptImportOutcome';
 import { deduplicateReceipts } from './ReceiptDeduplicator';
 import { filterReceiptsAfterExportCutoffs, type GmailImportResult } from './GmailImportService';
 import { restoreMailboxCheckpoint, saveMailboxCheckpoint, type MailboxImportState } from './MailboxImportCheckpoint';
+import { receiptImportAccounting } from './ReceiptImportExecution';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 
 const MAX_IMPORT_MESSAGES = 20_000;
 const HISTORICAL_BYTE_BUDGET = 500 * 1024 * 1024;
@@ -50,7 +53,7 @@ export class OutlookImportService {
   constructor(
     private readonly acquisition: Pick<OutlookImportAcquisitionService, 'acquire'>,
     private readonly extraction: Pick<ReceiptEmailBatchExtractor, 'extract'>,
-    private readonly persistence: Pick<ReceiptImportPersistenceService, 'persist'>,
+    private readonly persistence: Pick<ReceiptImportPersistenceService, 'persist' | 'getOutcome'>,
     private readonly syncRuns: Pick<
       MicrosoftMailboxSyncRunPort,
       'startSyncRun' | 'completeSyncRun' | 'failSyncRun'
@@ -61,6 +64,7 @@ export class OutlookImportService {
     >,
     private readonly lifecycle: Pick<ImportLifecyclePort, 'markTrackingReconnectRequired'>,
     private readonly logger: StructuredLogger = silentStructuredLogger,
+    private readonly receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
   ) {}
 
   async importFromOutlook(
@@ -69,8 +73,9 @@ export class OutlookImportService {
     trigger: 'manual' | 'background' = 'manual',
     execution?: ImportExecutionCheckpoint,
   ): Promise<GmailImportResult> {
-    const syncRunId = await this.syncRuns.startSyncRun(user.id, trigger);
+    const accounting = receiptImportAccounting(this.receiptPolicy, execution?.accountingJobId, 'microsoft');
     let state = restoreMailboxCheckpoint(execution, 'microsoft');
+    const syncRunId = await this.syncRuns.startSyncRun(user.id, trigger, execution?.accountingJobId);
     try {
       if (!state.done) {
         const acquired = await this.acquisition.acquire(user.id, trigger, state.cursor ?? undefined);
@@ -89,7 +94,7 @@ export class OutlookImportService {
           const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
           const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
           const deduplicated = deduplicateReceipts(eligible);
-          const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock);
+          const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock, accounting);
           const counters = state.counters;
           counters.pages += 1;
           counters.matchedMessages += page.matchedCount;
@@ -103,6 +108,7 @@ export class OutlookImportService {
           counters.totalAmount += deduplicated.receipts.reduce((sum, receipt) => sum + receipt.amountSpent, 0);
           counters.errorCount += extracted.errors.length;
           counters.newOrders += persisted.newOrders;
+          counters.unresolvedOrders = persisted.unresolvedOrders ?? 0;
           counters.updatedOrders += persisted.updatedOrders;
           counters.unchangedOrders += persisted.unchangedOrders;
           counters.rejectedMessages += page.rejectedCount ?? 0;
@@ -112,6 +118,10 @@ export class OutlookImportService {
           await saveMailboxCheckpoint(execution, state);
         }
       }
+      const receiptOutcome = accounting ? await this.persistence.getOutcome(user.id, lock, accounting) : undefined;
+      if (receiptOutcome && state.counters.deduplicatedReceipts > 0 && receiptOutcome.sourceDocuments === 0)
+        throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Saved mailbox progress has no canonical accounting evidence', publicMessage: 'This saved import cannot be resumed safely. Your existing history is preserved; start a new import.' });
+      const result = { ...this.successResult(state), ...(receiptOutcome ? receiptImportOutcomeFields(receiptOutcome) : {}) };
       await this.syncRuns.completeSyncRun(
         syncRunId,
         user.id,
@@ -123,9 +133,10 @@ export class OutlookImportService {
           exportCoveredReceipts: state.counters.exportCoveredReceipts,
           eligibleReceipts: state.counters.eligibleReceipts,
           deduplicatedReceipts: state.counters.deduplicatedReceipts,
-          newOrders: state.counters.newOrders,
-          updatedOrders: state.counters.updatedOrders,
-          unchangedOrders: state.counters.unchangedOrders,
+          newOrders: result.newOrders,
+          updatedOrders: result.updatedOrders,
+          unchangedOrders: result.unchangedOrders,
+          ...(receiptOutcome ? { receiptOutcome } : {}),
           rejectedMessages: state.counters.rejectedMessages,
           decodedBytesExamined: state.counters.decodedBytesExamined,
         },
@@ -140,7 +151,7 @@ export class OutlookImportService {
         emailsExamined: state.counters.emailsExamined,
         pages: state.counters.pages,
       });
-      return this.successResult(state);
+      return result;
     } catch (error) {
       const errorCode = errorCodeFor(error);
       await this.syncRuns.failSyncRun(syncRunId, user.id, errorCode, trigger);
@@ -164,7 +175,7 @@ export class OutlookImportService {
   private countsFromState(state: MailboxImportState): Pick<GmailImportResult,
     'totalEmailsFound'|'totalReceiptsProcessed'|'emailsExamined'|'supportedReceiptsFound'|
     'exportCoveredReceipts'|'eligibleReceipts'|'deduplicatedReceipts'|'totalReceiptsImported'|
-    'totalAmount'|'newOrders'|'updatedOrders'|'unchangedOrders'> {
+    'totalAmount'|'newOrders'|'updatedOrders'|'unchangedOrders'|'unresolvedOrders'> {
     return {
       totalEmailsFound: state.counters.matchedMessages,
       totalReceiptsProcessed: state.counters.receiptsProcessed,
@@ -176,6 +187,7 @@ export class OutlookImportService {
       totalReceiptsImported: state.counters.totalReceiptsImported,
       totalAmount: state.counters.totalAmount,
       newOrders: state.counters.newOrders,
+      unresolvedOrders: state.counters.unresolvedOrders,
       updatedOrders: state.counters.updatedOrders,
       unchangedOrders: state.counters.unchangedOrders,
     };

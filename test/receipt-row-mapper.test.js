@@ -49,10 +49,12 @@ test('receipt row mapper explicitly supports the migrated legacy string-item rep
 
 test('receipt repository rejects malformed aggregate and cutoff rows', async () => {
   const aggregate = new ReceiptRepository({
-    query: async () => ({ rows: [{ count: 0, total: 'not-money' }] }),
+    query: async () => ({
+      rows: [{ count: 'not-count', receipts: [], timezone: 'America/Toronto' }],
+    }),
   });
   await assert.rejects(
-    aggregate.getEmailReceiptStats('user-1'),
+    aggregate.findPage({ userId: 'user-1' }, 20, 0),
     (error) => error.code === 'DATABASE_ERROR',
   );
 

@@ -94,7 +94,7 @@ export interface ScheduledImportJobPort {
 
 export interface GmailSyncRunPort {
   resetGmailImportStatus(userId: string): Promise<void>;
-  startSyncRun(userId: string, trigger: GmailSyncTrigger): Promise<string>;
+  startSyncRun(userId: string, trigger: GmailSyncTrigger, importJobId?: string): Promise<string>;
   completeSyncRun(
     runId: string,
     userId: string,
@@ -141,7 +141,7 @@ export interface MicrosoftMailboxHealthPort {
 }
 
 export interface MicrosoftMailboxSyncRunPort {
-  startSyncRun(userId: string, trigger: 'manual' | 'background'): Promise<string>;
+  startSyncRun(userId: string, trigger: 'manual' | 'background', importJobId?: string): Promise<string>;
   completeSyncRun(
     runId: string,
     userId: string,

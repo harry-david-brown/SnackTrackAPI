@@ -19,7 +19,7 @@ test('enables the per-user Gmail delay and records an administrator audit', asyn
   });
   assert.equal(result.gmailLongRunning, true);
   assert.ok(calls.some(call => call.sql.includes('INSERT INTO user_import_test_scenarios')));
-  assert.ok(calls.some(call => call.sql.includes('import_test.gmail_long_running_enabled')));
+  assert.ok(calls.some(call => call.sql.includes('INSERT INTO admin_audit_events') && call.params.includes('import_test.gmail_long_running_enabled')));
 });
 
 test('moves an enabled Gmail import into one durable six-minute delay', async () => {

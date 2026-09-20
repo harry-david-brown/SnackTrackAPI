@@ -2,7 +2,7 @@ const GMAIL_QUOTA_WINDOW_MS = 60_000;
 
 export const GMAIL_MESSAGE_LIST_QUERY_UNITS = 5;
 export const GMAIL_MESSAGE_GET_QUERY_UNITS = 20;
-export const DEFAULT_GMAIL_IMPORT_QUERY_UNITS_PER_MINUTE = 4_000;
+export const DEFAULT_GMAIL_IMPORT_QUERY_UNITS_PER_MINUTE = 3_000;
 
 type Clock = () => number;
 type Sleep = (milliseconds: number) => Promise<void>;

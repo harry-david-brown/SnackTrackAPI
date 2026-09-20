@@ -37,7 +37,8 @@ for (const code of ['GMAIL_RATE_LIMITED', 'GMAIL_ACCESS_BLOCKED', 'GMAIL_RECONNE
       { persist: async () => { throw new Error('must not persist'); } },
       { start: async () => 'sync-1', complete: async () => { throw new Error('must not complete'); }, fail: async () => {}, markReconnectRequired: async () => { reconnects++; } },
     );
-    const result = await service.importFromGmail({ id: 'user-1' }, {});
+    const result = await service.importFromGmail({ id: 'user-1' }, {}, 'manual',
+      { accountingJobId: 'job-1', checkpoint: {}, save: async () => {} });
     assert.equal(result.success, false);
     assert.equal(result.errorCode, code);
     assert.equal(reconnects, code === 'GMAIL_RECONNECT_REQUIRED' ? 1 : 0);

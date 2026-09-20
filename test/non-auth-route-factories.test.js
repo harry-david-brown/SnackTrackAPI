@@ -43,7 +43,7 @@ const unusedUsersDependencies = () => ({
   validateUserId: passThrough,
   production: false,
   accountReset: { resetForOnboarding: async () => ({ deletedReceipts: 0 }) },
-  dashboardInsights: { execute: async () => ({}) },
+  dashboardInsights: { execute: async () => ({}), getInsightOrders: async () => ({ receipts: [], total: 0, timezone: 'UTC' }) },
   summaries: { execute: async () => ({}) },
 });
 
@@ -91,7 +91,7 @@ test('non-auth resource routers delegate through the injected capabilities', asy
     },
   );
   assert.deepEqual(summaryCalls, [
-    { userId: 'route-user', includeWrapped: true, requestTimezone: undefined },
+    { userId: 'route-user', includeWrapped: true, requestTimezone: undefined, displayCurrency: undefined },
   ]);
   await assert.rejects(
     invoke(users, '/:id/summary', 'get', {

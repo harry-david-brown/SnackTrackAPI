@@ -1,3 +1,5 @@
+import type { ExportProvider } from '../import/ImportLifecycleTypes';
+import { isExportReadyMessage } from '../import/ExportReadyMessage';
 import { classifyGmailRequestFailure, gmailFailureDiagnostics } from './GmailRequestFailure';
 import { User } from '../../models/User';
 import { MailboxClient, MailboxMessage, type MailboxMessagePage, type MailboxReadSafety } from '../ports/MailboxPorts';
@@ -23,6 +25,7 @@ import {
   GMAIL_MESSAGE_LIST_QUERY_UNITS,
 } from './GmailQuotaPacer';
 import type { GmailUsageCategory } from '../data/GmailUnitBudgetRepository';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 
 const MAX_IMPORT_MESSAGES = 20_000;
 const MAX_IMPORT_PAGES = 1_000;
@@ -31,8 +34,9 @@ const GMAIL_LIST_PAGE_SIZE = 500;
 const GMAIL_PROCESSING_BATCH_SIZE = 20;
 const GMAIL_BUFFERED_CURSOR_V1_PREFIX = 'snacktrack:gmail-buffer:v1:';
 const GMAIL_BUFFERED_CURSOR_V2_PREFIX = 'snacktrack:gmail-buffer:v2:';
+const GMAIL_BUFFERED_CURSOR_V3_PREFIX = 'snacktrack:gmail-buffer:v3:';
 
-type GmailSearchQueryVersion = 1 | 2;
+type GmailSearchQueryVersion = 1 | 2 | 3;
 
 interface GmailBufferedCursor {
   readonly pendingMessageIds: readonly string[];
@@ -42,7 +46,7 @@ interface GmailBufferedCursor {
 }
 
 const encodeGmailBufferedCursor = (cursor: GmailBufferedCursor): string =>
-  `${cursor.searchQueryVersion === 1 ? GMAIL_BUFFERED_CURSOR_V1_PREFIX : GMAIL_BUFFERED_CURSOR_V2_PREFIX}${Buffer.from(JSON.stringify({
+  `snacktrack:gmail-buffer:v${cursor.searchQueryVersion}:${Buffer.from(JSON.stringify({
     pendingMessageIds: cursor.pendingMessageIds,
     nextPageToken: cursor.nextPageToken,
     estimatedTotalCount: cursor.estimatedTotalCount,
@@ -50,8 +54,9 @@ const encodeGmailBufferedCursor = (cursor: GmailBufferedCursor): string =>
 
 const decodeGmailBufferedCursor = (cursor: string): GmailBufferedCursor => {
   try {
-    const searchQueryVersion: GmailSearchQueryVersion = cursor.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX) ? 2 : 1;
-    const prefix = searchQueryVersion === 2 ? GMAIL_BUFFERED_CURSOR_V2_PREFIX : GMAIL_BUFFERED_CURSOR_V1_PREFIX;
+    const searchQueryVersion: GmailSearchQueryVersion = cursor.startsWith(GMAIL_BUFFERED_CURSOR_V3_PREFIX)
+      ? 3 : cursor.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX) ? 2 : 1;
+    const prefix = `snacktrack:gmail-buffer:v${searchQueryVersion}:`;
     const decoded = JSON.parse(
       Buffer.from(cursor.slice(prefix.length), 'base64url').toString('utf8'),
     ) as Record<string, unknown>;
@@ -101,13 +106,16 @@ interface GmailUnitBudgetPort {
 }
 
 export class GmailClient implements MailboxClient {
-  private readonly contentGuard = new MailboxContentGuard();
+  private readonly contentGuard: MailboxContentGuard;
   constructor(
     private readonly logger: StructuredLogger = silentStructuredLogger,
     private readonly debugCapture: EmailDebugCapturePort = new DisabledEmailDebugCapture(),
     private readonly clientOverride?: GmailApiClient,
     private readonly unitBudget?: GmailUnitBudgetPort,
-  ) {}
+    private readonly receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
+  ) {
+    this.contentGuard = new MailboxContentGuard(receiptPolicy);
+  }
 
   private reserve(userId: string, category: GmailUsageCategory, method: string, units: number): Promise<void> {
     return this.unitBudget?.reserve(userId, category, method, units) ?? Promise.resolve();
@@ -205,7 +213,11 @@ export class GmailClient implements MailboxClient {
    * Looks only for Uber's export-ready notification after the user requested it.
    * This deliberately does not open links or download the export archive.
    */
-  async hasUberExportReadyEmail(user: User, requestedAt: string): Promise<boolean> {
+  hasUberExportReadyEmail(user: User, requestedAt: string): Promise<boolean> {
+    return this.hasExportReadyEmail(user, requestedAt, 'uber_eats');
+  }
+
+  async hasExportReadyEmail(user: User, requestedAt: string, provider: ExportProvider): Promise<boolean> {
     const requestedTimestamp = new Date(requestedAt).getTime();
     if (Number.isNaN(requestedTimestamp)) {
       return false;
@@ -214,16 +226,16 @@ export class GmailClient implements MailboxClient {
     if (config.shouldUseMockData() && !config.isProduction()) {
       const emails = this.loadEmailsFromDebugFolder(user);
       return emails.some((email) =>
-        this.isUberExportReadyMessage(email.from, email.subject ?? '', email.body),
+        isExportReadyMessage(provider, email.from, email.subject ?? '', email.body),
       );
     }
 
     const gmail = await this.createAuthenticatedGmailClient(user);
     const afterSeconds = Math.floor(requestedTimestamp / 1000);
     const query = [
-      '(from:noreply@uber.com OR from:uber.com OR from:ubereats.com)',
+      provider === 'doordash' ? 'from:doordash.com' : '(from:noreply@uber.com OR from:uber.com OR from:ubereats.com)',
       `after:${afterSeconds}`,
-      '(subject:"Your Uber data is ready for download" OR "Your Uber data is now ready" OR "GO TO DOWNLOAD PAGE")',
+      provider === 'doordash' ? '("View Your Data Archive" OR "archive is ready" OR "data is ready")' : '(subject:"Your Uber data is ready for download" OR "Your Uber data is now ready" OR "GO TO DOWNLOAD PAGE")',
     ].join(' ');
 
     try {
@@ -266,7 +278,7 @@ export class GmailClient implements MailboxClient {
           `${message.snippet ?? ''}\n${this.extractBody(payload)}`,
           preflight,
         );
-        if (guarded.accepted && this.isUberExportReadyMessage(from, subject, guarded.body)) {
+        if (guarded.accepted && isExportReadyMessage(provider, from, subject, guarded.body)) {
           return true;
         }
       }
@@ -359,12 +371,14 @@ export class GmailClient implements MailboxClient {
       return;
     }
 
-    const gmail = await this.createAuthenticatedGmailClient(user);
     const usageCategory: GmailUsageCategory = options?.readPurpose === 'monitoring'
       ? 'monitoring'
       : 'onboarding_import';
     const isBufferedCursor = options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V1_PREFIX) ||
-      options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX);
+      options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V2_PREFIX) ||
+      options?.cursor?.startsWith(GMAIL_BUFFERED_CURSOR_V3_PREFIX);
+    if (options?.cursor?.startsWith('snacktrack:gmail-buffer:') && !isBufferedCursor)
+      throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Unsupported Gmail search checkpoint' });
     const bufferedCursor = isBufferedCursor && options?.cursor
       ? decodeGmailBufferedCursor(options.cursor)
       : null;
@@ -372,19 +386,25 @@ export class GmailClient implements MailboxClient {
     // before subject filtering. Keep their query stable because Gmail page
     // tokens are tied to the original search.
     const searchQueryVersion: GmailSearchQueryVersion = bufferedCursor?.searchQueryVersion ??
-      (options?.cursor ? 1 : 2);
+      (options?.cursor ? 1 : this.receiptPolicy === 3 ? 3 : 2);
+    if (searchQueryVersion === 3 && this.receiptPolicy !== 3)
+      throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'This Gmail checkpoint requires the order-event receipt policy' });
     const senderQuery = config.getGmailSearchQuery();
+    const subjectQuery = searchQueryVersion === 3
+      ? '(subject:order OR subject:receipt OR subject:refund OR subject:canceled OR subject:cancelled OR subject:cancellation OR subject:adjustment)'
+      : 'subject:order';
     const baseSearchQuery = searchQueryVersion === 1
       ? (options?.safety?.allowForwardedReceipts
         ? `(${senderQuery}) OR ((subject:Uber OR subject:DoorDash) (receipt OR order))`
         : senderQuery)
       : (options?.safety?.allowForwardedReceipts
-        ? `((${senderQuery}) OR (subject:Uber OR subject:DoorDash)) subject:order`
-        : `(${senderQuery}) subject:order`);
+        ? `((${senderQuery}) OR (subject:Uber OR subject:DoorDash)) ${subjectQuery}`
+        : `(${senderQuery}) ${subjectQuery}`);
     const afterSeconds = options?.after ? Math.floor(options.after.getTime() / 1000) : null;
     const searchQuery = afterSeconds && Number.isFinite(afterSeconds)
       ? `(${baseSearchQuery}) after:${afterSeconds}`
       : baseSearchQuery;
+    const gmail = await this.createAuthenticatedGmailClient(user);
     const limit = pLimit(5);
     const quotaPacer = new GmailQuotaPacer(config.getGmailConfig().importQueryUnitsPerMinute);
     let gmailRequestCount = 0;

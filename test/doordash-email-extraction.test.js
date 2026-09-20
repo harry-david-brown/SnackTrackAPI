@@ -52,8 +52,9 @@ test('classifies and extracts the sanitized DoorDash HTML receipt', () => {
   assert.equal(result.data.serviceFee, 4.81);
   assert.equal(result.data.savings, null);
   assert.equal(result.data.currency, Currency.USD);
-  assert.equal(result.data.parsedDate.toISOString(), '2026-06-12T02:01:21.000Z');
-  assert.match(result.data.orderId, /^doordash:gmail:/);
+  // Message receipt time is not evidence of when the order was placed.
+  assert.equal(result.data.parsedDate, null);
+  assert.equal(result.data.orderId, null);
 });
 
 test('extracts bare-dollar Canadian DoorDash plain text and discounts', () => {
@@ -133,9 +134,6 @@ const createImportDependencies = (email) => {
       persisted.push(...values);
       return { newOrders: values.length, updatedOrders: 0, unchangedOrders: 0 };
     },
-    async getEmailReceiptStats() {
-      return { count: 0, total: 0 };
-    },
   };
   const lifecycle = {
     async start() {
@@ -158,11 +156,13 @@ const createImportDependencies = (email) => {
       new GmailImportAcquisitionService(gmailClient, receipts, importPreferences, {
         async get() { return { allowForwardedReceipts: false }; },
       }),
-      new ReceiptEmailBatchExtractor(new ReceiptExtractor(), debugCapture),
+      new ReceiptEmailBatchExtractor(new ReceiptExtractor({}, 2), debugCapture, 10, Date.now, 2),
       new ReceiptImportPersistenceService(receipts, cache, {
         assertLockOwned: async () => undefined,
-      }),
+      }, undefined, 2),
       lifecycle,
+      undefined,
+      2,
     ),
     persisted,
     getUpsertCalls: () => upsertCalls,
@@ -205,7 +205,8 @@ test('a parsed DoorDash email crosses the Gmail import boundary as a DoorDash re
   assert.equal(dependencies.persisted[0].receiptType, ReceiptType.DOORDASH);
   assert.equal(dependencies.persisted[0].dataSource, DataSource.EMAIL);
   assert.equal(dependencies.persisted[0].amountSpent, 41.62);
-  assert.match(dependencies.persisted[0].externalId, /^doordash:gmail:/);
+  assert.equal(dependencies.persisted[0].externalId, undefined);
+  assert.match(dependencies.persisted[0].resolution.sourceMessageId, /^gmail:/);
 });
 
 test('the Gmail import boundary does not persist a DoorDash receipt without a usable total', async () => {

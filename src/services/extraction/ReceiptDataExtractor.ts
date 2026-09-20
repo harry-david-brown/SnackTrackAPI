@@ -1,3 +1,4 @@
+import { extractReceiptAdjustments } from './ReceiptAdjustments';
 /**
  * Receipt Data Extractor
  *
@@ -8,6 +9,12 @@ import { ExtractedReceiptData, ServiceType, Currency, MonetaryAmount } from './t
 import { HtmlTextExtractor } from './HtmlTextExtractor';
 import { decode } from 'html-entities';
 import { isDoorDashReceiptEmail, parseDoorDashReceipt } from './DoorDashReceiptParser';
+import {
+  extractEmailOrderEvidence,
+} from './ReceiptOrderEvidenceExtractor';
+import { extractLinkedProviderOrderId } from '../receipt/ReceiptProviderOrderIdentity';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
+import { orderAdjustmentProvider } from './ReceiptClassifier';
 
 interface ExtractionMetadata {
   providerMessageId?: string;
@@ -45,7 +52,7 @@ const PATTERNS = {
   // Uber UUID patterns
   uuid: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
   orderUuidParam:
-    /(?:order_uuid|eats_order_uuid|uuid)=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    /(?:order_uuid|eats_order_uuid)=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
   uberLinkUuid:
     /https?:\/\/[^\s"'<>]*uber[^\s"'<>]*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
 };
@@ -54,7 +61,7 @@ const PATTERNS = {
 const CURRENCY_MAP: Record<string, Currency> = {
   CA$: Currency.CAD,
   US$: Currency.USD,
-  $: Currency.USD, // Default $ to USD
+  $: Currency.UNKNOWN, // A bare symbol does not establish a country
   '€': Currency.EUR,
   '£': Currency.GBP,
 };
@@ -62,7 +69,7 @@ const CURRENCY_MAP: Record<string, Currency> = {
 export class ReceiptDataExtractor {
   private textExtractor: HtmlTextExtractor;
 
-  constructor() {
+  constructor(private readonly policyVersion: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY) {
     this.textExtractor = new HtmlTextExtractor();
   }
 
@@ -89,7 +96,7 @@ export class ReceiptDataExtractor {
 
     // Extract date and time
     const extractedDateTime = this.extractDateTime(plainText, htmlBody);
-    const { orderDate } = extractedDateTime;
+    let { orderDate } = extractedDateTime;
     let { orderTime, parsedDate } = extractedDateTime;
 
     // Extract monetary values
@@ -145,7 +152,7 @@ export class ReceiptDataExtractor {
     // when the template itself contains a strong Canadian entity/address cue.
     if (
       doorDashCurrency === null &&
-      currency === Currency.USD &&
+      currency === Currency.UNKNOWN &&
       /Uber Portier Canada|\bCanada\b|,\s*(?:ON|QC|BC|AB|MB|SK|NS|NB|NL|PE|NT|NU|YT)\b/i.test(
         plainText,
       )
@@ -171,7 +178,52 @@ export class ReceiptDataExtractor {
     if (merchant === null) warnings.push('Could not extract merchant name');
     if (parsedDate === null) warnings.push('Could not extract order date');
 
+    const orderEvidence =
+      this.policyVersion === 3
+        ? extractEmailOrderEvidence({
+            text: plainText,
+            total: total?.amount ?? null,
+            receivedAt: metadata.receivedAt,
+          })
+        : undefined;
+    if (orderEvidence) {
+      if (currency === Currency.UNKNOWN) {
+        const paymentCurrencies = [
+          ...new Set(
+            orderEvidence.payments
+              .map((payment) => payment.currencyCode)
+              .filter((code) => code && code !== 'UNKNOWN'),
+          ),
+        ];
+        if (paymentCurrencies.length === 1)
+          currency =
+            Object.values(Currency).find((code) => code === paymentCurrencies[0]) ?? currency;
+      }
+      const placed = orderEvidence.timestamps.find((t) => t.role === 'placed');
+      orderDate = orderEvidence.orderHeaderDay
+        ? `${orderEvidence.orderHeaderDay.slice(5, 7)}/${orderEvidence.orderHeaderDay.slice(8, 10)}/${orderEvidence.orderHeaderDay.slice(0, 4)}`
+        : null;
+      orderTime = placed?.raw.match(PATTERNS.time)?.[0] ?? null;
+      parsedDate = null; // The batch boundary applies the account timezone to semantic dates.
+      if (service === ServiceType.UBER_EATS || service === ServiceType.DOORDASH)
+        orderId =
+          extractLinkedProviderOrderId(
+            htmlBody,
+            service === ServiceType.UBER_EATS ? 'uber_eats' : 'doordash',
+          ) ?? orderId;
+      if (service === ServiceType.UBER_EATS) {
+        const named = plainText
+          .match(
+            /(?:here['’]s your receipt (?:from|for)|we updated your receipt for|you ordered from)\s+([^\n]+)/i,
+          )?.[1]
+          ?.replace(/\s+and\s+Uber Eats\.?\s*$/i, '')
+          .replace(/\.\s*$/, '')
+          .trim();
+        if (named && named.length <= 255) merchant = named;
+      }
+    }
     return {
+      ...(orderEvidence ? { orderEvidence } : {}),
       orderId,
       service,
       merchant,
@@ -179,13 +231,15 @@ export class ReceiptDataExtractor {
       orderTime,
       parsedDate,
       currency,
-      total: total?.amount ?? null,
+      total: orderEvidence ? orderEvidence.recordedTotal : (total?.amount ?? null),
       subtotal: subtotal?.amount ?? null,
       tax: tax?.amount ?? null,
       tip: tip?.amount ?? null,
       deliveryFee: deliveryFee?.amount ?? null,
       serviceFee: serviceFee?.amount ?? null,
       savings,
+      adjustments: extractReceiptAdjustments(plainText),
+      headlineSavings: this.extractSavings(plainText) ?? undefined,
       deliveryAddress,
       paymentMethod,
       subject,
@@ -200,6 +254,9 @@ export class ReceiptDataExtractor {
    */
   private detectService(subject: string, from: string, text: string): ServiceType {
     const combined = `${subject} ${from} ${text}`.toLowerCase();
+
+    if (this.policyVersion === 3 && orderAdjustmentProvider(from, text) === 'doordash')
+      return ServiceType.DOORDASH;
 
     if (isDoorDashReceiptEmail({ from, subject, text })) {
       return ServiceType.DOORDASH;
@@ -348,23 +405,9 @@ export class ReceiptDataExtractor {
   private extractAmountNear(label: string, text: string, html: string): MonetaryAmount | null {
     // Build regex to find label followed by amount
     const labelPattern = new RegExp(
-      `${label}[:\\s]*(?<currency>CA\\$|US\\$|\\$|€|£)?\\s*(?<amount>\\d+(?:\\.\\d{2})?)`,
+      `\\b${label}\\b[:\\s]*(?<currency>CA\\$|US\\$|\\$|€|£)?\\s*(?<amount>\\d+(?:\\.\\d{2})?)`,
       'gi',
     );
-
-    // Search in plain text first
-    const textMatch = labelPattern.exec(text);
-    if (textMatch?.groups) {
-      const amount = parseFloat(textMatch.groups.amount);
-      if (!isNaN(amount)) {
-        const currencySymbol = textMatch.groups.currency || '$';
-        return {
-          amount,
-          currency: CURRENCY_MAP[currencySymbol] || Currency.UNKNOWN,
-          raw: textMatch[0],
-        };
-      }
-    }
 
     // Try HTML data attributes for Uber emails
     const testIdMap: Record<string, string> = {
@@ -383,11 +426,18 @@ export class ReceiptDataExtractor {
       }
     }
 
-    // Window-based search as fallback
-    const window = this.textExtractor.extractNearLabel(text, label, 100);
-    if (window) {
-      const amount = this.parseAmountFromString(window);
-      if (amount) return amount;
+    // Fall back to an exact plain-text label
+    const textMatch = labelPattern.exec(text);
+    if (textMatch?.groups) {
+      const amount = parseFloat(textMatch.groups.amount);
+      if (!isNaN(amount)) {
+        const currencySymbol = textMatch.groups.currency || '$';
+        return {
+          amount,
+          currency: CURRENCY_MAP[currencySymbol] || Currency.UNKNOWN,
+          raw: textMatch[0],
+        };
+      }
     }
 
     return null;
@@ -507,24 +557,17 @@ export class ReceiptDataExtractor {
       return null;
     }
 
-    // 1) Strongest signal: explicit order_uuid or uuid query param
+    // 1) Strongest signal: explicit order_uuid query parameter
     const paramMatch = html.match(PATTERNS.orderUuidParam);
     if (paramMatch) {
       return paramMatch[1].toLowerCase();
     }
 
-    // 2) Next: UUID embedded in an Uber URL
-    const linkMatch = html.match(PATTERNS.uberLinkUuid);
-    if (linkMatch) {
-      return linkMatch[1].toLowerCase();
-    }
-
-    // 3) Fallback: first UUID in the HTML, but only if Uber-related
-    // Note: We use the generic UUID pattern here but scoped to the UBER check above
-    const genericMatch = html.match(PATTERNS.uuid);
-    if (genericMatch) {
-      return genericMatch[0].toLowerCase();
-    }
+    // Order-specific URL paths are identities; unrelated tracking UUIDs are not.
+    const linkMatch = html.match(
+      /https?:\/\/[^\s"'<>]*uber[^\s"'<>]*\/orders?\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    );
+    if (linkMatch) return linkMatch[1].toLowerCase();
 
     // 4) Last fallback: order number pattern (text based)
     const orderNum = text.match(/order\s*(number|no\.?)\s*[:#]\s*([A-Z0-9-]+)/i);

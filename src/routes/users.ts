@@ -1,5 +1,6 @@
 import { RequestHandler, Router } from 'express';
 import { requestTimezone } from '../http/requestTimezone';
+import { mapReceiptPageResponse } from '../http/mappers/receiptResponse';
 import { parseQueryBoolean, parseQueryInteger } from '../http/validation/requestValues';
 import { asyncHandler, ValidationError } from '../middleware/errorHandler';
 import { MAX_DASHBOARD_INSIGHT_DEV_DAY_OFFSET } from '../services/analytics/dashboard';
@@ -13,7 +14,7 @@ export interface UsersRouterDependencies {
   readonly validateUserId: RequestHandler;
   readonly production: boolean;
   readonly accountReset: Pick<AccountResetService, 'resetForOnboarding'>;
-  readonly dashboardInsights: Pick<GetDashboardInsightsService, 'execute'>;
+  readonly dashboardInsights: Pick<GetDashboardInsightsService, 'execute' | 'getInsightOrders'>;
   readonly summaries: Pick<GetUserSummaryService, 'execute'>;
 }
 
@@ -85,6 +86,47 @@ export const createUsersRouter = (dependencies: UsersRouterDependencies): Router
     }),
   );
 
+  router.get(
+    '/:id/dashboard-insights/:insightId/orders',
+    ...ownedUser,
+    asyncHandler(async (request, response) => {
+      const localDate = typeof request.query.localDate === 'string' ? request.query.localDate : '';
+      const parsedLocalDate = new Date(`${localDate}T00:00:00.000Z`);
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(localDate) ||
+        !Number.isFinite(parsedLocalDate.getTime()) ||
+        parsedLocalDate.toISOString().slice(0, 10) !== localDate
+      ) {
+        throw new ValidationError('Expected YYYY-MM-DD', 'localDate');
+      }
+      if (!/^[a-z0-9-]{1,120}$/i.test(request.params.insightId)) {
+        throw new ValidationError('Invalid insight identifier', 'insightId');
+      }
+      const page = parseQueryInteger(request.query.page, 'page', {
+        defaultValue: 1,
+        minimum: 1,
+        maximum: 100_000,
+      }) ?? 1;
+      const limit = parseQueryInteger(request.query.limit, 'limit', {
+        defaultValue: 30,
+        minimum: 1,
+        maximum: 100,
+      }) ?? 30;
+      const snapshotId = request.query.snapshotId;
+      if (snapshotId !== undefined && (typeof snapshotId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(snapshotId))) throw new ValidationError('Invalid snapshot identifier', 'snapshotId');
+      const result = await dependencies.dashboardInsights.getInsightOrders({
+        snapshotId: typeof snapshotId === 'string' ? snapshotId : undefined,
+        userId: request.params.id,
+        insightId: request.params.insightId,
+        localDate,
+        page,
+        limit,
+      });
+      response.set('Cache-Control', 'private, no-cache');
+      response.json(mapReceiptPageResponse(result.receipts, result.total, page, limit, result.timezone));
+    }),
+  );
+
   /**
    * @swagger
    * /users/{id}/summary:
@@ -95,6 +137,7 @@ export const createUsersRouter = (dependencies: UsersRouterDependencies): Router
    *     parameters:
    *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
    *       - { in: query, name: includeWrapped, schema: { type: boolean, default: false } }
+   *       - { in: query, name: displayCurrency, schema: { type: string, enum: [CAD, USD, EUR, GBP] }, description: Approximate recap display currency; does not change summary totals. }
    *       - { in: header, name: X-Timezone, schema: { type: string } }
    *     responses:
    *       200:
@@ -110,6 +153,12 @@ export const createUsersRouter = (dependencies: UsersRouterDependencies): Router
     ...ownedUser,
     asyncHandler(async (request, response) => {
       const summary = await dependencies.summaries.execute({
+        displayCurrency: (() => {
+          const value = request.query.displayCurrency;
+          if (value === undefined) return undefined;
+          if (value === 'CAD' || value === 'USD' || value === 'EUR' || value === 'GBP') return value;
+          throw new ValidationError('Invalid displayCurrency');
+        })(),
         userId: request.params.id,
         includeWrapped:
           parseQueryBoolean(request.query.includeWrapped, 'includeWrapped', false) ?? false,

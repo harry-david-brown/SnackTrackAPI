@@ -9,9 +9,8 @@ test('receipt list and count use the same filter predicates and values', async (
   const postgres = {
     query: async (sql, params) => {
       queries.push({ sql, params });
-      if (sql.includes('COUNT(*)')) return { rows: [{ count: '1' }], rowCount: 1 };
       return {
-        rows: [
+        rows: [{ count: '1', timezone: 'America/Toronto', receipts: [
           {
             id: 'receipt-id',
             user_id: 'user-id',
@@ -24,7 +23,7 @@ test('receipt list and count use the same filter predicates and values', async (
             delivery_time: null,
             external_id: 'provider-id',
           },
-        ],
+        ] }],
         rowCount: 1,
       };
     },
@@ -42,14 +41,12 @@ test('receipt list and count use the same filter predicates and values', async (
     0,
   );
 
-  const listQuery = queries.find(({ sql }) => sql.includes('ORDER BY'));
-  const countQuery = queries.find(({ sql }) => sql.includes('COUNT(*)'));
-  assert.ok(listQuery);
-  assert.ok(countQuery);
-  assert.match(listQuery.sql, /restaurant_name ILIKE \$3/);
-  assert.match(countQuery.sql, /restaurant_name ILIKE \$3/);
-  assert.deepEqual(listQuery.params.slice(0, -2), countQuery.params);
-  assert.deepEqual(countQuery.params, ['user-id', 'uber_eats', '%Kitchen%', 0, 20]);
+  assert.equal(queries.length, 1, 'page and count must share one database statement snapshot');
+  assert.match(queries[0].sql, /restaurant_name ILIKE \$3/);
+  assert.match(queries[0].sql, /COUNT\(\*\) FROM matching/);
+  assert.match(queries[0].sql, /net >= \$4::numeric/);
+  assert.deepEqual(queries[0].params, ['user-id', 'uber_eats', '%Kitchen%', 0, 20, 20, 0]);
   assert.equal(result.total, 1);
   assert.equal(result.receipts[0].id, 'receipt-id');
+  assert.equal(result.timezone, 'America/Toronto');
 });

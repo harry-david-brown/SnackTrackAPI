@@ -47,7 +47,17 @@ export const isExportProvider = (value: unknown): value is ExportProvider =>
 export const isProviderRelevance = (value: unknown): value is ProviderRelevance =>
   includes(PROVIDER_RELEVANCE_VALUES, value);
 
+export interface ProviderReadyAlert {
+  consentState: MonitoringConsentState;
+  consentVersion: string | null;
+  consentedAt: string | null;
+  revokedAt: string | null;
+  backgroundAvailable: boolean;
+  canMonitor: boolean;
+}
 export interface ProviderExportPreference {
+  requestId?: string | null;
+  readyAlert?: ProviderReadyAlert;
   provider: ExportProvider;
   status: ProviderExportLifecycleStatus;
   requestedAt: string | null;
@@ -87,6 +97,7 @@ export interface ImportPreferences {
 }
 
 export interface SyncRunCounts {
+  receiptOutcome?: import('./ReceiptImportOutcome').ReceiptImportOutcome;
   emailsScanned: number;
   receiptsProcessed: number;
   supportedReceiptsFound: number;
@@ -106,13 +117,16 @@ export interface TrackingBaseline {
 }
 
 export interface ProviderSourceCoverage {
+  /** Canonical records containing this source, including unresolved evidence; not documents. */
   readonly receiptCount: number;
   readonly hasData: boolean;
+  /** Observed order range, excluding unlinked adjustments; not verified export completeness. */
   readonly earliestOrderDate: string | null;
   readonly latestOrderDate: string | null;
 }
 
 export interface ImportSourceCoverage {
+  /** Overlapping source sets: a combined order contributes once to each, never sum them. */
   readonly emailReceiptCount: number;
   readonly exportReceiptCount: number;
   readonly hasEmailData: boolean;

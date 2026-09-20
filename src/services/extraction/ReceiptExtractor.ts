@@ -17,6 +17,7 @@ import {
 import { HtmlTextExtractor } from './HtmlTextExtractor';
 import { ReceiptClassifier } from './ReceiptClassifier';
 import { ReceiptDataExtractor } from './ReceiptDataExtractor';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 
 export class ReceiptExtractor {
   private textExtractor: HtmlTextExtractor;
@@ -24,11 +25,14 @@ export class ReceiptExtractor {
   private dataExtractor: ReceiptDataExtractor;
   private config: ExtractorConfig;
 
-  constructor(config: Partial<ExtractorConfig> = {}) {
+  constructor(
+    config: Partial<ExtractorConfig> = {},
+    policyVersion: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
+  ) {
     this.config = { ...DEFAULT_EXTRACTOR_CONFIG, ...config };
     this.textExtractor = new HtmlTextExtractor(this.config);
-    this.classifier = new ReceiptClassifier(this.config);
-    this.dataExtractor = new ReceiptDataExtractor();
+    this.classifier = new ReceiptClassifier(this.config, policyVersion);
+    this.dataExtractor = new ReceiptDataExtractor(policyVersion);
   }
 
   /**

@@ -1,4 +1,6 @@
 import { domainToASCII } from 'url';
+import { extractLinkedProviderOrderId } from '../receipt/ReceiptProviderOrderIdentity';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 
 export type MailboxAuthenticationOutcome = 'pass' | 'fail' | 'none' | 'unavailable';
 export type MailboxRejectionReason =
@@ -54,13 +56,26 @@ const dmarcOutcome = (value: string | null, visibleDomain: string | null): Mailb
   return result === 'pass' ? 'pass' : result === 'fail' ? 'fail' : 'none';
 };
 
-const sanitizeHtml = (body: string): string => body
-  .replace(/<!--[\s\S]*?-->/g, ' ')
-  .replace(/<(script|style|svg|iframe|object|embed|form|video|audio|picture|canvas)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
-  .replace(/<(img|source|track|input|link|meta)\b[^>]*>/gi, ' ')
-  .replace(/\b(?:src|href|style)\s*=\s*(["'])(?:data:|blob:|cid:|https?:)[\s\S]*?\1/gi, ' ');
+const sanitizeHtml = (body: string, retainOrderReferences: boolean): string => {
+  const content = body
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|svg|iframe|object|embed|form|video|audio|picture|canvas)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<(img|source|track|input|link|meta)\b[^>]*>/gi, ' ');
+  const references = retainOrderReferences
+    ? (['uber_eats', 'doordash'] as const).flatMap((provider) => {
+        const id = extractLinkedProviderOrderId(content, provider);
+        const host = provider === 'uber_eats' ? 'www.ubereats.com' : 'www.doordash.com';
+        // This is a reconstructed identity marker for extraction, not the original
+        // clickable receipt URL. No query string, access token or tracking is retained.
+        return id ? [`<a href="https://${host}/orders/${id}">Order reference</a>`] : [];
+      }).join('')
+    : '';
+  return content.replace(/\b(?:src|href|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ') + references;
+};
 
 export class MailboxContentGuard {
+  constructor(private readonly receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY) {}
+
   preflight(input: {
     provider: 'gmail' | 'microsoft';
     from: string;
@@ -101,7 +116,7 @@ export class MailboxContentGuard {
     if (!preflight.accepted) return { ...preflight, body: '', decodedBytes: 0 };
     const decodedBytes = Buffer.byteLength(body, 'utf8');
     if (decodedBytes > MAX_BODY_BYTES) return { accepted: false, reason: 'body_too_large', body: '', decodedBytes, authentication: preflight.authentication };
-    const sanitized = sanitizeHtml(body);
+    const sanitized = sanitizeHtml(body, this.receiptPolicy === 3);
     return { accepted: true, body: sanitized, decodedBytes, authentication: preflight.authentication };
   }
 }

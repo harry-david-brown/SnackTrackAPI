@@ -4,9 +4,8 @@ import type { ImportJobRepository } from '../data/ImportJobRepository';
 import type { ImportObjectStorage } from '../storage/ImportObjectStorage';
 import type { ImportJob, ImportJobKind, ImportJobTrigger, ImportJourneyContext } from './ImportJobTypes';
 import type { ExportProvider } from './ImportJobTypes';
+import { CSV_EXPORT_LIMIT_BYTES as CSV_LIMIT, ZIP_EXPORT_LIMIT_BYTES as ZIP_LIMIT } from './ExportFileLimits';
 
-const CSV_LIMIT = 10 * 1024 * 1024;
-const ZIP_LIMIT = 50 * 1024 * 1024;
 const supportedContentTypes = new Set([
   'text/csv',
   'application/csv',

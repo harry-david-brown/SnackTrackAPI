@@ -4,6 +4,7 @@ import {
   ERROR_ENVELOPE_FIXTURE,
   RECEIPT_PAGE_FIXTURE,
 } from '../contracts/contractFixtures';
+import { adminOrderCountFields } from '../services/admin/AdminReceiptSummary';
 
 const schema = (name: string): Readonly<Record<string, unknown>> => ({
   $ref: `#/components/schemas/${name}`,
@@ -23,6 +24,8 @@ const jsonBody = (schemaName: string, required = true) => ({
 });
 const secured = [{ BearerAuth: [] }];
 const nullableTimestamp = { type: 'string', format: 'date-time', nullable: true };
+const receiptConfidence = { type: 'string', enum: ['confirmed', 'inferred', 'unknown', 'conflicted'] };
+const receiptAmount = { type: 'number', minimum: 0, maximum: 1000000, multipleOf: 0.01, nullable: true };
 const gmailHealth = {
   type: 'string',
   enum: ['disconnected', 'valid', 'reconnect_required', 'unavailable'],
@@ -50,6 +53,7 @@ const providerState = {
 };
 const sourceCoverage = {
   type: 'object',
+  description: 'Canonical records containing this source, including unresolved evidence. Date bounds describe observed orders only, exclude unlinked adjustments and do not establish continuous or complete export coverage.',
   additionalProperties: false,
   required: ['receiptCount', 'hasData', 'earliestOrderDate', 'latestOrderDate'],
   properties: {
@@ -61,6 +65,24 @@ const sourceCoverage = {
 };
 
 export const contractSchemas = {
+  AdminReceiptSummary: {
+    type: 'object', additionalProperties: false,
+    description: 'Canonical order-outcome metrics. Source memberships overlap. Unknown and unresolved costs are not settled totals; legacy records lack rebuilt order outcomes. Provider-wallet payments are included in net cost.',
+    required: ['policyVersion', 'receiptRecords', ...adminOrderCountFields, 'currencies'],
+    properties: {
+      policyVersion: { type: 'integer', enum: [3] }, receiptRecords: { type: 'integer', minimum: 0 },
+      ...Object.fromEntries(adminOrderCountFields.map(field => [field, { type: 'integer', minimum: 0 }])),
+      currencies: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        required: ['currencyCode', 'netSpend', 'deliveredNetSpend', 'cancellationCost', 'confirmedRefundAmount', 'estimatedRefundAmount', 'possibleAdditionalSpend', 'pricedOrders', 'estimatedPriceOrders', 'unknownPriceOrders', 'unpricedPossibleOrders', 'confirmedRefundsWithUnknownAmount'],
+        properties: {
+          currencyCode: { type: 'string', enum: ['CAD', 'USD', 'EUR', 'GBP', 'UNKNOWN'] },
+          ...Object.fromEntries(['netSpend', 'deliveredNetSpend', 'cancellationCost', 'confirmedRefundAmount', 'estimatedRefundAmount', 'possibleAdditionalSpend'].map(field => [field, { type: 'number', minimum: 0, multipleOf: 0.01 }])),
+          ...Object.fromEntries(['pricedOrders', 'estimatedPriceOrders', 'unknownPriceOrders', 'unpricedPossibleOrders', 'confirmedRefundsWithUnknownAmount'].map(field => [field, { type: 'integer', minimum: 0 }])),
+        },
+      } },
+    },
+  },
   AuthUser: {
     type: 'object',
     additionalProperties: false,
@@ -235,6 +257,38 @@ export const contractSchemas = {
       message: { type: 'string' },
       expiresIn: { type: 'integer', minimum: 1 },
       attemptLimit: { type: 'integer', minimum: 1 },
+    },
+  },
+  ReceiptOrderOutcome: {
+    type: 'object',
+    additionalProperties: false,
+    description: 'Canonical order outcome. Unknown amounts remain null. Payment events are a breakdown, not extra spending or a chronological ledger.',
+    required: ['version', 'counting', 'orderDay', 'fulfillment', 'fulfillmentConfidence', 'refundStatus', 'refundConfidence', 'originalCharge', 'netAmount', 'confirmedRefundAmount', 'estimatedRefundAmount', 'cancellationCharge', 'financialConfidence', 'events'],
+    properties: {
+      version: { type: 'integer', enum: [3] },
+      counting: { type: 'string', enum: ['established_order', 'possible_additional_order', 'unlinked_adjustment'] },
+      orderDay: { type: 'string', format: 'date', nullable: true, description: 'Local order day; do not timezone-convert again.' },
+      fulfillment: { type: 'string', enum: ['completed', 'canceled', 'failed', 'unfulfilled', 'unknown'] },
+      fulfillmentConfidence: receiptConfidence,
+      refundStatus: { type: 'string', enum: ['none_established', 'confirmed_unclassified', 'partial', 'full', 'reversed', 'probable_full', 'zero_unexplained', 'conflicted'] },
+      refundConfidence: receiptConfidence,
+      financialConfidence: receiptConfidence,
+      originalCharge: receiptAmount, netAmount: receiptAmount, confirmedRefundAmount: receiptAmount,
+      estimatedRefundAmount: receiptAmount, cancellationCharge: receiptAmount,
+      events: {
+        type: 'array', maxItems: 10000,
+        items: {
+          type: 'object', additionalProperties: false,
+          required: ['kind', 'amount', 'tender', 'currencyCode', 'confidence'],
+          properties: {
+            kind: { type: 'string', enum: ['charge', 'refund', 'charge_adjustment', 'refund_reversal'] },
+            amount: { ...receiptAmount, nullable: false },
+            tender: { type: 'string', enum: ['card', 'provider_wallet', 'other', 'unknown'] },
+            currencyCode: { type: 'string', enum: ['CAD', 'USD', 'EUR', 'GBP', 'UNKNOWN'] },
+            confidence: receiptConfidence,
+          },
+        },
+      },
     },
   },
   ReceiptPage: {
@@ -607,8 +661,8 @@ export const contractSchemas = {
           'exportProviders',
         ],
         properties: {
-          emailReceiptCount: { type: 'integer', minimum: 0 },
-          exportReceiptCount: { type: 'integer', minimum: 0 },
+          emailReceiptCount: { type: 'integer', minimum: 0, description: 'Canonical history records with email evidence, including unresolved records and unlinked adjustments. Overlaps exportReceiptCount; not additive or a document count.' },
+          exportReceiptCount: { type: 'integer', minimum: 0, description: 'Canonical history records with export evidence. Overlaps emailReceiptCount; not additive or a document count.' },
           hasEmailData: { type: 'boolean' },
           hasExportData: { type: 'boolean' },
           emailProviders: {

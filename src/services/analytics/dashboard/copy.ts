@@ -12,11 +12,6 @@ export function getInsightValueBand(value: number): InsightValueBand {
 }
 
 const COPY_VARIANTS: Record<string, string[]> = {
-  foodflation: [
-    'Your wallet clocked it.',
-    'Same craving, different damage.',
-    'The receipt remembered.',
-  ],
   'exact-basket': [
     'Your order history found its comfort blanket.',
     'Consistency, but make it delicious.',
@@ -51,6 +46,9 @@ export function applyDailyCopyVariant(candidate: InsightCandidate, seed: string)
     title: candidate.insight.title,
     detail: candidate.insight.detail,
   };
+  const orderEvidence = candidate.orderIds?.length
+    ? { orderEvidence: { count: candidate.orderIds.length } }
+    : {};
   if (candidate.insight.presentation === 'locked') return { ...candidate.insight, ...copy };
   const numericFact = Object.values(candidate.facts ?? {}).find(
     (value) => typeof value === 'number',
@@ -58,12 +56,17 @@ export function applyDailyCopyVariant(candidate: InsightCandidate, seed: string)
   const band = numericFact === undefined ? 'small' : getInsightValueBand(numericFact);
   // Named families get their own voice on every edition. Value-band copy is a
   // fallback for candidates without more specific material.
-  const options = variants?.length ? variants : (BAND_LINES[band] ?? []);
-  if (!options.length) return { ...candidate.insight, ...copy };
+  const options = candidate.copyVariants !== undefined
+    ? candidate.copyVariants
+    : variants?.length
+      ? variants
+      : (BAND_LINES[band] ?? []);
+  if (!options.length) return { ...candidate.insight, ...copy, ...orderEvidence };
   const variant = options[stableHash(`${seed}:copy:${candidate.insight.id}`) % options.length];
   return {
     ...candidate.insight,
     ...copy,
+    ...orderEvidence,
     detail: copy.detail ? `${copy.detail} ${variant}` : variant,
   };
 }

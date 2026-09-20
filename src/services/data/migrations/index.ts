@@ -1,3 +1,11 @@
+import { marketHistoryMigration } from './032_market_history';
+import { receiptEvidenceMigration } from './024_receipt_evidence';
+import { receiptReconciliationMigration } from './026_receipt_reconciliation';
+import { orderEventsMigration } from './027_order_events';
+import { receiptProjectionRevisionMigration } from './028_receipt_projection_revision';
+import { receiptImportOutcomesMigration } from './029_receipt_import_outcomes';
+import { unclassifiedRefundsMigration } from './030_unclassified_refunds';
+import { receiptReviewEvidenceMigration } from './031_receipt_review_evidence';
 import { Migration } from './Migration';
 import { coreSchemaMigration } from './001_core_schema';
 import { authAndProviderIdentityMigration } from './002_auth_and_provider_identity';
@@ -22,6 +30,9 @@ import { importJourneyContextMigration } from './020_import_journey_context';
 import { importTestScenariosMigration } from './021_import_test_scenarios';
 import { importJobEventsMigration } from './022_import_job_events';
 import { gmailPushAndQuotaMigration } from './023_gmail_push_and_quota';
+import { receiptProviderIdentityMigration } from './025_receipt_provider_identity';
+
+import { exportReadyAlertsMigration } from './033_export_ready_alerts';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -47,4 +58,14 @@ export const migrations: readonly Migration[] = [
   importTestScenariosMigration,
   importJobEventsMigration,
   gmailPushAndQuotaMigration,
+  receiptEvidenceMigration,
+  receiptProviderIdentityMigration,
+  receiptReconciliationMigration,
+  orderEventsMigration,
+  receiptProjectionRevisionMigration,
+  receiptImportOutcomesMigration,
+  unclassifiedRefundsMigration,
+  receiptReviewEvidenceMigration,
+  marketHistoryMigration,
+  exportReadyAlertsMigration,
 ];

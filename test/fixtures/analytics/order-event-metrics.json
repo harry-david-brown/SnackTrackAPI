@@ -1,0 +1,87 @@
+{
+  "metrics": {
+    "policyVersion": 3,
+    "attempts": 5,
+    "deliveries": 4,
+    "canceled": 1,
+    "chargedCancellations": 1,
+    "zeroBalanceCancellations": 0,
+    "failed": 0,
+    "unfulfilled": 0,
+    "unknownFulfillment": 0,
+    "confirmedRefunds": 1,
+    "fullyRefunded": 1,
+    "partiallyRefunded": 0,
+    "unclassifiedRefunds": 0,
+    "reversedRefunds": 0,
+    "likelyRefunds": 0,
+    "possibleAdditionalOrders": 0,
+    "unlinkedAdjustments": 0,
+    "legacyOrders": 0,
+    "currencies": [
+      {
+        "currencyCode": "CAD",
+        "netSpend": 157.02,
+        "deliveredNetSpend": 113.76,
+        "cancellationCost": 43.26,
+        "confirmedRefundAmount": 22.48,
+        "estimatedRefundAmount": 0,
+        "possibleAdditionalSpend": 0,
+        "pricedOrders": 5,
+        "estimatedPriceOrders": 0,
+        "unknownPriceOrders": 0,
+        "unpricedPossibleOrders": 0,
+        "confirmedRefundsWithUnknownAmount": 0,
+        "payments": [
+          {
+            "tender": "card",
+            "charges": 153.81,
+            "refunds": 0,
+            "refundReversals": 0
+          },
+          {
+            "tender": "provider_wallet",
+            "charges": 25.69,
+            "refunds": 22.48,
+            "refundReversals": 0
+          }
+        ]
+      }
+    ]
+  },
+  "ranking": {
+    "status": "available",
+    "day": "2023-12-10",
+    "deliveries": 4,
+    "spending": [
+      {
+        "currencyCode": "CAD",
+        "netSpend": 113.76,
+        "deliveredNetSpend": 113.76,
+        "cancellationCost": 0,
+        "confirmedRefundAmount": 22.48,
+        "estimatedRefundAmount": 0,
+        "possibleAdditionalSpend": 0,
+        "pricedOrders": 4,
+        "estimatedPriceOrders": 0,
+        "unknownPriceOrders": 0,
+        "unpricedPossibleOrders": 0,
+        "confirmedRefundsWithUnknownAmount": 0,
+        "payments": [
+          {
+            "tender": "card",
+            "charges": 110.55,
+            "refunds": 0,
+            "refundReversals": 0
+          },
+          {
+            "tender": "provider_wallet",
+            "charges": 25.69,
+            "refunds": 22.48,
+            "refundReversals": 0
+          }
+        ]
+      }
+    ]
+  }
+}

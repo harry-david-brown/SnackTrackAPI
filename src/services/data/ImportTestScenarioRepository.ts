@@ -82,7 +82,7 @@ export class ImportTestScenarioRepository {
       const previous = existing.rows[0];
       if (previous) {
         if (previous.pending === true) {
-          const resumeAt = new Date(String(previous.resume_at));
+          const resumeAt = new Date(previous.resume_at instanceof Date ? previous.resume_at.getTime() : String(previous.resume_at));
           await this.markJobDelayed(transaction, jobId, userId, resumeAt);
           return resumeAt;
         }
@@ -105,7 +105,7 @@ export class ImportTestScenarioRepository {
          RETURNING resume_at`,
         [jobId, userId, GMAIL_LONG_RUNNING_SCENARIO, GMAIL_LONG_RUNNING_DELAY_MS],
       );
-      const resumeAt = new Date(String(inserted.rows[0]?.resume_at));
+      const resumeAt = new Date(inserted.rows[0]?.resume_at instanceof Date ? inserted.rows[0].resume_at.getTime() : String(inserted.rows[0]?.resume_at));
       await this.markJobDelayed(transaction, jobId, userId, resumeAt);
       return resumeAt;
     });

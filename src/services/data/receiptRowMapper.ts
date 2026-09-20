@@ -1,3 +1,4 @@
+import { decodeItemEvidence, decodeResolution } from '../../models/ReceiptResolution';
 import { DatabaseRow } from '../ports/DatabasePort';
 import { DatabaseError } from '../../core/errors';
 import { DataSource, Receipt, ReceiptItem, ReceiptType } from '../../models/Receipt';
@@ -20,6 +21,7 @@ export interface ReceiptRow extends DatabaseRow {
   delivery_fee_amount: unknown;
   service_fee_amount: unknown;
   savings_amount: unknown;
+  resolution?: unknown;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -61,6 +63,7 @@ const parseItem = (value: unknown, field: string): ReceiptItem => {
   }
   const customizations = item.customizations as unknown[] | undefined;
   return {
+    ...(item.evidence === undefined ? {} : { evidence: decodeItemEvidence(item.evidence) }),
     name: nonemptyString(item.name, `${field}.name`),
     quantity: nonnegativeNumber(item.quantity, `${field}.quantity`),
     price: nonnegativeNumber(item.price, `${field}.price`),
@@ -91,7 +94,7 @@ export const decodeReceiptItems = (value: unknown): ReceiptItem[] => {
   return (candidate as unknown[]).map((item, index) => parseItem(item, `items.${index}`));
 };
 
-export const mapReceiptRow = (row: ReceiptRow): Receipt => {
+export const mapReceiptRow = (row: DatabaseRow): Receipt => {
   const receiptTypeValue = nonemptyString(row.receipt_type, 'receipt_type');
   const dataSourceValue = nonemptyString(row.data_source, 'data_source');
   const receiptType = isReceiptType(receiptTypeValue) ? receiptTypeValue : invalid('receipt_type');
@@ -122,5 +125,6 @@ export const mapReceiptRow = (row: ReceiptRow): Receipt => {
     nullableString(row.external_id, 'external_id'),
     nonemptyString(row.id, 'id'),
     Object.keys(monetaryDetails).length ? monetaryDetails : undefined,
+    decodeResolution(row.resolution),
   );
 };

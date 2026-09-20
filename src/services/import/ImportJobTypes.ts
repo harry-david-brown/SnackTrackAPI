@@ -1,10 +1,16 @@
+import { decodeReceiptImportOutcome } from './ReceiptImportOutcome';
+
 export const IMPORT_JOB_KINDS = [
+  'export_ready_check',
   'gmail_historical',
   'outlook_historical',
   'manual_tracking',
   'scheduled_tracking',
   'gmail_push_tracking',
   'export_file',
+  'receipt_rebuild',
+  'receipt_publish',
+  'receipt_rollback',
 ] as const;
 export type ImportJobKind = (typeof IMPORT_JOB_KINDS)[number];
 
@@ -86,6 +92,8 @@ export type ImportOperation = Omit<ImportJob,
 };
 
 export interface ImportExecutionCheckpoint {
+  /** Internal durable accounting identity, separate from provider cursor checkpoints. */
+  readonly accountingJobId?: string;
   readonly checkpoint: Readonly<Record<string, unknown>>;
   save(checkpoint: Readonly<Record<string, unknown>>, phase: string, progress: number): Promise<void>;
 }
@@ -103,7 +111,7 @@ export const toImportOperation = (job: ImportJob): ImportOperation => ({
   status: job.status,
   phase: job.phase,
   progress: job.progress,
-  result: job.result,
+  result: job.result ? { ...job.result, ...(job.result.receiptOutcome === undefined ? {} : { receiptOutcome: decodeReceiptImportOutcome(job.result.receiptOutcome) }) } : null,
   errorCode: job.errorCode,
   errorMessage: job.errorMessage,
   attempts: job.attempts,

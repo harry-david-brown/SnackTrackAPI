@@ -1,3 +1,24 @@
+import { calculateHistoricalInvestment, type InvestmentContext } from './shared/historicalInvestment';
+import { classifyItemPersonality } from './dashboard/itemPersonalities';
+import { normalizeRestaurantName as normalizeRestaurant } from './dashboard/normalization';
+import { wrappedNetAmount, wrappedSpending } from './shared/wrappedSpending';
+import { projectReceiptForAnalytics } from './ReceiptAnalyticsProjection';
+import {
+  buildOrderComparisonProfile,
+  selectOrderComparisonStandings,
+  type OrderComparisonProfile,
+  type OrderComparisonRank,
+  type WrappedPercentileRanks,
+} from './shared/orderComparisons';
+import type { WrappedReceiptSnapshot } from '../ports/ProjectionPorts';
+import { overnightMinute, spendingByCurrency, currencyOf } from './shared/receiptMetrics';
+import {
+  hasOrderTimeEvidence,
+  mostDeliveriesDay,
+  orderMetricEligibility,
+  summarizeOrderMetrics,
+  usesOrderEventMetrics,
+} from './shared/orderMetrics';
 import {
   WrappedAnalytics,
   WrappedPercentiles,
@@ -30,27 +51,59 @@ import {
   getLocalYear,
 } from '../../utils/timezone';
 import { isLateNightHour } from './shared/timeWindows';
+import { buildRecapStories } from './shared/recapStories';
+import { usableItemUnitPrice } from '../receipt/ItemPrice';
 import {
   calculateHypotheticalInvestment,
   HYPOTHETICAL_ANNUAL_RETURN_PERCENT,
 } from './shared/investment';
 export interface WrappedAnalyticsQueryPort {
+  getRecapCoverage?(userId: string): Promise<import('./shared/recapStories').RecapCoverageInterval[]>;
   getUserTimezone(userId: string): Promise<string>;
   getUserReceipts(userId: string): Promise<ReceiptForAnalytics[]>;
   getPercentileRanks(
     userId: string,
     minimumReceipts: number,
-  ): Promise<{
-    spentRank: number;
-    ordersRank: number;
-    nightOwlRank: number;
-    sampleSize: number;
-  } | null>;
+    target?: OrderComparisonProfile,
+  ): Promise<WrappedPercentileRanks | null>;
 }
 
 export interface WrappedAnalyticsLogPort {
   warn(message: string, context: Readonly<Record<string, unknown>>): void;
 }
+
+const COMPOSITE_MENU_ITEM_PATTERN =
+  /\b(?:meal|combo|bundle|box|platter|feast|family\s+pack|party\s+pack|variety\s+pack)\b/i;
+
+const isCompositeMenuItem = (item: ReceiptForAnalytics['items'][number]): boolean =>
+  item.evidence?.components.some((component) => component.quantity > 0) === true ||
+  COMPOSITE_MENU_ITEM_PATTERN.test(item.name);
+
+const GENERIC_PIZZA_SIZE_PATTERN = /^(?:small|medium|large|extra\s+large|x-?large)$/i;
+
+const singleItemDisplayName = (
+  receipt: ReceiptForAnalytics,
+  item: ReceiptForAnalytics['items'][number],
+): string => {
+  const name = item.name.trim();
+  if (GENERIC_PIZZA_SIZE_PATTERN.test(name) && /\bpizza\b/i.test(receipt.restaurantName ?? '')) {
+    return `${name} pizza`;
+  }
+  return name;
+};
+
+/** Import/row order must not choose a different merchant when records tie. */
+const compareReceiptTie = (left: ReceiptForAnalytics, right: ReceiptForAnalytics): number => {
+  const date = (receipt: ReceiptForAnalytics) => {
+    const value = receipt.orderDate?.getTime();
+    return value !== undefined && Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  };
+  return (
+    date(left) - date(right) ||
+    (left.restaurantName ?? '').localeCompare(right.restaurantName ?? '') ||
+    (left.id ?? '').localeCompare(right.id ?? '')
+  );
+};
 
 /** Pure receipt-to-analytics calculation policy. */
 export class WrappedAnalyticsCalculator {
@@ -61,11 +114,77 @@ export class WrappedAnalyticsCalculator {
     receipts: ReceiptForAnalytics[],
     userTimezone: string,
     percentiles?: WrappedPercentiles,
+    market?: InvestmentContext,
   ): Promise<WrappedAnalytics> {
+    const eventMetrics = usesOrderEventMetrics(receipts);
     if (receipts.length === 0) {
-      return this.getEmptyAnalytics();
+      return {
+        ...this.getEmptyAnalytics(),
+        ...(eventMetrics
+          ? {
+              behaviorPolicyVersion: 1,
+              orderMetrics: summarizeOrderMetrics(receipts),
+              deliveryDayRanking: mostDeliveriesDay(receipts, userTimezone),
+              currencyCode: 'UNKNOWN',
+              totalsByCurrency: {},
+            }
+          : {}),
+      };
     }
 
+    // Export event timezones outrank later account preferences for every story.
+    receipts = receipts.map((r) => ({
+      ...r,
+      timezone: r.resolution?.timestamp?.timezone ?? r.timezone ?? userTimezone,
+    }));
+    if (eventMetrics) receipts.sort(compareReceiptTie);
+    const allReceipts = receipts;
+    const orderMetrics = eventMetrics ? summarizeOrderMetrics(receipts) : undefined;
+    // User-facing delivery records rank dated, completed deliveries, just like
+    // dashboard delivery stories. Other evidence remains in orderMetrics.
+    const deliveryDayRanking = eventMetrics
+      ? mostDeliveriesDay(receipts.filter((r) => orderMetricEligibility(r).delivered &&
+          r.orderDate && Number.isFinite(r.orderDate.getTime())), userTimezone)
+      : undefined;
+    const spending = spendingByCurrency(receipts);
+    const established = eventMetrics
+      ? receipts.filter((r) => orderMetricEligibility(r).establishedAttempt)
+      : receipts;
+    receipts = eventMetrics
+      ? established.filter((r) => orderMetricEligibility(r).delivered)
+      : receipts;
+    // Keep policy-3 evidence intact. Unknown/foreign costs are not zero-priced
+    // deliveries; each story derives its own currency-aware financial cohort.
+    receipts = eventMetrics
+      ? receipts
+      : receipts.map((r) =>
+          currencyOf(r) === spending.primary
+            ? {
+                ...r,
+                amountSpent: r.amountSpent,
+              }
+            : {
+                ...r,
+                amountSpent: 0,
+                subtotal: null,
+                tax: null,
+                tip: null,
+                deliveryFee: null,
+                serviceFee: null,
+                savings: null,
+                items: r.items.map((i) => ({ ...i, price: 0 })),
+              },
+        );
+    const timed = eventMetrics ? receipts.filter(hasOrderTimeEvidence) : receipts;
+    const financialActivity =
+      eventMetrics && spending.primary !== 'UNKNOWN'
+        ? receipts.filter(
+            (r) =>
+              currencyOf(r) === spending.primary && orderMetricEligibility(r).netAmount !== null,
+          )
+        : eventMetrics
+          ? []
+          : receipts;
     // Calculate all analytics categories
     const [
       lateNightOrders,
@@ -86,38 +205,93 @@ export class WrappedAnalyticsCalculator {
       deliveryWaits,
     ] = await Promise.all([
       // Shame analytics
-      this.calculateLateNightOrders(receipts, userTimezone),
-      this.calculateLaziestDay(receipts, userTimezone),
+      this.calculateLateNightOrders(timed, userTimezone),
+      // An uncertain all-account daily record must not suppress unrelated stories.
+      !eventMetrics || deliveryDayRanking?.status === 'available'
+        ? this.calculateLaziestDay(receipts, userTimezone) : undefined,
       this.calculateLongestStreak(receipts, userTimezone),
-      this.calculateSingleItemOrders(receipts),
+      // This story has a price threshold. Unknown/other-currency costs cannot
+      // become zero-priced candidates through the display-only money projection.
+      this.calculateSingleItemOrders(financialActivity),
       this.calculateChainDependency(receipts),
 
       // Flex analytics
-      this.calculateMostExpensiveOrder(receipts, userTimezone),
+      this.calculateMostExpensiveOrder(financialActivity, userTimezone),
       this.calculateCoffeeAddiction(receipts),
-      this.calculateNightOwl(receipts, userTimezone),
+      this.calculateNightOwl(timed, userTimezone),
 
       // Comparative analytics
-      this.calculateSpentThisYear(receipts, userTimezone),
+      this.calculateSpentThisYear(
+        eventMetrics ? established : receipts,
+        userTimezone,
+        eventMetrics,
+      ),
       this.calculateCouldHaveBought(receipts),
-      this.calculateMissedInvestment(receipts, userTimezone),
-      this.calculateCostPerMeal(receipts),
-      this.calculateDeliveryFeeTrend(receipts),
+      // This is a hypothetical spending illustration, not a payment-ledger return.
+      market?.mode === 'historical' ? undefined : this.calculateMissedInvestment(financialActivity, userTimezone),
+      this.calculateCostPerMeal(financialActivity),
+      this.calculateDeliveryFeeTrend(financialActivity, userTimezone),
 
       // Pattern analytics
-      this.calculatePeakHungerHour(receipts, userTimezone),
+      this.calculatePeakHungerHour(timed, userTimezone),
       this.calculateWeekendWarrior(receipts, userTimezone),
-      this.calculateDeliveryWaits(receipts),
+      this.calculateDeliveryWaits(timed),
     ]);
 
-    const coverage = this.calculateCoverage(receipts);
+    const coverage = this.calculateCoverage(eventMetrics ? established : receipts);
+    // The new ranking's count and spend must come from exactly the same delivered cohort.
+    let deliveredDay = laziestDay;
+    if (deliveryDayRanking?.status === 'available') {
+      const day = deliveryDayRanking.day;
+      deliveredDay = {
+        date: day,
+        dayOfWeek: this.getDayOfWeek(day),
+        orderCount: deliveryDayRanking.deliveries,
+        ...wrappedSpending(
+          allReceipts.filter(
+            (r) =>
+              orderMetricEligibility(r).delivered &&
+              r.orderDate &&
+              getLocalDateKey(r.orderDate, r.timezone ?? userTimezone) === day,
+          ),
+          true,
+        ),
+        restaurants: allReceipts
+          .filter(
+            (r) =>
+              orderMetricEligibility(r).delivered &&
+              r.orderDate &&
+              getLocalDateKey(
+                r.orderDate,
+                r.resolution?.timestamp?.timezone ?? r.timezone ?? userTimezone,
+              ) === day,
+          )
+          .map((r) => r.restaurantName ?? 'Unknown'),
+        message: `${deliveryDayRanking.deliveries} deliveries on your busiest delivery day.`,
+      };
+    }
 
     return {
       coverage,
-      percentiles,
+      ...(orderMetrics
+        ? {
+            behaviorPolicyVersion: 1,
+            orderMetrics,
+            deliveryDayRanking,
+            currencyCode: spending.primary,
+            totalsByCurrency: spending.buckets,
+          }
+        : {}),
+      // All-time comparison eligibility is independent of whether a daily record can be proven.
+      percentiles: eventMetrics
+        ? selectOrderComparisonStandings(
+            percentiles,
+            buildOrderComparisonProfile(allReceipts, userTimezone),
+          )
+        : percentiles,
       shame: {
         lateNightOrders,
-        laziestDay,
+        laziestDay: deliveredDay,
         longestStreak,
         singleItemOrders,
         chainDependency,
@@ -131,6 +305,10 @@ export class WrappedAnalyticsCalculator {
         spentThisYear,
         couldHaveBought,
         missedInvestment,
+        historicalInvestment: market?.mode === 'historical' ? calculateHistoricalInvestment(
+          financialActivity.filter(r => r.orderDate).map(r => ({ amount: wrappedNetAmount(r) ?? NaN,
+            date: getLocalDateKey(r.orderDate!, r.timezone ?? userTimezone) ?? '' })), spending.primary, market,
+        ) : undefined,
         costPerMeal,
         deliveryFeeTrend,
       },
@@ -155,7 +333,7 @@ export class WrappedAnalyticsCalculator {
     const dataSources = Array.from(
       new Set(
         receipts
-          .map((receipt) => receipt.dataSource)
+          .flatMap((receipt) => receipt.resolution?.sources ?? [receipt.dataSource])
           .filter((source): source is string => Boolean(source)),
       ),
     ).sort();
@@ -178,41 +356,50 @@ export class WrappedAnalyticsCalculator {
   ): Promise<LateNightOrders | undefined> {
     const lateNightReceipts = receipts.filter((r) => {
       if (!r.orderDate) return false;
-      const hour = getLocalHour(r.orderDate, timezone);
+      const hour = getLocalHour(r.orderDate, r.timezone ?? timezone);
       return isLateNightHour(hour);
     });
 
     if (lateNightReceipts.length === 0) return undefined;
 
-    const totalSpent = lateNightReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
+    const costs = wrappedSpending(lateNightReceipts);
 
     // Find latest order (by hour in user's timezone)
     const latest = lateNightReceipts.reduce((latest, r) => {
       if (!r.orderDate) return latest;
       if (!latest.orderDate) return r;
-      const rMinute = getLocalMinuteOfDay(r.orderDate, timezone) ?? -1;
-      const latestMinute = getLocalMinuteOfDay(latest.orderDate, timezone) ?? -1;
-      return rMinute > latestMinute ? r : latest;
+      const rMinute = getLocalMinuteOfDay(r.orderDate, r.timezone ?? timezone) ?? -1;
+      const latestMinute = getLocalMinuteOfDay(latest.orderDate, latest.timezone ?? timezone) ?? -1;
+      const difference = overnightMinute(rMinute) - overnightMinute(latestMinute);
+      return difference > 0 || (difference === 0 && compareReceiptTie(r, latest) < 0) ? r : latest;
     }, lateNightReceipts[0]);
 
     // Find worst offender (most expensive late night order)
-    const worstOffender = lateNightReceipts.reduce(
-      (worst, r) => (r.amountSpent > worst.amountSpent ? r : worst),
-      lateNightReceipts[0],
-    );
+    const worstOffender =
+      costs.totalSpent === null
+        ? undefined
+        : lateNightReceipts.reduce((worst, r) => {
+            const difference = wrappedNetAmount(r)! - wrappedNetAmount(worst)!;
+            return difference > 0 || (difference === 0 && compareReceiptTie(r, worst) < 0)
+              ? r
+              : worst;
+          }, lateNightReceipts[0]);
 
     // Format times in user's local timezone
-    const formatLocalTime = (date: Date) => formatTimeInTimezone(date, timezone) || 'Unknown';
+    const formatLocalTime = (date: Date, eventTimezone = timezone) =>
+      formatTimeInTimezone(date, eventTimezone) || 'Unknown';
 
     return {
       count: lateNightReceipts.length,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
-      latestOrder: latest.orderDate ? formatLocalTime(latest.orderDate) : 'Unknown',
-      worstOffender: worstOffender.orderDate
+      ...costs,
+      latestOrder: latest.orderDate
+        ? formatLocalTime(latest.orderDate, latest.timezone ?? timezone)
+        : 'Unknown',
+      worstOffender: worstOffender?.orderDate
         ? {
             restaurant: worstOffender.restaurantName || 'Unknown',
-            time: formatLocalTime(worstOffender.orderDate),
-            amount: worstOffender.amountSpent,
+            time: formatLocalTime(worstOffender.orderDate, worstOffender.timezone ?? timezone),
+            amount: wrappedNetAmount(worstOffender)!,
             items: worstOffender.items.map((i) => i.name),
           }
         : undefined,
@@ -235,7 +422,7 @@ export class WrappedAnalyticsCalculator {
     validReceipts.forEach((r) => {
       if (!r.orderDate) return;
       // Get the date string in user's timezone (YYYY-MM-DD)
-      const dateKey = getLocalDateKey(r.orderDate, timezone);
+      const dateKey = getLocalDateKey(r.orderDate, r.timezone ?? timezone);
       if (!dateKey) return;
       if (!dayGroups.has(dateKey)) {
         dayGroups.set(dateKey, []);
@@ -258,17 +445,13 @@ export class WrappedAnalyticsCalculator {
 
     if (maxOrders < 3) return undefined; // Only show if 3+ orders
 
-    const totalSpent = laziestReceipts.reduce(
-      (sum: number, r: ReceiptForAnalytics) => sum + r.amountSpent,
-      0,
-    );
     const dayOfWeek = this.getDayOfWeek(laziestDate);
 
     return {
       date: laziestDate,
       dayOfWeek,
       orderCount: laziestReceipts.length,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
+      ...wrappedSpending(laziestReceipts),
       restaurants: laziestReceipts.map((r: ReceiptForAnalytics) => r.restaurantName || 'Unknown'),
       message: `${laziestReceipts.length} orders in one day? Go outside.`,
     };
@@ -290,7 +473,7 @@ export class WrappedAnalyticsCalculator {
       new Set(
         validReceipts
           .map((r) => {
-            return getLocalDateKey(r.orderDate!, timezone);
+            return getLocalDateKey(r.orderDate!, r.timezone ?? timezone);
           })
           .filter((d): d is string => d !== null),
       ),
@@ -330,24 +513,26 @@ export class WrappedAnalyticsCalculator {
 
     // Calculate total spent during streak
     const streakReceipts = validReceipts.filter((r) => {
-      const date = getLocalDateKey(r.orderDate!, timezone);
+      const date = getLocalDateKey(r.orderDate!, r.timezone ?? timezone);
       if (!date) return false;
       return date >= startDate && date <= endDate;
     });
-    const totalSpent = streakReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
 
     return {
       days: longestStreak,
       startDate,
       endDate,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
-      message: `${longestStreak} days straight without cooking`,
+      ...wrappedSpending(streakReceipts),
+      message: usesOrderEventMetrics(receipts)
+        ? `${longestStreak} consecutive days with completed deliveries`
+        : `${longestStreak} days straight without cooking`,
     };
   }
 
   /**
    * Calculate Single Item Orders
-   * Orders with 1-2 items under $20, excluding receipts with Unknown items
+   * Orders with one standalone menu item under $20. A meal remains a
+   * composite order even when the provider exports it as one purchased line.
    */
   private async calculateSingleItemOrders(
     receipts: ReceiptForAnalytics[],
@@ -358,20 +543,32 @@ export class WrappedAnalyticsCalculator {
       const hasUnknownItems = r.items.some(
         (item) => item.name.toLowerCase() === 'unknown' || item.name.trim() === '' || !item.name,
       );
-      return r.items.length > 0 && itemCount === 1 && r.amountSpent < 20 && !hasUnknownItems;
+      const hasCompositeItem = r.items.some(isCompositeMenuItem);
+      const amount = wrappedNetAmount(r);
+      return (
+        (!usesOrderEventMetrics(receipts) ||
+          normalizeRestaurant(r.restaurantName ?? undefined)?.merchantClass === 'restaurant') &&
+        r.items.length > 0 &&
+        itemCount === 1 &&
+        amount !== null &&
+        amount < 20 &&
+        !hasUnknownItems &&
+        !hasCompositeItem
+      );
     });
 
     if (singleOrders.length === 0) return undefined;
 
-    const totalSpent = singleOrders.reduce((sum, r) => sum + r.amountSpent, 0);
+    const costs = wrappedSpending(singleOrders);
+    const totalSpent = costs.totalSpent!; // The caller supplies one known currency.
     const averageAmount = totalSpent / singleOrders.length;
 
     // Find most common single item (excluding "Unknown")
     const itemCounts = new Map<string, number>();
-    singleOrders.forEach((r) => {
-      r.items.forEach((item) => {
+    singleOrders.forEach((receipt) => {
+      receipt.items.forEach((item) => {
         // Skip Unknown/invalid items when counting (case-insensitive)
-        const itemName = item.name?.trim();
+        const itemName = singleItemDisplayName(receipt, item);
         if (itemName && itemName.toLowerCase() !== 'unknown') {
           const count = itemCounts.get(itemName) || 0;
           itemCounts.set(itemName, count + item.quantity);
@@ -384,18 +581,22 @@ export class WrappedAnalyticsCalculator {
 
     let mostCommon = 'Various items';
     let maxCount = 0;
-    itemCounts.forEach((count, item) => {
-      if (count > maxCount) {
-        maxCount = count;
-        mostCommon = `${item} (${count} times)`;
-      }
-    });
+    [...itemCounts]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([item, count]) => {
+        if (count > maxCount) {
+          maxCount = count;
+          mostCommon = `${item} (${count} times)`;
+        }
+      });
 
     return {
       count: singleOrders.length,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
+      ...costs,
       averageAmount: parseFloat(averageAmount.toFixed(2)),
-      message: `${singleOrders.length} times you couldn't just go get it`,
+      message: usesOrderEventMetrics(receipts)
+        ? 'Single-item restaurant deliveries with a recorded net cost under 20 in the displayed currency, after refunds'
+        : `${singleOrders.length} times you couldn't just go get it`,
       mostCommon,
     };
   }
@@ -432,20 +633,23 @@ export class WrappedAnalyticsCalculator {
       'Booster Juice',
     ];
 
-    const chainCounts = new Map<string, { count: number; spent: number }>();
+    const eventMetrics = usesOrderEventMetrics(receipts);
+    const chainCounts = new Map<string, ReceiptForAnalytics[]>();
 
     receipts.forEach((r) => {
       if (!r.restaurantName) return;
 
+      const restaurant = normalizeRestaurant(r.restaurantName);
       const chain = majorChains.find((c) =>
-        r.restaurantName!.toLowerCase().includes(c.toLowerCase()),
+        eventMetrics
+          ? restaurant?.key === normalizeRestaurant(c)?.key
+          : r.restaurantName!.toLowerCase().includes(c.toLowerCase()),
       );
 
       if (chain) {
-        const data = chainCounts.get(chain) || { count: 0, spent: 0 };
-        data.count++;
-        data.spent += r.amountSpent;
-        chainCounts.set(chain, data);
+        const group = chainCounts.get(chain) ?? [];
+        group.push(r);
+        chainCounts.set(chain, group);
       }
     });
 
@@ -453,12 +657,22 @@ export class WrappedAnalyticsCalculator {
 
     // Sort by count
     const sortedChains = Array.from(chainCounts.entries())
-      .map(([name, data]) => ({
-        name,
-        count: data.count,
-        spent: parseFloat(data.spent.toFixed(2)),
-      }))
-      .sort((a, b) => b.count - a.count || b.spent - a.spent || a.name.localeCompare(b.name));
+      .map(([name, group]) => {
+        const costs = wrappedSpending(group);
+        return {
+          name,
+          count: group.length,
+          spent: costs.totalSpent,
+          ...(costs.spending ? { spending: costs.spending } : {}),
+        };
+      })
+      // Frequency ties cannot be broken by incomparable or missing money.
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          (eventMetrics ? 0 : (b.spent ?? 0) - (a.spent ?? 0)) ||
+          a.name.localeCompare(b.name),
+      );
 
     const worstOffender = sortedChains[0];
     const percentage = Math.round((worstOffender.count / receipts.length) * 100);
@@ -467,8 +681,9 @@ export class WrappedAnalyticsCalculator {
       worstOffender: worstOffender.name,
       orderCount: worstOffender.count,
       totalSpent: worstOffender.spent,
+      ...(worstOffender.spending ? { spending: worstOffender.spending } : {}),
       percentage,
-      message: `${percentage}% of your orders were ${worstOffender.name}`,
+      message: `${percentage}% of your ${eventMetrics ? 'completed deliveries' : 'orders'} were ${worstOffender.name}`,
       allChains: sortedChains,
     };
   }
@@ -482,19 +697,30 @@ export class WrappedAnalyticsCalculator {
   ): Promise<MostExpensiveOrder | undefined> {
     if (receipts.length === 0) return undefined;
 
-    const mostExpensive = receipts.reduce(
-      (max, r) => (r.amountSpent > max.amountSpent ? r : max),
-      receipts[0],
-    );
+    const mostExpensive = receipts.reduce((max, r) => {
+      const difference = wrappedNetAmount(r)! - wrappedNetAmount(max)!;
+      return difference > 0 || (difference === 0 && compareReceiptTie(r, max) < 0) ? r : max;
+    }, receipts[0]);
 
     return {
-      amount: mostExpensive.amountSpent,
+      amount: wrappedNetAmount(mostExpensive)!,
+      ...(usesOrderEventMetrics(receipts)
+        ? {
+            currencyCode: currencyOf(mostExpensive),
+            includesEstimates: receipts.some((r) => orderMetricEligibility(r).estimatedAmount),
+          }
+        : {}),
       restaurant: mostExpensive.restaurantName || 'Unknown',
       date: mostExpensive.orderDate
-        ? getLocalDateKey(mostExpensive.orderDate, timezone) || 'Unknown'
+        ? getLocalDateKey(mostExpensive.orderDate, mostExpensive.timezone ?? timezone) || 'Unknown'
         : 'Unknown',
-      items: mostExpensive.items.map((i) => ({ name: i.name, price: i.price })),
-      message: `You once spent $${mostExpensive.amountSpent.toFixed(2)} on a single order`,
+      items: mostExpensive.items.map((item) => ({
+        name: item.name,
+        price: usableItemUnitPrice(item, mostExpensive) ?? 0,
+      })),
+      message: usesOrderEventMetrics(receipts)
+        ? `Highest net cost among your completed deliveries in ${currencyOf(mostExpensive)}`
+        : `You once spent $${mostExpensive.amountSpent.toFixed(2)} on a single order`,
     };
   }
 
@@ -504,56 +730,64 @@ export class WrappedAnalyticsCalculator {
   private async calculateCoffeeAddiction(
     receipts: ReceiptForAnalytics[],
   ): Promise<CoffeeAddiction | undefined> {
-    const coffeeTerms = [
-      'coffee',
-      'latte',
-      'espresso',
-      'cappuccino',
-      'americano',
-      'mocha',
-      'frappe',
-      'cold brew',
-      'macchiato',
-      'iced capp',
-    ];
-
-    const coffeeOrders = receipts.filter((r) =>
-      r.items.some((item) => coffeeTerms.some((term) => item.name.toLowerCase().includes(term))),
+    const eventMetrics = usesOrderEventMetrics(receipts);
+    const coffeeOrders = receipts.filter(
+      (r) =>
+        (!eventMetrics ||
+          normalizeRestaurant(r.restaurantName ?? undefined)?.merchantClass === 'restaurant') &&
+        r.items.some((item) => classifyItemPersonality(item.name.toLowerCase()) === 'coffee'),
     );
 
     if (coffeeOrders.length === 0) return undefined;
 
     let totalSpent = 0;
-    let totalCoffeeItems = 0;
+    let pricedCoffeeItems = 0;
 
     // Find most ordered coffee drink
     const coffeeCounts = new Map<string, number>();
     coffeeOrders.forEach((r) => {
       r.items.forEach((item) => {
-        if (coffeeTerms.some((term) => item.name.toLowerCase().includes(term))) {
+        if (classifyItemPersonality(item.name.toLowerCase()) === 'coffee') {
           const count = coffeeCounts.get(item.name) || 0;
           coffeeCounts.set(item.name, count + item.quantity);
-          totalCoffeeItems += item.quantity;
-          totalSpent += item.price * item.quantity;
+          if (!eventMetrics) {
+            const unitPrice = usableItemUnitPrice(item, r);
+            if (unitPrice !== undefined) {
+              totalSpent += unitPrice * item.quantity;
+              pricedCoffeeItems += item.quantity;
+            }
+          }
         }
       });
     });
 
     let mostOrdered = 'Unknown';
     let maxCount = 0;
-    coffeeCounts.forEach((count, item) => {
-      if (count > maxCount) {
-        maxCount = count;
-        mostOrdered = `${item} (${count} times)`;
-      }
-    });
+    [...coffeeCounts]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([item, count]) => {
+        if (count > maxCount) {
+          maxCount = count;
+          mostOrdered = `${item} (${count} times)`;
+        }
+      });
 
     return {
       orderCount: coffeeOrders.length,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
-      averagePrice: parseFloat((totalSpent / Math.max(1, totalCoffeeItems)).toFixed(2)),
+      totalSpent: eventMetrics ? null : parseFloat(totalSpent.toFixed(2)),
+      averagePrice: eventMetrics
+        ? null
+        : pricedCoffeeItems > 0 ? parseFloat((totalSpent / pricedCoffeeItems).toFixed(2)) : null,
       mostOrdered,
-      message: `You spent $${totalSpent.toFixed(2)} on coffee items`,
+      message: eventMetrics
+        ? `${coffeeOrders.length} completed restaurant deliveries included coffee items`
+        : `You spent $${totalSpent.toFixed(2)} on coffee items`,
+      ...(eventMetrics
+        ? {
+            disclaimer:
+              'Items ordered, not verified consumption. Discounts, fees and refunds cannot be allocated to coffee alone.',
+          }
+        : {}),
     };
   }
 
@@ -568,29 +802,31 @@ export class WrappedAnalyticsCalculator {
     if (validReceipts.length === 0) return undefined;
 
     const nightOrders = validReceipts.filter((r) => {
-      const hour = getLocalHour(r.orderDate!, timezone);
+      const hour = getLocalHour(r.orderDate!, r.timezone ?? timezone);
       return isLateNightHour(hour);
     });
     if (nightOrders.length === 0) return undefined;
 
-    const totalSpent = nightOrders.reduce((sum, r) => sum + r.amountSpent, 0);
     const percentage = Math.round((nightOrders.length / validReceipts.length) * 100);
 
     // Find latest order (by hour in user's timezone)
     const latest = nightOrders.reduce((latest, r) => {
-      const rMinute = getLocalMinuteOfDay(r.orderDate!, timezone) ?? -1;
-      const latestMinute = getLocalMinuteOfDay(latest.orderDate!, timezone) ?? -1;
-      return rMinute > latestMinute ? r : latest;
+      const rMinute = getLocalMinuteOfDay(r.orderDate!, r.timezone ?? timezone) ?? -1;
+      const latestMinute =
+        getLocalMinuteOfDay(latest.orderDate!, latest.timezone ?? timezone) ?? -1;
+      const difference = overnightMinute(rMinute) - overnightMinute(latestMinute);
+      return difference > 0 || (difference === 0 && compareReceiptTie(r, latest) < 0) ? r : latest;
     }, nightOrders[0]);
 
-    const formatLocalTime = (date: Date) => formatTimeInTimezone(date, timezone) || 'Unknown';
+    const formatLocalTime = (date: Date, eventTimezone = timezone) =>
+      formatTimeInTimezone(date, eventTimezone) || 'Unknown';
 
     return {
       percentage,
       count: nightOrders.length,
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
-      latestOrder: formatLocalTime(latest.orderDate!),
-      message: `${percentage}% of your orders were after 10pm`,
+      ...wrappedSpending(nightOrders),
+      latestOrder: formatLocalTime(latest.orderDate!, latest.timezone ?? timezone),
+      message: `${percentage}% of your orders were between 10pm and 4am`,
     };
   }
 
@@ -601,6 +837,7 @@ export class WrappedAnalyticsCalculator {
   private async calculateSpentThisYear(
     receipts: ReceiptForAnalytics[],
     timezone: string,
+    eventMetrics = usesOrderEventMetrics(receipts),
   ): Promise<SpentThisYear | undefined> {
     // Get current year in user's timezone
     const now = new Date();
@@ -609,22 +846,24 @@ export class WrappedAnalyticsCalculator {
     // Filter receipts from current year (comparing UTC dates, but year is determined by local timezone)
     const thisYearReceipts = receipts.filter((r) => {
       if (!r.orderDate) return false;
-      const receiptYear = getLocalYear(r.orderDate, timezone);
+      const receiptYear = getLocalYear(r.orderDate, r.timezone ?? timezone);
       return receiptYear === currentYear;
     });
 
     if (thisYearReceipts.length === 0) return undefined;
 
-    const totalSpent = thisYearReceipts.reduce((sum, r) => sum + r.amountSpent, 0);
+    const costs = wrappedSpending(thisYearReceipts, eventMetrics);
     const orderCount = thisYearReceipts.length;
-    const averagePerOrder = totalSpent / orderCount;
 
     return {
-      totalSpent: parseFloat(totalSpent.toFixed(2)),
+      ...costs,
       year: currentYear,
       orderCount,
-      averagePerOrder: parseFloat(averagePerOrder.toFixed(2)),
-      message: `You've spent $${totalSpent.toFixed(2)} on delivery this year`,
+      averagePerOrder:
+        costs.totalSpent === null ? null : Number((costs.totalSpent / orderCount).toFixed(2)),
+      message: eventMetrics
+        ? `Net costs for ${orderCount} established order attempts this year, including charged cancellations and wallet payments`
+        : `You've spent $${costs.totalSpent!.toFixed(2)} on delivery this year`,
     };
   }
 
@@ -651,6 +890,7 @@ export class WrappedAnalyticsCalculator {
     timezone: string,
   ): Promise<MissedInvestment | undefined> {
     const validReceipts = receipts
+      .map((r) => ({ ...r, amountSpent: wrappedNetAmount(r) ?? NaN }))
       .filter((r) => r.orderDate && Number.isFinite(r.amountSpent) && r.amountSpent > 0)
       .sort((a, b) => a.orderDate!.getTime() - b.orderDate!.getTime());
 
@@ -677,7 +917,7 @@ export class WrappedAnalyticsCalculator {
     return {
       amountSpent: parseFloat(totalSpent.toFixed(2)),
       firstOrderDate:
-        getLocalDateKey(firstOrder.orderDate!, timezone) ||
+        getLocalDateKey(firstOrder.orderDate!, firstOrder.timezone ?? timezone) ||
         firstOrder.orderDate!.toISOString().split('T')[0],
       daysElapsed,
       sp500Return,
@@ -702,22 +942,42 @@ export class WrappedAnalyticsCalculator {
 
   private async calculateDeliveryFeeTrend(
     receipts: ReceiptForAnalytics[],
+    timezone = 'UTC',
   ): Promise<DeliveryFeeTrend | undefined> {
+    const eventMetrics = usesOrderEventMetrics(receipts);
     const qualifying = receipts
-      .filter((receipt): receipt is ReceiptForAnalytics & {
-        orderDate: Date;
-        currencyCode: string;
-        deliveryFee: number;
-        serviceFee: number;
-      } => Boolean(
-        receipt.orderDate &&
-        receipt.currencyCode &&
-        receipt.currencyCode !== 'UNKNOWN' &&
-        Number.isFinite(receipt.deliveryFee) &&
-        Number.isFinite(receipt.serviceFee) &&
-        receipt.deliveryFee! >= 0 &&
-        receipt.serviceFee! >= 0,
-      ))
+      .filter((receipt) => {
+        if (!eventMetrics) return true;
+        const outcome = receipt.resolution?.orderOutcome;
+        // A basket refund does not establish which fee was refunded. Only use
+        // unadjusted completed orders with a confirmed original/net balance.
+        return (
+          orderMetricEligibility(receipt).delivered &&
+          outcome?.financialConfidence === 'confirmed' &&
+          outcome.refundStatus === 'none_established' &&
+          outcome.originalCharge !== null &&
+          outcome.originalCharge === outcome.netAmount
+        );
+      })
+      .filter(
+        (
+          receipt,
+        ): receipt is ReceiptForAnalytics & {
+          orderDate: Date;
+          currencyCode: string;
+          deliveryFee: number;
+          serviceFee: number;
+        } =>
+          Boolean(
+            receipt.orderDate &&
+            receipt.currencyCode &&
+            receipt.currencyCode !== 'UNKNOWN' &&
+            Number.isFinite(receipt.deliveryFee) &&
+            Number.isFinite(receipt.serviceFee) &&
+            receipt.deliveryFee! >= 0 &&
+            receipt.serviceFee! >= 0,
+          ),
+      )
       .sort((left, right) => left.orderDate.getTime() - right.orderDate.getTime());
     if (qualifying.length < 6) return undefined;
     const currencies = new Set(qualifying.map((receipt) => receipt.currencyCode));
@@ -728,15 +988,21 @@ export class WrappedAnalyticsCalculator {
 
     const groups = new Map<string, typeof qualifying>();
     for (const receipt of qualifying) {
-      const quarter = `${receipt.orderDate.getUTCFullYear()}-Q${Math.floor(receipt.orderDate.getUTCMonth() / 3) + 1}`;
+      const day = getLocalDateKey(
+        receipt.orderDate,
+        receipt.resolution?.timestamp?.timezone ?? receipt.timezone ?? timezone,
+      )!;
+      const quarter = `${day.slice(0, 4)}-Q${Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1}`;
       groups.set(quarter, [...(groups.get(quarter) ?? []), receipt]);
     }
     const series: FeePeriod[] = [...groups.entries()]
       .filter(([, values]) => values.length >= 3)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([quarter, values]) => {
-        const averageDeliveryFee = values.reduce((sum, receipt) => sum + receipt.deliveryFee, 0) / values.length;
-        const averageServiceFee = values.reduce((sum, receipt) => sum + receipt.serviceFee, 0) / values.length;
+        const averageDeliveryFee =
+          values.reduce((sum, receipt) => sum + receipt.deliveryFee, 0) / values.length;
+        const averageServiceFee =
+          values.reduce((sum, receipt) => sum + receipt.serviceFee, 0) / values.length;
         return {
           quarter,
           orderCount: values.length,
@@ -746,9 +1012,14 @@ export class WrappedAnalyticsCalculator {
         };
       });
     if (series.length < 2) return undefined;
+    const included = [...groups.values()]
+      .filter((values) => values.length >= 3)
+      .flat()
+      .sort((a, b) => a.orderDate.getTime() - b.orderDate.getTime());
     const earliestPeriod = series[0];
     const latestPeriod = series[series.length - 1];
-    if (earliestPeriod.averageDeliveryFee <= 0 || earliestPeriod.averageCompanyFees <= 0) return undefined;
+    if (earliestPeriod.averageDeliveryFee <= 0 || earliestPeriod.averageCompanyFees <= 0)
+      return undefined;
     const percentChange = (latest: number, earliest: number): number =>
       Number((((latest - earliest) / earliest) * 100).toFixed(1));
     const deliveryFeeChangePercent = percentChange(
@@ -759,16 +1030,18 @@ export class WrappedAnalyticsCalculator {
       latestPeriod.averageCompanyFees,
       earliestPeriod.averageCompanyFees,
     );
-    const trend = companyFeeChangePercent > 2
-      ? 'increased'
-      : companyFeeChangePercent < -2
-        ? 'decreased'
-        : 'flat';
+    const trend =
+      companyFeeChangePercent > 2
+        ? 'increased'
+        : companyFeeChangePercent < -2
+          ? 'decreased'
+          : 'flat';
     return {
       currency: qualifying[0].currencyCode,
-      coveredOrderCount: qualifying.length,
-      coverageStart: firstOrder.toISOString(),
-      coverageEnd: lastOrder.toISOString(),
+      ...(eventMetrics ? { basis: 'unadjusted_deliveries' as const } : {}),
+      coveredOrderCount: included.length,
+      coverageStart: included[0].orderDate.toISOString(),
+      coverageEnd: included[included.length - 1].orderDate.toISOString(),
       earliestPeriod,
       latestPeriod,
       deliveryFeeChangePercent,
@@ -791,7 +1064,7 @@ export class WrappedAnalyticsCalculator {
     // Group by hour in user's local timezone
     const hourCounts = new Map<number, number>();
     validReceipts.forEach((r) => {
-      const hour = getLocalHour(r.orderDate!, timezone);
+      const hour = getLocalHour(r.orderDate!, r.timezone ?? timezone);
       if (hour !== null) {
         hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
       }
@@ -801,7 +1074,7 @@ export class WrappedAnalyticsCalculator {
     let peakHour = 0;
     let maxCount = 0;
     hourCounts.forEach((count, hour) => {
-      if (count > maxCount) {
+      if (count > maxCount || (count === maxCount && hour < peakHour)) {
         maxCount = count;
         peakHour = hour;
       }
@@ -814,7 +1087,9 @@ export class WrappedAnalyticsCalculator {
       hourDisplay: this.formatHour(peakHour),
       orderCount: maxCount,
       percentageOfTotal: percentage,
-      message: `You're hungriest at ${this.formatHour(peakHour)}`,
+      message: usesOrderEventMetrics(receipts)
+        ? `Your most common placement hour for completed deliveries is ${this.formatHour(peakHour)}`
+        : `You're hungriest at ${this.formatHour(peakHour)}`,
     };
   }
 
@@ -866,12 +1141,20 @@ export class WrappedAnalyticsCalculator {
 
     // Find longest wait
     const longestWait = waitTimes.reduce((longest, current) =>
-      current.minutes > longest.minutes ? current : longest,
+      current.minutes > longest.minutes ||
+      (current.minutes === longest.minutes &&
+        compareReceiptTie(current.receipt, longest.receipt) < 0)
+        ? current
+        : longest,
     );
 
     // Find fastest delivery
     const fastestDelivery = waitTimes.reduce((fastest, current) =>
-      current.minutes < fastest.minutes ? current : fastest,
+      current.minutes < fastest.minutes ||
+      (current.minutes === fastest.minutes &&
+        compareReceiptTie(current.receipt, fastest.receipt) < 0)
+        ? current
+        : fastest,
     );
 
     return {
@@ -881,8 +1164,13 @@ export class WrappedAnalyticsCalculator {
       longestWait: {
         minutes: longestWait.minutes,
         restaurant: longestWait.receipt.restaurantName || 'Unknown',
-        amount: longestWait.receipt.amountSpent,
-        message: `Your longest wait was ${longestWait.minutes} minutes for ${longestWait.receipt.restaurantName || 'Unknown'}`,
+        amount: wrappedNetAmount(longestWait.receipt),
+        ...(usesOrderEventMetrics(receipts)
+          ? { currencyCode: currencyOf(longestWait.receipt) }
+          : {}),
+        message: usesOrderEventMetrics(receipts)
+          ? `Longest recorded placement-to-delivery interval: ${longestWait.minutes} minutes at ${longestWait.receipt.restaurantName || 'Unknown'}`
+          : `Your longest wait was ${longestWait.minutes} minutes for ${longestWait.receipt.restaurantName || 'Unknown'}`,
       },
       fastestDelivery: {
         minutes: fastestDelivery.minutes,
@@ -901,13 +1189,37 @@ export class WrappedAnalyticsCalculator {
     const validReceipts = receipts.filter((r) => r.orderDate);
     if (validReceipts.length === 0) return undefined;
 
+    if (usesOrderEventMetrics(receipts)) {
+      const isWeekend = (receipt: ReceiptForAnalytics) => {
+        const day = getLocalDay(receipt.orderDate!, receipt.timezone ?? timezone);
+        return day === 0 || day === 6;
+      };
+      const weekend = validReceipts.filter(isWeekend);
+      const weekday = validReceipts.filter((r) => !isWeekend(r));
+      const weekendCosts = wrappedSpending(weekend, true);
+      const weekdayCosts = wrappedSpending(weekday, true);
+      const ratio = weekday.length > 0 ? weekend.length / 2 / (weekday.length / 5) : null;
+      return {
+        weekendOrders: weekend.length,
+        weekdayOrders: weekday.length,
+        weekendSpending: weekendCosts.totalSpent,
+        weekdaySpending: weekdayCosts.totalSpent,
+        weekendCosts: weekendCosts.spending,
+        weekdayCosts: weekdayCosts.spending,
+        ratio: ratio === null ? null : Number(ratio.toFixed(2)),
+        ratioBasis: 'deliveries_per_day',
+        message:
+          'Completed deliveries, normalized across two weekend days and five weekdays. Imported history may not cover every day.',
+      };
+    }
+
     let weekendOrders = 0;
     let weekdayOrders = 0;
     let weekendSpending = 0;
     let weekdaySpending = 0;
 
     validReceipts.forEach((r) => {
-      const day = getLocalDay(r.orderDate!, timezone);
+      const day = getLocalDay(r.orderDate!, r.timezone ?? timezone);
       if (day === null) return;
       const isWeekend = day === 0 || day === 6; // Sunday or Saturday
 
@@ -984,21 +1296,70 @@ export class WrappedAnalyticsService {
     private readonly calculator: WrappedAnalyticsCalculator = new WrappedAnalyticsCalculator(),
   ) {}
 
-  async calculateWrappedAnalytics(userId: string): Promise<WrappedAnalytics> {
-    const [timezone, receipts, percentiles] = await Promise.all([
-      this.queries.getUserTimezone(userId),
-      this.queries.getUserReceipts(userId),
-      this.calculatePercentiles(userId),
-    ]);
-    return this.calculator.calculate(receipts, timezone, percentiles);
+  async calculateWrappedAnalytics(
+    userId: string,
+    snapshot?: WrappedReceiptSnapshot,
+  ): Promise<WrappedAnalytics> {
+    if (snapshot?.receipts.some((receipt) => receipt.userId !== userId))
+      throw new Error('Analytics snapshot belongs to another account');
+    const [timezone, receipts] = snapshot
+      ? [snapshot.timezone, snapshot.receipts.map(projectReceiptForAnalytics)]
+      : await Promise.all([
+          this.queries.getUserTimezone(userId),
+          this.queries.getUserReceipts(userId),
+        ]);
+    const target = usesOrderEventMetrics(receipts)
+      ? buildOrderComparisonProfile(receipts, timezone)
+      : undefined;
+    const percentiles = await this.calculatePercentiles(userId, target);
+    const result = await this.calculator.calculate(receipts, timezone, percentiles, snapshot?.market);
+    const coverage = await this.queries.getRecapCoverage?.(userId) ?? [];
+    result.recap = buildRecapStories(receipts, timezone, snapshot?.displayCurrency ?? 'CAD', snapshot?.rates ?? { id: 'unavailable', date: '', rates: {} }, result, coverage);
+    return result;
   }
 
-  private async calculatePercentiles(userId: string): Promise<WrappedPercentiles | undefined> {
+  private async calculatePercentiles(
+    userId: string,
+    target?: OrderComparisonProfile,
+  ): Promise<WrappedPercentiles | undefined> {
     try {
       const row = await this.queries.getPercentileRanks(
         userId,
         WrappedAnalyticsService.PERCENTILE_MIN_RECEIPTS,
+        target,
       );
+      if (row?.policyVersion === 3) {
+        const standing = (rank: OrderComparisonRank | null): PercentileStanding | undefined => {
+          if (!rank || rank.sampleSize < WrappedAnalyticsService.PERCENTILE_MIN_SAMPLE)
+            return undefined;
+          const percentile = Math.floor((rank.lowerCount * 100) / rank.sampleSize);
+          return { percentile, topPercent: 100 - percentile, sampleSize: rank.sampleSize };
+        };
+        const totalSpent = standing(row.totalSpent),
+          orderCount = standing(row.orderCount),
+          nightOwl = standing(row.nightOwl);
+        const sizes = [totalSpent, orderCount, nightOwl].flatMap((value) =>
+          value?.sampleSize === undefined ? [] : [value.sampleSize],
+        );
+        if (!sizes.length) return undefined;
+        const measures = [
+          totalSpent ? `net order costs in ${row.currencyCode}` : undefined,
+          orderCount ? 'completed deliveries' : undefined,
+          nightOwl ? 'late-night share among explicitly timed deliveries' : undefined,
+        ]
+          .filter(Boolean)
+          .join('; ');
+        return {
+          policyVersion: 3,
+          sampleSize: Math.max(...sizes),
+          currencyCode: row.currencyCode,
+          totalSpent,
+          orderCount,
+          nightOwl,
+          methodology:
+            `Separate groups of accounts with at least 3 comparable records and at least 100 accounts per comparison: ${measures}. Imported history is not necessarily complete. ${totalSpent && row.estimatedNetCost ? 'Net-cost comparisons include recorded/export estimates.' : ''}`.trim(),
+        };
+      }
       if (!row || row.sampleSize < WrappedAnalyticsService.PERCENTILE_MIN_SAMPLE) {
         return undefined;
       }

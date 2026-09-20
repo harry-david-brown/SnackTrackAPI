@@ -7,12 +7,41 @@
 import { EmailClassification, ExtractorConfig, DEFAULT_EXTRACTOR_CONFIG } from './types';
 import { HtmlTextExtractor } from './HtmlTextExtractor';
 import { isDoorDashReceiptEmail } from './DoorDashReceiptParser';
+import { extractEmailOrderEvidence } from './ReceiptOrderEvidenceExtractor';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
+
+export function orderAdjustmentProvider(
+  from: string,
+  text: string,
+): 'uber_eats' | 'doordash' | undefined {
+  const address = (from.match(/<([^<>]+)>/)?.[1] ?? from).trim();
+  const domain = address.match(/^[^\s<>@]+@([a-z\d.-]+)$/i)?.[1]?.toLowerCase();
+  const provider =
+    domain && /(?:^|\.)doordash\.com$/.test(domain)
+      ? 'doordash'
+      : domain && /(?:^|\.)(?:uber\.com|ubereats\.com)$/.test(domain)
+        ? 'uber_eats'
+        : undefined;
+  if (!provider || !/\border\b/i.test(text)) return undefined;
+  const evidence = extractEmailOrderEvidence({ text, total: null });
+  return evidence.documentKind === 'cancellation' ||
+    (['refund', 'updated'].includes(evidence.documentKind) &&
+      (evidence.recordedTotal !== null ||
+        evidence.refundConfirmed === true ||
+        evidence.refundAmount !== undefined ||
+        evidence.payments.length > 0))
+    ? provider
+    : undefined;
+}
 
 export class ReceiptClassifier {
   private config: ExtractorConfig;
   private textExtractor: HtmlTextExtractor;
 
-  constructor(config: Partial<ExtractorConfig> = {}) {
+  constructor(
+    config: Partial<ExtractorConfig> = {},
+    private readonly policyVersion: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
+  ) {
     this.config = { ...DEFAULT_EXTRACTOR_CONFIG, ...config };
     this.textExtractor = new HtmlTextExtractor(this.config);
   }
@@ -26,6 +55,17 @@ export class ReceiptClassifier {
     const coreText = this.textExtractor.extractCoreText(htmlBody);
     const subjectLower = (subject || '').toLowerCase();
     const combinedText = `${subjectLower} ${coreText}`;
+
+    if (this.policyVersion === 3 && orderAdjustmentProvider(from, plainText)) {
+      return {
+        isReceipt: true,
+        confidence: 0.99,
+        reason:
+          'Supported provider order adjustment with explicit financial or cancellation evidence',
+        matchedKeywords: ['order adjustment'],
+        tableWordHits: 0,
+      };
+    }
 
     if (isDoorDashReceiptEmail({ from, subject: subject || '', text: plainText })) {
       const matchedKeywords = ['doordash order confirmation', 'your receipt'];

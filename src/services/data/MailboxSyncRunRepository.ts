@@ -1,6 +1,7 @@
 import type { SyncRunCounts } from '../import/ImportLifecycleTypes';
 import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
 import { databaseRow, databaseString } from './DatabaseRowDecoder';
+import { ConflictError } from '../../core/errors';
 
 /** Persists Microsoft mailbox import attempts and their provider baseline. */
 export class MailboxSyncRunRepository {
@@ -19,17 +20,25 @@ export class MailboxSyncRunRepository {
     });
   }
 
-  async startSyncRun(userId: string, trigger: 'manual' | 'background'): Promise<string> {
+  async startSyncRun(userId: string, trigger: 'manual' | 'background', importJobId?: string): Promise<string> {
     await this.database.query(
       `INSERT INTO mailbox_import_states (user_id, provider)
        VALUES ($1, 'microsoft') ON CONFLICT (user_id, provider) DO NOTHING`,
       [userId],
     );
-    const result = await this.database.query(
+    const result = importJobId ? await this.database.query(
+      `INSERT INTO mailbox_sync_runs(user_id,provider,trigger_type,import_job_id)
+       SELECT j.user_id,'microsoft',$2,j.id FROM import_jobs j JOIN users u ON u.id=j.user_id
+       WHERE j.id=$3 AND j.user_id=$1 AND j.import_generation=u.import_generation AND j.status IN ('running','retrying')
+       ON CONFLICT(user_id,provider,import_job_id) WHERE import_job_id IS NOT NULL
+       DO UPDATE SET outcome='running',error_code=NULL,completed_at=NULL RETURNING id`,
+      [userId, trigger, importJobId],
+    ) : await this.database.query(
       `INSERT INTO mailbox_sync_runs (user_id, provider, trigger_type)
        VALUES ($1, 'microsoft', $2) RETURNING id`,
       [userId, trigger],
     );
+    if (!result.rows.length) throw new ConflictError('IMPORT_OUTCOME_STALE', 'Import no longer belongs to an active account generation');
     await this.database.query(
       trigger === 'manual'
         ? `UPDATE mailbox_import_states
@@ -75,6 +84,10 @@ export class MailboxSyncRunRepository {
           counts.decodedBytesExamined,
           userId,
         ],
+      );
+      if (counts.receiptOutcome) await transaction.query(
+        "UPDATE mailbox_sync_runs SET receipt_outcome=$3::jsonb WHERE id=$1 AND user_id=$2 AND provider='microsoft'",
+        [runId, userId, JSON.stringify(counts.receiptOutcome)],
       );
       if (trigger === 'manual') {
         await transaction.query(

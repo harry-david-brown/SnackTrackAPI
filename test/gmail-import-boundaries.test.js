@@ -69,22 +69,22 @@ test('incremental cursor uses the earliest export cutoff with a reread window', 
   assert.equal(after.toISOString(), '2026-08-08T00:00:00.000Z');
 });
 
-test('receipt deduplication is pure and keeps the highest-total update', () => {
+test('receipt deduplication preserves revisions and ambiguous same-minute purchases', () => {
   const original = receipt({ amount: 20, externalId: 'order-1' });
   const tipUpdate = receipt({ amount: 25, externalId: 'order-1' });
   const fallbackDuplicate = receipt({ amount: 10 });
   const fallbackUpdate = receipt({ amount: 12 });
 
   const result = deduplicateReceipts([original, tipUpdate, fallbackDuplicate, fallbackUpdate]);
-  assert.equal(result.receipts.length, 2);
+  assert.equal(result.receipts.length, 4);
   assert.deepEqual(
     result.receipts.map((value) => value.amountSpent).sort((left, right) => left - right),
-    [12, 25],
+    [10, 12, 20, 25],
   );
-  assert.equal(result.duplicatesFound, 2);
-  assert.equal(result.higherAmountReplacements, 2);
+  assert.equal(result.duplicatesFound, 0);
+  assert.equal(result.higherAmountReplacements, 0);
   assert.equal(result.totalBeforeDeduplication, 67);
-  assert.equal(result.totalAfterDeduplication, 37);
+  assert.equal(result.totalAfterDeduplication, 42);
 });
 
 test('Gmail lifecycle adapter owns sync transitions and reconnect persistence ordering', async () => {
@@ -102,11 +102,11 @@ test('Gmail lifecycle adapter owns sync transitions and reconnect persistence or
     { markGmailReconnectRequired: async (userId) => calls.push(['connection', userId]) },
   );
 
-  assert.equal(await service.start('user-1', 'manual'), 'run-1');
+  assert.equal(await service.start('user-1', 'manual', 'job-1'), 'run-1');
   await service.fail('run-1', 'user-1', 'GMAIL_SYNC_FAILED', 'manual');
   await service.markReconnectRequired('user-1');
   assert.deepEqual(calls, [
-    ['start', 'user-1', 'manual'],
+    ['start', 'user-1', 'manual', 'job-1'],
     ['fail', 'run-1', 'user-1', 'GMAIL_SYNC_FAILED', 'manual'],
     ['connection', 'user-1'],
     ['tracking', 'user-1'],

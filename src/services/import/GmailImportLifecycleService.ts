@@ -13,8 +13,8 @@ export class GmailImportLifecycleService {
     private readonly users: Users,
   ) {}
 
-  start(userId: string, trigger: 'manual' | 'background'): Promise<string> {
-    return this.syncRuns.startSyncRun(userId, trigger);
+  start(userId: string, trigger: 'manual' | 'background', importJobId?: string): Promise<string> {
+    return this.syncRuns.startSyncRun(userId, trigger, importJobId);
   }
 
   complete(

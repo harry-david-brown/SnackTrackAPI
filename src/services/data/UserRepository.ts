@@ -1,5 +1,6 @@
 import { User } from '../../models/User';
-import { DuplicateUserEmailError } from '../../core/errors';
+import { DatabaseError, DuplicateUserEmailError } from '../../core/errors';
+import type { UserProjectionProfile } from '../ports/ProjectionPorts';
 import { DatabaseQueryExecutor } from '../ports/DatabasePort';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -79,6 +80,21 @@ export class UserRepository {
       [id],
     );
     return result.rows[0] ? mapUser(result.rows[0]) : undefined;
+  }
+
+  async findProjectionProfileById(id: string): Promise<UserProjectionProfile | undefined> {
+    const result = await this.postgres.query(
+      `SELECT id,email,COALESCE(timezone,'America/New_York') AS timezone,
+        receipt_projection_revision::text AS receipt_projection_revision FROM users WHERE id=$1`,
+      [id],
+    );
+    if (!result.rows[0]) return undefined;
+    const row = databaseRow(result.rows[0], 'user projection profile');
+    const receiptProjectionRevision = databaseString(row, 'receipt_projection_revision');
+    if (!/^(0|[1-9]\d*)$/.test(receiptProjectionRevision) || BigInt(receiptProjectionRevision) > 9223372036854775807n)
+      throw new DatabaseError('Invalid receipt projection revision');
+    return { id: databaseUuid(row, 'id'), email: databaseString(row, 'email'),
+      timezone: databaseString(row, 'timezone'), receiptProjectionRevision };
   }
 
   async findByEmail(email: string): Promise<User | undefined> {

@@ -42,10 +42,17 @@ export class ReceiptClearService {
            WHERE user_id=$1 AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')`,
           [userId],
         );
+        await transaction.query('DELETE FROM import_receipt_staging WHERE job_id IN (SELECT id FROM import_jobs WHERE user_id=$1)', [userId]);
         const receiptResult = await transaction.query('DELETE FROM receipts WHERE user_id = $1', [
           userId,
         ]);
         deletedReceipts = receiptResult.rowCount ?? 0;
+        await transaction.query('DELETE FROM receipt_observations WHERE user_id=$1', [userId]);
+        await transaction.query('DELETE FROM receipt_repair_source_batches WHERE user_id=$1', [userId]);
+        await transaction.query('DELETE FROM receipt_association_reviews WHERE user_id=$1', [userId]);
+        await transaction.query('DELETE FROM receipt_repair_manifests WHERE user_id=$1',[userId]);
+        await transaction.query('DELETE FROM receipt_import_batches WHERE user_id=$1',[userId]);
+        await transaction.query('DELETE FROM receipt_reconciliation_lineage WHERE user_id=$1',[userId]);
         await transaction.query('DELETE FROM gmail_sync_runs WHERE user_id = $1', [userId]);
         await transaction.query('DELETE FROM user_experience_state WHERE user_id = $1', [userId]);
 

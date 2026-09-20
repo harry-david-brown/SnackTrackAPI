@@ -1,3 +1,4 @@
+require('./helpers/legacyReceiptPolicy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -549,8 +550,8 @@ test('Uber local timestamps and line-item quantity prices are parsed consistentl
   assert.equal(result.receipts[0].orderDate.toISOString(), '2025-09-16T22:30:13.000Z');
   assert.equal(result.receipts[0].items[0].price, 16.99);
   assert.deepEqual(result.receipts[0].items[0].customizations, [
-    'Creamy Garlic',
     'Blackened Ranch',
+    'Creamy Garlic',
   ]);
   assert.equal(
     Math.round((result.receipts[0].deliveryTime - result.receipts[0].orderDate) / 60000),
@@ -585,10 +586,47 @@ test('wrapped metrics use the local weekday and only count real single-item data
     {
       id: '3',
       userId: 'user-id',
-      restaurantName: 'Snack Shop',
+      restaurantName: 'Pizza Pizza',
       orderDate: new Date('2023-12-10T23:00:00.000Z'),
       amountSpent: '9.00',
-      items: [{ name: 'Cookie', quantity: 1, price: 9 }],
+      items: [{ name: 'Small', quantity: 1, price: 9 }],
+      receiptType: 'uber_eats',
+      dataSource: 'csv',
+      deliveryTime: null,
+    },
+    {
+      id: '4',
+      userId: 'user-id',
+      restaurantName: 'Breakfast Shop',
+      orderDate: new Date('2023-12-11T12:00:00.000Z'),
+      amountSpent: '11.00',
+      items: [{
+        name: 'Breakfast Special',
+        quantity: 1,
+        price: 11,
+        evidence: {
+          rawName: 'Breakfast Special',
+          configuredName: 'Breakfast Special',
+          baseLineTotal: 11,
+          configuredLineTotal: 11,
+          modifierTotal: 0,
+          method: 'complementary_modifiers',
+          sourceRows: [1, 2],
+          alternatives: [],
+          components: [{ name: 'Hash Brown', quantity: 1, role: 'side' }],
+        },
+      }],
+      receiptType: 'uber_eats',
+      dataSource: 'csv',
+      deliveryTime: null,
+    },
+    {
+      id: '5',
+      userId: 'user-id',
+      restaurantName: "McDonald's",
+      orderDate: new Date('2023-12-12T12:00:00.000Z'),
+      amountSpent: '15.00',
+      items: [{ name: 'Quarter Pounder Extra Value Meal', quantity: 1, price: 15 }],
       receiptType: 'uber_eats',
       dataSource: 'csv',
       deliveryTime: null,
@@ -608,6 +646,8 @@ test('wrapped metrics use the local weekday and only count real single-item data
   assert.equal(analytics.shame.laziestDay.date, '2023-12-10');
   assert.equal(analytics.shame.laziestDay.dayOfWeek, 'Sunday');
   assert.equal(analytics.shame.singleItemOrders.count, 1);
+  assert.equal(analytics.shame.singleItemOrders.totalSpent, 9);
+  assert.equal(analytics.shame.singleItemOrders.mostCommon, 'Small pizza (1 times)');
   assert.equal(analytics.flex.coffeeAddiction.totalSpent, 10);
   assert.equal(analytics.flex.coffeeAddiction.averagePrice, 5);
   assert.equal(analytics.comparative.couldHaveBought, undefined);
@@ -615,28 +655,7 @@ test('wrapped metrics use the local weekday and only count real single-item data
 });
 
 test('incremental Gmail upsert distinguishes new, updated, and unchanged orders', async () => {
-  const queries = [];
-  const postgres = {
-    query: async (sql, params) => {
-      queries.push({ sql, params });
-      if (sql.includes('SELECT source_identity')) {
-        return {
-          rows: [
-            {
-              source_identity: 'external:order-1',
-              amount_spent: '10.00',
-              restaurant_name: 'Test Kitchen',
-              order_date: new Date('2026-08-01T22:00:00.000Z'),
-              receipt_type: 'uber_eats',
-              items: [],
-            },
-          ],
-        };
-      }
-      return { rows: [], rowCount: 1 };
-    },
-    withTransaction: async (operation) => operation(postgres),
-  };
+  const postgres = require('./helpers/receiptDatabase').database();
   const unchanged = new Receipt(
     'user-id',
     [],
@@ -659,16 +678,14 @@ test('incremental Gmail upsert distinguishes new, updated, and unchanged orders'
     undefined,
     'order-2',
   );
-  const result = await new ReceiptRepository(postgres).upsertEmailReceipts(
+  const repository = new ReceiptRepository(postgres);
+  await repository.upsertEmailReceipts([unchanged],async()=>{});
+  const result = await repository.upsertEmailReceipts(
     [unchanged, fresh],
     async () => {},
   );
-  assert.deepEqual(result, { newOrders: 1, updatedOrders: 0, unchangedOrders: 1 });
-  assert.ok(
-    queries.some((query) =>
-      query.sql.includes('ON CONFLICT (user_id, data_source, source_identity)'),
-    ),
-  );
+  assert.deepEqual(result, { newOrders: 1, updatedOrders: 0, unchangedOrders: 1, unresolvedOrders:0 });
+  assert.equal(postgres.state.observations.length,2);
 });
 
 test('orders-added-this-week uses a user-local PostgreSQL week boundary', async () => {
@@ -686,8 +703,9 @@ test('orders-added-this-week uses a user-local PostgreSQL week boundary', async 
   assert.equal(count, 2);
   assert.match(captured.sql, /DATE_TRUNC\('week', NOW\(\) AT TIME ZONE \$2\)/);
   assert.match(captured.sql, /order_date IS NOT NULL/);
-  assert.match(captured.sql, /order_date >=/);
-  assert.match(captured.sql, /order_date </);
+  assert.match(captured.sql, /order_date AT TIME ZONE z.name\)::date >=/);
+  assert.match(captured.sql, /order_date AT TIME ZONE z.name\)::date </);
+  assert.match(captured.sql, /unlinked_adjustment/);
   assert.doesNotMatch(captured.sql, /first_seen_at/);
   assert.deepEqual(captured.params, ['user-id', 'America/Toronto']);
 });
@@ -708,11 +726,12 @@ test('shared investment math compounds each order from its own timestamp at the 
   assert.equal(result.gains, result.futureValue - result.contributed);
 });
 
-test('export replacement is scoped to its provider and preserves newer matching Gmail orders', async () => {
+test('export enrichment preserves existing receipt evidence', async () => {
   const queries = [];
   const client = {
     query: async (sql, params) => {
       queries.push({ sql, params });
+      if(sql.startsWith('SELECT timezone'))return {rows:[{timezone:'America/Toronto'}]};
       return { rows: [], rowCount: 1 };
     },
     release: () => {},
@@ -730,17 +749,18 @@ test('export replacement is scoped to its provider and preserves newer matching 
 
   await new ReceiptRepository(postgres).replaceProviderExport('user-id', [receipt], async () => {});
 
-  const replacement = queries.find((query) => query.sql.includes('DELETE FROM receipts'));
-  assert.match(replacement.sql, /data_source = 'csv'/);
-  assert.match(replacement.sql, /receipt_type = \$2/);
-  assert.match(replacement.sql, /data_source = 'email' AND order_date <= \$3/);
-  assert.deepEqual(replacement.params.slice(0, 2), ['user-id', ReceiptType.UBER_EATS]);
-  assert.equal(replacement.params[2].toISOString(), '2026-08-01T22:00:00.000Z');
+  const pruned = queries.find(query => query.sql.includes('DELETE FROM receipts'));
+  assert.match(pruned.sql,/NOT \(id=ANY/);
+  assert.equal(pruned.params[1].length,1,'retain the canonical order when pruning old projections');
+  const insert = queries.find(query => query.sql.includes('INSERT INTO receipts('));
+  assert.equal(insert.params[1], 'user-id');
+  assert.equal(insert.params[2], ReceiptType.UBER_EATS);
+  assert.ok(queries.some(query => query.sql.includes('INSERT INTO receipt_observations')));
   assert.equal(queries[0].sql, 'BEGIN');
   assert.equal(queries.at(-1).sql, 'COMMIT');
 });
 
-test('export cutoffs suppress overlap only for the matching provider', () => {
+test('export cutoffs retain overlap for field-level enrichment', () => {
   const uberBeforeDoorDashCutoff = new Receipt(
     'user-id',
     [],
@@ -774,7 +794,7 @@ test('export cutoffs suppress overlap only for the matching provider', () => {
     { [ReceiptType.DOORDASH]: new Date('2026-08-01T12:00:00.000Z') },
   );
 
-  assert.deepEqual(filtered, [uberBeforeDoorDashCutoff, doorDashNewerThanExport]);
+  assert.deepEqual(filtered, [uberBeforeDoorDashCutoff, doorDashCoveredByExport, doorDashNewerThanExport]);
 });
 
 test('Google invalid_grant errors require Gmail reconnection', () => {

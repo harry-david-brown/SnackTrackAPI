@@ -265,6 +265,7 @@ export class ImportStatusService {
     private readonly sourceCoverage: SourceCoveragePort,
     private readonly outlookHealth?: OutlookHealthPort,
     private readonly mailboxStates?: MailboxStatePort,
+    private readonly backgroundAlertsEnabled = false,
   ) {}
 
   async getConnection(
@@ -325,6 +326,12 @@ export class ImportStatusService {
       outlookConnection.canImport &&
       outlookConnection.connectionMode === 'offline';
     const durableMailbox = durableGmail || durableOutlook;
+    for (const provider of Object.values(providers)) {
+      if (provider.readyAlert) {
+        provider.readyAlert.backgroundAvailable = this.backgroundAlertsEnabled;
+        provider.readyAlert.canMonitor = durableMailbox;
+      }
+    }
     const mailboxConnectionHealth: GmailConnectionHealth = durableMailbox
       ? 'valid'
       : status.connectionHealth === 'reconnect_required' ||

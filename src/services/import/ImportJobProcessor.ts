@@ -1,3 +1,6 @@
+import type { ExportReadyAlertService } from './ExportReadyAlertService';
+import type { ReceiptRebuildService } from '../receipt/ReceiptRebuildService';
+import { decodeReceiptReviewChanges } from '../receipt/ReceiptReviewDecisions';
 import { DelayedError, type Job } from 'bullmq';
 import { AppError } from '../../core/errors';
 import type { ImportJobRepository } from '../data/ImportJobRepository';
@@ -14,12 +17,21 @@ import type { ImportJob } from './ImportJobTypes';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
 import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
 import type { GmailPushTrackingService } from './GmailPushTrackingService';
+import type { ReceiptImportOutcomePort } from '../ports/ReceiptPorts';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
+import { receiptImportOutcomeFields } from './ReceiptImportOutcome';
 
 const permanentCodes = new Set([
   'VALIDATION_ERROR','INVALID_CSV_FORMAT','UNKNOWN_EXPORT_PROVIDER','NO_VALID_EXPORT_ORDERS',
   'GMAIL_ACCESS_BLOCKED','GMAIL_RECONNECT_REQUIRED','OUTLOOK_RECONNECT_REQUIRED','TRACKING_NOT_AVAILABLE',
   'MAILBOX_IMPORT_LIMIT_REACHED','OUTLOOK_RESULT_LIMIT',
   'IMPORT_CHECKPOINT_INVALID',
+  'IMPORT_DURABLE_CONTEXT_REQUIRED',
+  'IMPORT_OUTCOME_STALE',
+  'RECEIPT_REVIEW_INVALID','RECEIPT_REVIEW_IDEMPOTENCY_CONFLICT','RECEIPT_REVIEW_SUPERSEDED',
+  'RECEIPT_REVIEW_SOURCE_UNAVAILABLE','RECEIPT_REVIEW_HISTORY_CHANGED','RECEIPT_REVIEW_CONFLICT',
+  'REPAIR_POLICY_STALE','REPAIR_GENERATION_STALE','REPAIR_MANIFEST_REQUIRED','REPAIR_LOCK_SCOPE_MISMATCH',
+  'REPAIR_MANIFEST_INELIGIBLE','REPAIR_EVIDENCE_CHANGED','REPAIR_MANIFEST_EXPIRED','REPAIR_SOURCE_CHANGED',
   'UPLOAD_PROVIDER_REQUIRED','UPLOAD_PROVIDER_MISMATCH','UPLOAD_CHANGED','UPLOAD_SIZE_MISMATCH',
   'UPLOAD_TOO_LARGE','UPLOAD_INTEGRITY_FAILED','UNSUPPORTED_UPLOAD_TYPE',
   'ZIP_INVALID','ZIP_TOO_MANY_ENTRIES','ZIP_TOO_LARGE','ZIP_OUTPUT_TOO_LARGE',
@@ -39,6 +51,10 @@ export class ImportJobProcessor {
     private readonly tracking: Pick<OngoingTrackingService, 'checkUserWithLock'|'checkOutlookUserWithLock'>,
     private readonly testScenarios: Pick<ImportTestScenarioRepository, 'delayGmailImportIfEnabled'>,
     private readonly gmailPush: Pick<GmailPushTrackingService, 'executeWithLock'>,
+    private readonly rebuild?: Pick<ReceiptRebuildService, 'executeWithLock'>,
+    private readonly receiptOutcomes?: ReceiptImportOutcomePort,
+    private readonly receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
+    private readonly exportAlerts?: Pick<ExportReadyAlertService, 'execute'>,
   ) {}
 
   async process(queueJob: Job<QueuePayload>): Promise<void> {
@@ -67,7 +83,10 @@ export class ImportJobProcessor {
           throw new DelayedError();
         }
       }
+      const accountReceipts = this.receiptPolicy === 3 && !['export_ready_check','receipt_rebuild','receipt_publish','receipt_rollback'].includes(operation.kind);
+      if (accountReceipts && !this.receiptOutcomes) throw new Error('Canonical import outcome service is unavailable');
       const execution: ImportExecutionCheckpoint = {
+        ...(accountReceipts ? { accountingJobId: operation.id } : {}),
         checkpoint: operation.checkpoint,
         save: (checkpoint, phase, progress) => this.jobs.saveCheckpoint(operation!.id, checkpoint, phase, progress),
       };
@@ -76,14 +95,34 @@ export class ImportJobProcessor {
       await this.jobs.progress(operation.id, 'processing', 10);
       let result: Readonly<Record<string, unknown>>;
       switch (operation.kind) {
+        case 'export_ready_check':
+          if (!this.exportAlerts) throw new Error('Export alert service unavailable');
+          result = await this.exportAlerts.execute(operation, lock); break;
         case 'gmail_historical': result = this.compactMailboxResult(await this.gmail.executeWithLock(operation.userId, lock, execution)); break;
         case 'outlook_historical': result = this.compactMailboxResult(await this.outlook.executeWithLock(operation.userId, lock, execution)); break;
         case 'manual_tracking': result = this.requireTrackingSuccess(await this.manual.executeWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>>); break;
         case 'scheduled_tracking': result = this.requireTrackingSuccess((await this.tracking.checkOutlookUserWithLock(operation.userId, lock, execution) as unknown as Readonly<Record<string, unknown>> | null) ?? { success: true, newOrders: 0, updatedOrders: 0, skipped: true }); break;
         case 'gmail_push_tracking': result = await this.gmailPush.executeWithLock(operation.userId, lock, execution); break;
+        case 'receipt_rebuild':
+        case 'receipt_publish':
+        case 'receipt_rollback':
+          if (!this.rebuild) throw new Error('Receipt rebuild service is unavailable');
+          if (operation.checkpoint.stagedBatchIds !== undefined &&
+              (!Array.isArray(operation.checkpoint.stagedBatchIds) || !operation.checkpoint.stagedBatchIds.every((id) => typeof id === 'string')))
+            throw new Error('Invalid staged repair batch checkpoint');
+          result = await this.rebuild.executeWithLock(operation.userId, operation.importGeneration,
+            operation.kind === 'receipt_rebuild' ? 'prepare' : operation.kind === 'receipt_publish' ? 'publish' : 'rollback',
+            lock, typeof operation.checkpoint.manifestId === 'string' ? operation.checkpoint.manifestId : undefined,
+            operation.checkpoint.stagedBatchIds,
+            decodeReceiptReviewChanges(operation.checkpoint.reviewChanges === undefined ? [] : operation.checkpoint.reviewChanges));
+          break;
         case 'export_file': result = await this.processExport(operation, lock); break;
       }
       await this.jobs.progress(operation.id, 'finalizing', 95);
+      if (accountReceipts && this.receiptOutcomes) {
+        const outcome = await this.receiptOutcomes.getImportOutcome(operation.userId, operation.id, () => ImportLockService.assertLockOwned(lock));
+        result = { ...result, ...receiptImportOutcomeFields(outcome) };
+      }
       await this.jobs.succeed(operation, result);
       if (operation.kind === 'export_file' && operation.objectKey) {
         await this.storage.delete(operation.objectKey).catch(() => undefined);
@@ -173,7 +212,9 @@ export class ImportJobProcessor {
       const extracted = isZip ? await this.zip.extractProviderCSVToFile(temporary.path, operation.exportProvider) : null;
       try {
         await this.jobs.progress(operation.id, 'importing', 70);
-        return await this.csv.executeWithLock({ userId: operation.userId, provider: operation.exportProvider, csvPath: extracted?.path ?? temporary.path, fileType: isZip ? 'zip' : 'csv', jobId: operation.id }, lock) as unknown as Readonly<Record<string, unknown>>;
+        return await this.csv.executeWithLock({ userId: operation.userId, provider: operation.exportProvider, csvPath: extracted?.path ?? temporary.path, fileType: isZip ? 'zip' : 'csv', jobId: operation.id,
+          ...(this.receiptPolicy === 3 ? { accountingJobId: operation.id } : {}),
+        }, lock) as unknown as Readonly<Record<string, unknown>>;
       } finally {
         await extracted?.remove();
       }

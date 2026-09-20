@@ -56,6 +56,7 @@ export interface AppConfig {
     forcePathStyle: boolean;
     uploadUrlTtlSeconds: number;
   };
+  marketHistory: { enabled: boolean; refreshEnabled: boolean; apiKey: string };
   push: { deliveryMode: 'log' | 'expo' };
   mail: {
     sendGridApiKey?: string;
@@ -355,7 +356,7 @@ class ConfigManager {
         userMinuteUnitLimit: boundedInteger(
           'GMAIL_USER_QUERY_UNITS_PER_MINUTE',
           process.env.GMAIL_USER_QUERY_UNITS_PER_MINUTE,
-          4_000,
+          6_000,
           1,
           6_000,
         ),
@@ -417,6 +418,7 @@ class ConfigManager {
         forcePathStyle: boolean('OBJECT_STORAGE_FORCE_PATH_STYLE', process.env.OBJECT_STORAGE_FORCE_PATH_STYLE, true),
         uploadUrlTtlSeconds: integer('OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS', process.env.OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS, 900, 60),
       },
+      marketHistory: { enabled: boolean('HISTORICAL_INVESTMENTS_ENABLED', process.env.HISTORICAL_INVESTMENTS_ENABLED, false), refreshEnabled: boolean('MARKET_HISTORY_REFRESH_ENABLED', process.env.MARKET_HISTORY_REFRESH_ENABLED, false), apiKey: optional(process.env.FINAZON_API_KEY) ?? '' },
       push: { deliveryMode: pushDeliveryMode },
       mail: {
         sendGridApiKey: optional(process.env.SENDGRID_API_KEY),
@@ -493,6 +495,7 @@ export const config = {
   getRedisConfig: () => appConfig.get().redis,
   getQueueConfig: () => appConfig.get().queue,
   getObjectStorageConfig: () => appConfig.get().objectStorage,
+  getMarketHistoryConfig: () => appConfig.get().marketHistory,
   getPushConfig: () => appConfig.get().push,
   getDatabaseMaxConnections: () => appConfig.get().database.maxConnections,
   getMailConfig: () => appConfig.get().mail,

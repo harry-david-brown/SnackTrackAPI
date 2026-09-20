@@ -1,0 +1,149 @@
+{
+  "localDate": "2023-12-11",
+  "timezone": "America/Toronto",
+  "generatedAt": "2023-12-11T18:00:00.000Z",
+  "nextRefreshAt": "2023-12-12T05:00:00.000Z",
+  "metricVersion": "daily-v17",
+  "availableCandidateCount": 22,
+  "partialExportProvider": "uber_eats",
+  "insights": [
+    {
+      "id": "refunds-and-cancellations",
+      "presentation": "timeline",
+      "category": "progress",
+      "icon": "receipt",
+      "eyebrow": "Order outcomes",
+      "title": "Refunds and cancellations",
+      "detail": "1 confirmed refunded orders; 0 likely refunds inferred from exports, kept separate.",
+      "events": [
+        {
+          "label": "Charged cancellations",
+          "value": 1
+        },
+        {
+          "label": "Zero-balance cancellations",
+          "value": 0
+        },
+        {
+          "label": "Fully refunded",
+          "value": 1
+        },
+        {
+          "label": "Partially refunded",
+          "value": 0
+        },
+        {
+          "label": "CAD",
+          "value": "43.26 cancellation cost; 22.48 known confirmed refunds"
+        }
+      ]
+    },
+    {
+      "id": "accumulated-delivery-time",
+      "presentation": "hero",
+      "category": "extremes",
+      "icon": "delivery",
+      "eyebrow": "Waiting, accumulated",
+      "title": "Your delivery-window lifetime",
+      "value": 2.3,
+      "valueFormat": "hours",
+      "detail": "4 valid deliveries, averaging 34 minutes from order to arrival.",
+      "currencyCode": "CAD",
+      "methodology": {
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      }
+    },
+    {
+      "id": "restaurant-loyalty",
+      "presentation": "hero",
+      "category": "favorites",
+      "icon": "heart",
+      "eyebrow": "Creature of habit",
+      "title": "Your number one",
+      "headline": "Pizza Pizza",
+      "value": 50,
+      "valueFormat": "percent",
+      "detail": "2 tracked orders. At this point, they may recognize your cart.",
+      "currencyCode": "CAD",
+      "methodology": {
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      }
+    },
+    {
+      "id": "biggest-splurge-rank-2",
+      "presentation": "order",
+      "category": "extremes",
+      "icon": "receipt",
+      "eyebrow": "The runner-up receipt",
+      "title": "Second-highest net order cost",
+      "detail": "Net cost after refunds, including charged cancellations. This is not a delivery ranking.",
+      "period": {
+        "startDate": "2023-12-10"
+      },
+      "order": {
+        "restaurant": "McDonald's",
+        "amount": 45.83,
+        "orderedAt": "2023-12-10T18:39:24.000Z",
+        "items": [
+          "Wrap"
+        ]
+      },
+      "currencyCode": "CAD",
+      "methodology": {
+        "estimated": false,
+        "assumption": "CAD known net order costs, including charged cancellations and failures; refunds are already deducted and wallet payments included. Other currencies are separate."
+      }
+    },
+    {
+      "id": "longest-delivery-rank-3",
+      "presentation": "hero",
+      "category": "extremes",
+      "icon": "delivery",
+      "eyebrow": "Long wait #3",
+      "title": "Your third-longest delivery",
+      "value": 30,
+      "valueFormat": "minutes",
+      "headline": "Pizza Pizza",
+      "detail": "Ranked #3 among valid delivery windows.",
+      "period": {
+        "startDate": "2023-12-10"
+      },
+      "currencyCode": "CAD",
+      "methodology": {
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      }
+    },
+    {
+      "id": "busiest-month",
+      "presentation": "hero",
+      "category": "extremes",
+      "icon": "calendar",
+      "eyebrow": "Peak season",
+      "title": "Your busiest month",
+      "headline": "December 2023",
+      "value": 4,
+      "valueFormat": "number",
+      "detail": "4 completed deliveries—100% of your dated delivery history. Includes every merchant category.",
+      "currencyCode": "CAD",
+      "methodology": {
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      }
+    },
+    {
+      "id": "favorite-day",
+      "presentation": "hero",
+      "category": "habits",
+      "icon": "calendar",
+      "eyebrow": "Weekly ritual",
+      "title": "Your delivery day",
+      "headline": "Sunday",
+      "value": 4,
+      "valueFormat": "number",
+      "detail": "4 tracked orders landed on Sundays—100% of your dated history.",
+      "currencyCode": "CAD",
+      "methodology": {
+        "assumption": "Completed deliveries across all merchant categories. Refunded deliveries count once; canceled, failed and unfulfilled attempts are excluded. Hour and wait records require explicit placement times."
+      }
+    }
+  ]
+}

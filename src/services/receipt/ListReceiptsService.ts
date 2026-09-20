@@ -10,6 +10,7 @@ export interface ListReceiptsInput {
 export interface ListReceiptsResult {
   receipts: Receipt[];
   total: number;
+  timezone?: string;
 }
 
 /** Application operation for one authenticated user's receipt history page. */

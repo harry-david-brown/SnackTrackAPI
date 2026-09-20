@@ -24,12 +24,12 @@ GMAIL_PUBSUB_AUDIENCE=https://<api-host>/webhooks/gmail/pubsub
 GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL=<push-service-account>@<project>.iam.gserviceaccount.com
 ```
 
-Safety defaults reserve headroom below Google's published limits:
+Configured Gmail quota limits and safety defaults:
 
 ```dotenv
 GMAIL_PROJECT_QUERY_UNITS_PER_MINUTE=600000
 GMAIL_PROJECT_QUERY_UNITS_PER_DAY=60000000
-GMAIL_USER_QUERY_UNITS_PER_MINUTE=4000
+GMAIL_USER_QUERY_UNITS_PER_MINUTE=6000
 GMAIL_PUSH_DEBOUNCE_SECONDS=30
 ```
 

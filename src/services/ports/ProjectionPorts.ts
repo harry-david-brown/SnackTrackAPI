@@ -1,10 +1,18 @@
-import type { User } from '../../models/User';
+import type { Receipt } from '../../models/Receipt';
 import type { DashboardInsightEdition } from '../analytics/dashboard';
 import type { WrappedAnalytics } from '../analytics/WrappedAnalyticsTypes';
 import type { UserSummaryProjection } from '../core/cacheProjections';
 
+/** Internal projection inputs read atomically; the revision is never exposed in login/profile DTOs. */
+export interface UserProjectionProfile {
+  id: string;
+  email: string;
+  timezone: string;
+  receiptProjectionRevision: string;
+}
+
 export interface UserProfilePort {
-  findById(userId: string): Promise<User | undefined>;
+  findProjectionProfileById(userId: string): Promise<UserProjectionProfile | undefined>;
   updateTimezone(userId: string, timezone: string): Promise<void>;
 }
 
@@ -25,5 +33,16 @@ export interface DashboardCachePort {
 }
 
 export interface WrappedAnalyticsPort {
-  calculateWrappedAnalytics(userId: string): Promise<WrappedAnalytics>;
+  calculateWrappedAnalytics(
+    userId: string,
+    snapshot?: WrappedReceiptSnapshot,
+  ): Promise<WrappedAnalytics>;
+}
+
+export interface WrappedReceiptSnapshot {
+  market?: import('../analytics/shared/historicalInvestment').InvestmentContext;
+  displayCurrency?: import('./RecapExchangeRatesPort').RecapCurrency;
+  rates?: import('./RecapExchangeRatesPort').RecapRateSnapshot;
+  receipts: readonly Receipt[];
+  timezone: string;
 }

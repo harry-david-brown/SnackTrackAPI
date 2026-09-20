@@ -1,3 +1,4 @@
+import type { InvestmentContext } from '../shared/historicalInvestment';
 import { DataSource, Receipt, ReceiptType } from '../../../models/Receipt';
 import {
   getLocalDateKey,
@@ -72,8 +73,9 @@ export function buildDashboardInsightCatalogue(
   receipts: Receipt[],
   timezone: string,
   now: Date = new Date(),
+  market?: InvestmentContext,
 ): CandidateCatalogue {
-  return buildCandidateCatalogue(buildDashboardDataset(receipts, timezone, now));
+  return buildCandidateCatalogue(buildDashboardDataset(receipts, timezone, now), market);
 }
 
 export function buildDashboardInsightEdition(
@@ -81,13 +83,16 @@ export function buildDashboardInsightEdition(
   timezone: string,
   userId: string,
   now: Date = new Date(),
+  market?: InvestmentContext,
 ): DashboardInsightEdition {
   const dataset = buildDashboardDataset(receipts, timezone, now);
-  const catalogue = buildCandidateCatalogue(dataset);
+  const catalogue = buildCandidateCatalogue(dataset, market);
   const localDate = getLocalDateKey(now, timezone) ?? now.toISOString().slice(0, 10);
   const exportProviders = new Set(
     receipts
-      .filter((receipt) => receipt.dataSource === DataSource.CSV)
+      .filter((receipt) =>
+        (receipt.resolution?.sources ?? [receipt.dataSource]).includes(DataSource.CSV),
+      )
       .map((receipt) => receipt.receiptType)
       .filter(
         (provider): provider is ReceiptType.UBER_EATS | ReceiptType.DOORDASH =>

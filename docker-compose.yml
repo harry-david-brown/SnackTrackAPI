@@ -97,6 +97,17 @@ services:
       migrate: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
 
+  # Same state-aware job as production: check on startup and daily at 08:00 UTC.
+  # Finazon is called only when the completed-month snapshot is missing.
+  market-history:
+    <<: *app-service
+    command: npm run dev:market-history
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
   scheduler:
     <<: *app-service
     command: npm run dev:scheduler

@@ -14,6 +14,7 @@ export interface MailboxImportCounters {
   totalAmount: number;
   errorCount: number;
   newOrders: number;
+  unresolvedOrders: number;
   updatedOrders: number;
   unchangedOrders: number;
   rejectedMessages: number;
@@ -42,6 +43,7 @@ export const emptyMailboxCounters = (): MailboxImportCounters => ({
   totalAmount: 0,
   errorCount: 0,
   newOrders: 0,
+  unresolvedOrders: 0,
   updatedOrders: 0,
   unchangedOrders: 0,
   rejectedMessages: 0,
@@ -59,6 +61,16 @@ export const restoreMailboxCheckpoint = (
     return { provider, version: 1, cursor: null, done: false, counters: emptyMailboxCounters() };
   }
   const raw = execution.checkpoint;
+  if (
+    execution.accountingJobId
+      ? raw.receiptPolicyVersion !== 3 || raw.accountingJobId !== execution.accountingJobId
+      : raw.receiptPolicyVersion !== undefined || raw.accountingJobId !== undefined
+  )
+    throw new AppError({
+      code: 'IMPORT_CHECKPOINT_INVALID',
+      message: 'Mailbox checkpoint belongs to a different receipt policy or import operation',
+      publicMessage: 'This saved import cannot be resumed with the current receipt rules. Start a new import; your existing receipts are preserved.',
+    });
   const counters = raw.counters;
   const estimatedTotalMessages = raw.estimatedTotalMessages;
   if (
@@ -83,6 +95,7 @@ export const restoreMailboxCheckpoint = (
   }
   const restored = emptyMailboxCounters();
   for (const key of Object.keys(restored) as Array<keyof MailboxImportCounters>) {
+    if (key === 'unresolvedOrders' && (counters as Record<string, unknown>)[key] === undefined) continue;
     const value = nonNegativeNumber((counters as Record<string, unknown>)[key]);
     if (value === null) {
       throw new AppError({
@@ -132,7 +145,10 @@ export const saveMailboxCheckpoint = async (
     ? state
     : { ...state, estimatedTotalMessages: totalMessages };
   await execution.save(
-    checkpoint as unknown as Readonly<Record<string, unknown>>,
+    {
+      ...checkpoint,
+      ...(execution.accountingJobId ? { receiptPolicyVersion: 3, accountingJobId: execution.accountingJobId } : {}),
+    } as unknown as Readonly<Record<string, unknown>>,
     state.done ? 'mailbox_imported' : 'importing_mailbox',
     state.done ? 90 : checkpointProgress(
       state.counters.pages,

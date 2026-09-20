@@ -26,6 +26,8 @@ import { getLogLevel, getRecentLogs, logger, logRequest, setLogLevel } from './c
 import * as Sentry from '@sentry/node';
 import { container } from './services/core/ServiceContainer';
 import { ShutdownCoordinator } from './services/core/ShutdownCoordinator';
+import { startDevMarketHistoryCheck } from './services/market/startDevMarketHistoryCheck';
+import { ACTIVE_RECEIPT_POLICY } from './services/receipt/ReceiptPolicy';
 import { ImportQueueOperations } from './services/queue/ImportQueues';
 import { AdminQueueOperationsService } from './services/admin/AdminQueueOperationsService';
 import { redisLockStore } from './config/redis';
@@ -194,6 +196,7 @@ app.get(
         status: degraded ? 'degraded' : 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        receiptPolicyVersion: ACTIVE_RECEIPT_POLICY,
         database: {
           status: 'connected',
           latency: readiness.latencyMs,
@@ -423,12 +426,24 @@ async function startServer() {
     if (config.isAnalyticsMaintenanceEnabled()) container.analyticsMaintenanceService.start();
 
     // Start the server
+    let marketHistoryStartupCheck = Promise.resolve();
     const server = app.listen(PORT, () => {
       logger.info('Server started', {
         port: PORT,
         environment: config.isProduction() ? 'production' : 'development',
+        receiptPolicyVersion: ACTIVE_RECEIPT_POLICY,
       });
       logger.info('Database connected');
+      marketHistoryStartupCheck = startDevMarketHistoryCheck(
+        config.isDevelopment(),
+        config.getMarketHistoryConfig().refreshEnabled,
+        () => container.refreshMarketHistoryService.execute(),
+        (message, metadata) => logger.info(message, { operation: 'market_history_startup', ...metadata }),
+        (error) => logger.error('Market history startup check failed', {
+          operation: 'market_history_startup',
+          error: error instanceof Error ? error.message : 'Unknown failure',
+        }),
+      );
       if (getLogLevel() === 'debug') {
         logger.debug('Environment', { info: config.getEnvironmentInfo() });
       }
@@ -447,6 +462,7 @@ async function startServer() {
       { name: 'Redis connection', close: () => redisConfig.close() },
       { name: 'Queue monitoring connection', close: () => adminQueueOperations.close() },
       { name: 'Import object storage', close: () => container.importObjectStorage.close() },
+      { name: 'Market history startup check', close: () => marketHistoryStartupCheck },
       { name: 'PostgreSQL connection', close: () => postgresService.close() },
       { name: 'Sentry transport', close: () => Sentry.close(2000).then(() => undefined) },
     ]);

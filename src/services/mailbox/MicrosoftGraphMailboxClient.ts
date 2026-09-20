@@ -1,3 +1,5 @@
+import type { ExportProvider } from '../import/ImportLifecycleTypes';
+import { isExportReadyMessage } from '../import/ExportReadyMessage';
 import { AppError } from '../../core/errors';
 import type { StructuredLogger } from '../core/StructuredLogger';
 import { silentStructuredLogger } from '../core/StructuredLogger';
@@ -7,6 +9,7 @@ import { MailboxContentGuard } from './MailboxContentGuard';
 import pLimit from 'p-limit';
 import type { MicrosoftMailboxConnection } from './MailboxConnection';
 import type { MicrosoftMailboxTokenService } from './MicrosoftMailboxTokenService';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 
 interface GraphResponse {
   readonly ok: boolean;
@@ -125,7 +128,7 @@ const decodeCursor = (value: string): GraphCursor => {
 
 /** Microsoft Graph adapter that returns normalized HTML mailbox messages. */
 export class MicrosoftGraphMailboxClient {
-  private readonly contentGuard = new MailboxContentGuard();
+  private readonly contentGuard: MailboxContentGuard;
   constructor(
     private readonly tokens: Pick<MicrosoftMailboxTokenService, 'acquire'>,
     private readonly fetcher: GraphFetch = fetch,
@@ -133,7 +136,10 @@ export class MicrosoftGraphMailboxClient {
     private readonly now: () => Date = () => new Date(),
     private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) =>
       new Promise((resolve) => setTimeout(resolve, milliseconds)),
-  ) {}
+    receiptPolicy: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
+  ) {
+    this.contentGuard = new MailboxContentGuard(receiptPolicy);
+  }
 
   async validateConnection(connection: MicrosoftMailboxConnection): Promise<void> {
     const token = await this.tokens.acquire(connection);
@@ -242,24 +248,18 @@ export class MicrosoftGraphMailboxClient {
     }
   }
 
-  async hasUberExportReadyEmail(
+  hasUberExportReadyEmail(connection: MicrosoftMailboxConnection, requestedAt: string): Promise<boolean> {
+    return this.hasExportReadyEmail(connection, requestedAt, 'uber_eats');
+  }
+  async hasExportReadyEmail(
     connection: MicrosoftMailboxConnection,
     requestedAt: string,
+    provider: ExportProvider,
   ): Promise<boolean> {
     const after = new Date(requestedAt);
     if (Number.isNaN(after.getTime())) return false;
     const messages = await this.getEmails(connection, { after });
-    return messages.some((message) => {
-      const from = message.from.toLowerCase();
-      const subject = (message.subject ?? '').toLowerCase();
-      const body = message.body.toLowerCase();
-      return (
-        /@(?:[a-z0-9-]+\.)?(?:uber|ubereats)\.com\b/i.test(from) &&
-        (subject.includes('your uber data is ready for download') ||
-          body.includes('your uber data is now ready') ||
-          body.includes('ready for you to download'))
-      );
-    });
+    return messages.some(message => isExportReadyMessage(provider,message.from,message.subject ?? '',message.body));
   }
 
   private initialCursor(after?: Date): GraphCursor {

@@ -1,4 +1,6 @@
 import { Currency, ExtractionResult, ServiceType } from './types';
+import { decodeAdjustments } from '../../models/ReceiptResolution';
+import { decodeOrderSourceEvidence } from '../../models/OrderEvidence';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -54,6 +56,19 @@ export const decodeExtractionResult = (value: unknown): ExtractionResult => {
       invalid('data.extractionConfidence');
     }
     data = {
+      ...(candidate.orderEvidence === undefined ? {} : { orderEvidence: decodeOrderSourceEvidence(candidate.orderEvidence) }),
+      ...(candidate.items === undefined ? {} : { items: (() => {
+        if (!Array.isArray(candidate.items) || candidate.items.length > 500) return invalid('data.items');
+        return candidate.items.map((value,index) => {
+          const item = record(value, `data.items.${index}`);
+          const quantity = finiteNumber(item.quantity, 'item.quantity'), price = finiteNumber(item.price, 'item.price');
+          if (quantity <= 0 || quantity > 1000 || price < 0 || price > 1_000_000) return invalid('item amounts');
+          return { name: string(item.name, 'item.name'), quantity, price,
+            ...(item.customizations === undefined ? {} : { customizations: stringArray(item.customizations, 'item.customizations') }) };
+        });
+      })() }),
+      ...(candidate.adjustments === undefined ? {} : { adjustments: decodeAdjustments(candidate.adjustments) }),
+      ...(candidate.headlineSavings === undefined ? {} : { headlineSavings: finiteNumber(candidate.headlineSavings, 'data.headlineSavings') }),
       orderId: nullableString(candidate.orderId, 'data.orderId'),
       service: enumValue(candidate.service, services, 'data.service'),
       merchant: nullableString(candidate.merchant, 'data.merchant'),

@@ -1,3 +1,6 @@
+import type { MoneyAdjustment } from '../../models/ReceiptResolution';
+import type { OrderSourceEvidence } from '../../models/OrderEvidence';
+import type { ReceiptItem } from '../../models/Receipt';
 /**
  * Receipt Extraction Types
  *
@@ -68,6 +71,8 @@ export interface MonetaryAmount {
  * Extracted receipt data
  */
 export interface ExtractedReceiptData {
+  orderEvidence?: OrderSourceEvidence;
+  items?: ReceiptItem[];
   // Core identifiers
   orderId: string | null; // Added orderId
   service: ServiceType;
@@ -87,6 +92,8 @@ export interface ExtractedReceiptData {
   deliveryFee: number | null;
   serviceFee: number | null;
   savings: number | null;
+  adjustments?: MoneyAdjustment[];
+  headlineSavings?: number;
 
   // Additional metadata
   deliveryAddress: string | null;

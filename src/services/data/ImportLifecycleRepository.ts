@@ -113,7 +113,10 @@ export class ImportLifecycleRepository {
     const result = await this.database.withTransaction(async (transaction) => {
       const updated = await transaction.query(
         `UPDATE user_export_provider_preferences provider_preferences
-         SET status = 'requested', requested_at = NOW(), updated_at = NOW(),
+         SET status = 'requested',
+             request_id = CASE WHEN status='requested' THEN request_id ELSE gen_random_uuid() END,
+             requested_at = CASE WHEN status='requested' THEN requested_at ELSE NOW() END,
+             alert_next_check_at=NOW(), updated_at = NOW(),
              error_code = NULL, ready_source = NULL, relevance = 'unknown'
          WHERE user_id = $1 AND provider = $2::VARCHAR(24)`,
         [userId, provider],

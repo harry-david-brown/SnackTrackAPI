@@ -4,6 +4,7 @@ import type { DatabaseQueryExecutor, DatabaseRow } from '../ports/DatabasePort';
 import type { MailboxSecurityPolicyRepository } from '../data/MailboxSecurityPolicyRepository';
 import type { ImportTestScenarioRepository } from '../data/ImportTestScenarioRepository';
 import type { GmailConnectionService } from '../import/GmailConnectionService';
+import type { AdminReceiptReadPort } from '../ports/AdminReceiptPorts';
 
 const asNumber = (value: unknown): number => Number(value ?? 0);
 const asIso = (value: unknown): string | null => {
@@ -145,6 +146,7 @@ export class AdminManagementService {
     private readonly mailboxSecurityPolicies: MailboxSecurityPolicyRepository,
     private readonly importTestScenarios: ImportTestScenarioRepository,
     private readonly gmailConnections: Pick<GmailConnectionService, 'expireForTesting'>,
+    private readonly receiptReports: AdminReceiptReadPort,
   ) {}
 
   async listUsers(filters: AdminUserFilters) {
@@ -211,8 +213,7 @@ export class AdminManagementService {
     const user = userResult.rows[0];
     if (!user) throw new NotFoundError('User', userId);
     const [sources, gmailRuns, microsoftRuns, audits, mailboxSecurity, testScenarios, authMethods, exports] = await Promise.all([
-      this.database.query<DatabaseRow>(
-        'SELECT data_source, receipt_type, COUNT(*)::int AS count FROM receipts WHERE user_id=$1 GROUP BY data_source, receipt_type ORDER BY data_source, receipt_type', [userId]),
+      this.receiptReports.getReceiptReport(userId),
       this.database.query<DatabaseRow>(
         `SELECT id, 'gmail' AS provider, trigger_type, outcome, started_at, completed_at,
           emails_scanned, receipts_processed, new_orders, updated_orders, rejected_messages,
@@ -263,7 +264,8 @@ export class AdminManagementService {
         lastSuccessfulCheckAt: asIso(user.last_successful_check_at),
         lastErrorCode: user.last_tracking_error_code ? String(user.last_tracking_error_code) : null,
       },
-      receiptSources: sources.rows.map((row) => ({ dataSource: String(row.data_source), receiptType: String(row.receipt_type), count: asNumber(row.count) })),
+      receiptSummary: sources.summary,
+      receiptSources: sources.sources,
       importRuns: runs.slice(0, 25),
       auditEvents: audits.rows.map((row) => ({ action: String(row.action), reason: row.reason ? String(row.reason) : null, outcome: String(row.outcome), createdAt: asIso(row.created_at) })),
       authMethods: authMethods.rows.map((row) => ({ method: String(row.method), linkedAt: asIso(row.linked_at), provenance: 'exact' as const })),

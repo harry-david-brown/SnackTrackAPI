@@ -81,7 +81,7 @@ const parseAmount = (raw: string): MonetaryAmount | null => {
   const currency =
     symbol === 'CA$'
       ? Currency.CAD
-      : symbol === 'US$' || symbol === '$'
+      : symbol === 'US$'
         ? Currency.USD
         : symbol === '€'
           ? Currency.EUR
@@ -89,7 +89,7 @@ const parseAmount = (raw: string): MonetaryAmount | null => {
             ? Currency.GBP
             : Currency.UNKNOWN;
 
-  return { amount, currency, raw: match[0] };
+  return { amount: match.groups.leadingSign || match.groups.trailingSign ? -amount : amount, currency, raw: match[0] };
 };
 
 const extractLabeledAmount = (text: string, labels: readonly string[]): MonetaryAmount | null => {
@@ -146,8 +146,9 @@ const extractOrderId = (html: string, text: string, providerMessageId?: string, 
   const fromUrl = validProviderId(urlValue);
   if (fromUrl) return `doordash:${fromUrl}`;
 
-  const messageId = validProviderId(providerMessageId);
-  return messageId ? `doordash:${mailboxProvider}:${messageId}` : null;
+  void providerMessageId;
+  void mailboxProvider;
+  return null;
 };
 
 const resolveCurrency = (text: string, amounts: readonly (MonetaryAmount | null)[]): Currency => {
@@ -184,7 +185,6 @@ export const parseDoorDashReceipt = ({
   const serviceFee = extractLabeledAmount(text, ['Service Fee']);
   const savingsAmount = extractLabeledAmount(text, [
     'Discounts',
-    'Credits',
     'Savings',
     'Promotion',
   ]);
@@ -207,7 +207,7 @@ export const parseDoorDashReceipt = ({
     tip,
     deliveryFee,
     serviceFee,
-    savings: savingsAmount?.amount ?? null,
+    savings: savingsAmount ? Math.abs(savingsAmount.amount) : null,
     warnings,
   };
 };

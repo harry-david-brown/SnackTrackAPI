@@ -1,3 +1,4 @@
+require('./helpers/legacyReceiptPolicy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -43,6 +44,16 @@ const receipt = ({
     source,
     date && deliveryMinutes ? new Date(Date.parse(date) + deliveryMinutes * 60_000) : undefined,
   );
+
+test('spending concentration exposes its exact population without changing the percentage or rank', () => {
+  const receipts = Array.from({ length: 21 }, (_, index) => receipt({ amount: index + 1, date: '2026-01-01T18:00:00.000Z' }));
+  const catalogue = buildDashboardInsightCatalogue(receipts, 'America/Toronto', new Date('2026-01-10T15:00:00.000Z'));
+  const candidate = catalogue.eligible.find(row => row.insight.id === 'spending-concentration');
+  assert.ok(candidate);
+  assert.deepEqual(candidate.insight.spendingConcentration, { orderCount: 3 });
+  assert.equal(candidate.insight.value, Math.round((21 + 20 + 19) / 231 * 100));
+  assert.equal(candidate.insight.methodology.sampleSize, 21);
+});
 
 test('restaurant, merchant, item, and basket normalization is conservative and stable', () => {
   assert.deepEqual(normalizeRestaurantName(" McDonald's - #1042 "), {
@@ -107,7 +118,7 @@ test('dataset is built once with positive, local, source, delivery, and item ind
 
   assert.equal(data.receipts.length, 4);
   assert.equal(data.positive.length, 3);
-  assert.equal(data.dated.length, 2);
+  assert.equal(data.dated.length, 3); // Free orders still count as dated activity.
   assert.equal(data.sourceCoverage, 'mixed');
   assert.equal(data.deliveryReceipts.length, 1);
   assert.equal(data.itemTotals.get('12 pack cookies').units, 12);
@@ -269,17 +280,26 @@ test('foodflation compares one named identical order or item with clear earlier 
   const item = foodflation.find((insight) => insight.comparison.subject.kind === 'item');
 
   assert.ok(meal);
-  assert.equal(meal.eyebrow, 'Foodflation');
+  assert.equal(meal.eyebrow, 'Observed price change');
   assert.equal(meal.title, 'The same order costs 50% more');
   assert.equal(meal.comparison.subject.name, 'Classic Burger + Fries');
   assert.equal(meal.comparison.subject.restaurant, 'Burger Lab');
   assert.equal(meal.comparison.previousLabel, 'Earlier price');
   assert.equal(meal.comparison.currentLabel, 'Recent price');
   assert.deepEqual(meal.period, { startDate: '2024-01-05', endDate: '2026-01-05' });
-  assert.deepEqual(meal.methodology, { sampleSize: 3 });
+  assert.equal(meal.methodology.sampleSize, 3);
+  assert.equal(meal.methodology.estimated, true);
   assert.ok(item);
   assert.equal(item.title, 'The same item costs 50% more');
-  assert.equal(item.comparison.subject.name, 'Classic Burger');
+  assert.equal(item.comparison.subject.name, 'Classic Burger (per item)');
+  assert.equal(item.detail, undefined);
+  const itemCandidate = catalogue.eligible.find(
+    (candidate) => candidate.family === 'foodflation' && candidate.insight === item,
+  );
+  assert.ok(itemCandidate);
+  const publishedItem = applyDailyCopyVariant(itemCandidate, 'user:2026-02-01:daily-v21');
+  assert.equal(publishedItem.detail, undefined);
+  assert.equal(publishedItem.orderEvidence.count, 3);
   assert.doesNotMatch(JSON.stringify(foodflation), /first match|latest match|repeat basket/i);
 });
 
@@ -369,7 +389,7 @@ test('recent comparisons require fresh coverage and adequate bases', () => {
     new Date('2026-10-07T15:00:00.000Z'),
   );
   assert.equal(
-    stale.eligible.some((candidate) => candidate.insight.id.includes('spending')),
+    stale.eligible.some((candidate) => ['month-to-date-spending', 'rolling-30-spending', 'spending-change-decomposition'].includes(candidate.insight.id)),
     false,
   );
   assert.ok(

@@ -25,6 +25,7 @@ const importJob = (id, userId, kind) => ({
 const publicOperation = (id, kind) => ({
   id, kind, trigger: 'user', status: 'pending_dispatch', phase: 'waiting', progress: 0,
   result: null, errorCode: null, errorMessage: null, attempts: 0, provider: null,
+  journeyContext: undefined, presentation: kind === 'gmail_historical' ? { discoveredOrderCount: null, expectedDurationBand: 'unknown', mode: 'foreground', reason: 'normal', stage: 'waiting', timeEstimate: null } : null,
   createdAt: '2026-09-02T12:00:00.000Z', queuedAt: null, startedAt: null,
   completedAt: null, updatedAt: '2026-09-02T12:00:00.000Z',
 });

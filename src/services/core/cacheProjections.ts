@@ -1,4 +1,8 @@
 import type { DashboardInsightEdition } from '../analytics/dashboard';
+import type { OrderMetrics, summarizeOrderMetricPeriods } from '../analytics/shared/orderMetrics';
+import { isOrderMetrics, isOrderMetricPeriods } from '../analytics/shared/orderMetricContracts';
+import { isWrappedPercentiles } from '../analytics/shared/orderComparisonContracts';
+import { isWrappedStoryEvidence } from '../analytics/shared/wrappedStoryContracts';
 
 export interface UserSummaryProjection {
   user: {
@@ -7,11 +11,18 @@ export interface UserSummaryProjection {
     dataSource: string;
   };
   statistics: {
+    orderMetrics?: OrderMetrics;
+    orderMetricPeriods?: ReturnType<typeof summarizeOrderMetricPeriods>;
+    unresolvedReceiptCount?: number;
+    currencyCode?: string;
+    totalsByCurrency?: Record<string, { total: number; count: number }>;
+    dailyBreakdown?: Record<string, { total: number; count: number }>;
+    amountBasis?: 'receipt_totals' | 'best_available';
     totalSpent: number;
     averageSpent: number;
     totalReceipts: number;
     dataSourceBreakdown: Record<string, number>;
-    monthlyBreakdown: Record<string, { count: number; total: number }>;
+    monthlyBreakdown: Record<string, { count: number; total: number; pricedCount?: number }>;
     topRestaurants: Array<{ name: string; count: number; total: number }>;
   };
   validation: {
@@ -22,6 +33,7 @@ export interface UserSummaryProjection {
   recentReceipts: Array<{
     restaurantName?: string;
     amountSpent: number;
+    netAmount?: number | null;
     orderDate?: Date | string;
     dataSource: string;
   }>;
@@ -58,6 +70,16 @@ const isUserSummaryProjection = (value: unknown): value is UserSummaryProjection
     typeof statistics.totalSpent === 'number' &&
     typeof statistics.averageSpent === 'number' &&
     typeof statistics.totalReceipts === 'number' &&
+    (statistics.orderMetrics === undefined || isOrderMetrics(statistics.orderMetrics)) &&
+    (statistics.orderMetricPeriods === undefined ||
+      isOrderMetricPeriods(statistics.orderMetricPeriods)) &&
+    (value.wrappedAnalytics === undefined ||
+      (isRecord(value.wrappedAnalytics) &&
+        isWrappedStoryEvidence(value.wrappedAnalytics) &&
+        (value.wrappedAnalytics.orderMetrics === undefined ||
+          isOrderMetrics(value.wrappedAnalytics.orderMetrics)) &&
+        (value.wrappedAnalytics.percentiles === undefined ||
+          isWrappedPercentiles(value.wrappedAnalytics.percentiles)))) &&
     isNumberRecord(statistics.dataSourceBreakdown) &&
     isRecord(statistics.monthlyBreakdown) &&
     Object.values(statistics.monthlyBreakdown).every(
@@ -81,6 +103,9 @@ const isUserSummaryProjection = (value: unknown): value is UserSummaryProjection
         isRecord(entry) &&
         (entry.restaurantName === undefined || typeof entry.restaurantName === 'string') &&
         typeof entry.amountSpent === 'number' &&
+        (entry.netAmount === undefined ||
+          entry.netAmount === null ||
+          (typeof entry.netAmount === 'number' && Number.isFinite(entry.netAmount))) &&
         (entry.orderDate === undefined || typeof entry.orderDate === 'string') &&
         typeof entry.dataSource === 'string',
     )

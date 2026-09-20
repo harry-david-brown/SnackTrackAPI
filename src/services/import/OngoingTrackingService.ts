@@ -9,6 +9,8 @@ import { GmailImportService, GmailImportResult } from './GmailImportService';
 import type { OutlookImportService } from './OutlookImportService';
 import type { ImportLockHandle } from './ImportLockService';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
+import type { ReceiptImportOutcomePort } from '../ports/ReceiptPorts';
+import { receiptImportOutcomeFields } from './ReceiptImportOutcome';
 
 /** Runs consented receipt checks from either the app or an external scheduler. */
 export class OngoingTrackingService {
@@ -23,9 +25,10 @@ export class OngoingTrackingService {
       'markTrackingReconnectRequired' | 'markTrackingError'
     >,
     private readonly gmailImport: GmailImportService,
-    private readonly locks: Pick<ReceiptWriterLockPort, 'acquireLock' | 'releaseLock'>,
+    private readonly locks: Pick<ReceiptWriterLockPort, 'acquireLock' | 'releaseLock' | 'assertLockOwned'>,
     private readonly mailboxConnections?: Pick<MicrosoftMailboxConnectionPort, 'findMicrosoft'>,
     private readonly outlookImport?: Pick<OutlookImportService, 'importFromOutlook'>,
+    private readonly outcomes?: ReceiptImportOutcomePort,
   ) {}
 
   async checkUser(userId: string): Promise<GmailImportResult | null> {
@@ -85,7 +88,12 @@ export class OngoingTrackingService {
       if (providers.microsoft && durableMicrosoft && this.outlookImport) {
         results.push(await this.outlookImport.importFromOutlook(user, lockHandle, 'background', scopedExecutions.microsoft));
       }
-      const combined = this.combineResults(results);
+      let combined = this.combineResults(results);
+      if (combined?.success && execution?.accountingJobId) {
+        if (!this.outcomes) throw new Error('Canonical import outcome service is unavailable');
+        const outcome = await this.outcomes.getImportOutcome(userId, execution.accountingJobId, () => this.locks.assertLockOwned(lockHandle));
+        combined = { ...combined, ...receiptImportOutcomeFields(outcome) };
+      }
       if (combined && !combined.success) {
         const errorCode = combined.errorCode ?? 'MAILBOX_TRACKING_FAILED';
         if (errorCode.includes('RECONNECT_REQUIRED')) {
@@ -105,6 +113,7 @@ export class OngoingTrackingService {
       ? execution.checkpoint
       : { provider: 'tracking', version: 1 };
     const scoped = (provider: 'gmail' | 'microsoft'): ImportExecutionCheckpoint => ({
+      ...(execution.accountingJobId ? { accountingJobId: execution.accountingJobId } : {}),
       checkpoint: typeof root[provider] === 'object' && root[provider] !== null
         ? root[provider] as Readonly<Record<string, unknown>>
         : {},
@@ -134,10 +143,11 @@ export class OngoingTrackingService {
       eligibleReceipts: results.reduce((sum, result) => sum + result.eligibleReceipts, 0),
       deduplicatedReceipts: results.reduce((sum, result) => sum + result.deduplicatedReceipts, 0),
       totalReceiptsImported: results.reduce((sum, result) => sum + result.totalReceiptsImported, 0),
-      totalAmount: results.reduce((sum, result) => sum + result.totalAmount, 0),
+      totalAmount: results.some(result => result.totalAmount === null) ? null : results.reduce((sum, result) => sum + (result.totalAmount ?? 0), 0),
       errors: results.flatMap((result) => result.errors),
       receipts: results.flatMap((result) => result.receipts),
       newOrders: results.reduce((sum, result) => sum + result.newOrders, 0),
+      unresolvedOrders: results[results.length-1]?.unresolvedOrders ?? 0,
       updatedOrders: results.reduce((sum, result) => sum + result.updatedOrders, 0),
       unchangedOrders: results.reduce((sum, result) => sum + result.unchangedOrders, 0),
       errorCode: results.find((result) => result.errorCode)?.errorCode ?? null,

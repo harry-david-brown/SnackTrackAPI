@@ -21,6 +21,7 @@ import {
   resolveTrackingBaseline,
 } from '../import/ImportLifecycleTypes';
 import type { DatabaseQueryExecutor } from '../ports/DatabasePort';
+import { receiptHasSourceSql, receiptOrderPredicates } from './ReceiptReadPredicates';
 import {
   databaseEnum,
   databaseNonNegativeInteger,
@@ -70,6 +71,14 @@ const mapPreferences = (value: unknown): ImportPreferences => {
 const mapProvider = (value: unknown): ProviderExportPreference => {
   const row = databaseRow(value, 'provider export preference');
   return {
+    requestId: databaseNullableString(row, 'request_id'),
+    readyAlert: {
+      consentState: row.alert_consent === 'granted' || row.alert_consent === 'declined' || row.alert_consent === 'revoked' ? row.alert_consent : 'not_offered',
+      consentVersion: databaseNullableString(row, 'alert_consent_version'),
+      consentedAt: databaseTimestamp(row, 'alert_consented_at'),
+      revokedAt: databaseTimestamp(row, 'alert_revoked_at'),
+      backgroundAvailable: false, canMonitor: false,
+    },
     provider: databaseEnum(row, 'provider', EXPORT_PROVIDERS),
     status: databaseEnum(row, 'status', PROVIDER_EXPORT_LIFECYCLE_STATUSES),
     requestedAt: databaseTimestamp(row, 'requested_at'),
@@ -119,17 +128,18 @@ export class ImportPreferencesQueryRepository {
                   AND EXISTS (
                     SELECT 1 FROM receipts
                     WHERE receipts.user_id = $1
-                      AND receipts.data_source = 'csv'
+                      AND ${receiptHasSourceSql('receipts', 'csv')}
                       AND receipts.receipt_type = providers.provider
                   ) THEN 'completed'
                 ELSE COALESCE(preferences.status, 'not_started')
               END AS status,
-              preferences.requested_at,
+              preferences.requested_at, preferences.request_id, preferences.alert_consent,
+              preferences.alert_consent_version, preferences.alert_consented_at, preferences.alert_revoked_at,
               CASE
                 WHEN preferences.updated_at IS NULL THEN (
                   SELECT MAX(receipts.created_at) FROM receipts
                   WHERE receipts.user_id = $1
-                    AND receipts.data_source = 'csv'
+                    AND ${receiptHasSourceSql('receipts', 'csv')}
                     AND receipts.receipt_type = providers.provider
                 )
                 ELSE preferences.updated_at
@@ -172,11 +182,14 @@ export class ImportPreferencesQueryRepository {
 
   async getOrdersAddedThisWeek(userId: string, timezone: string): Promise<number> {
     const result = await this.database.query(
-      `SELECT COUNT(*)::int AS count FROM receipts
-       WHERE user_id = $1 AND data_source = 'email'
-         AND order_date IS NOT NULL
-         AND order_date >= (DATE_TRUNC('week', NOW() AT TIME ZONE $2) AT TIME ZONE $2)
-         AND order_date < ((DATE_TRUNC('week', NOW() AT TIME ZONE $2) + INTERVAL '7 days') AT TIME ZONE $2)`,
+      `SELECT COUNT(*)::int AS count FROM receipts r
+       LEFT JOIN pg_timezone_names z
+         ON LOWER(z.name)=LOWER(COALESCE(r.resolution->'timestamp'->>'timezone',$2))
+       WHERE r.user_id = $1 AND ${receiptHasSourceSql('r', 'email')}
+         AND ${receiptOrderPredicates('r').established}
+         AND r.order_date IS NOT NULL AND z.name IS NOT NULL
+         AND (r.order_date AT TIME ZONE z.name)::date >= DATE_TRUNC('week', NOW() AT TIME ZONE $2)::date
+         AND (r.order_date AT TIME ZONE z.name)::date < (DATE_TRUNC('week', NOW() AT TIME ZONE $2) + INTERVAL '7 days')::date`,
       [userId, timezone],
     );
     return databaseNonNegativeInteger(databaseRow(result.rows[0], 'weekly order count'), 'count');
@@ -187,10 +200,10 @@ export class ImportPreferencesQueryRepository {
       `SELECT preferences.gmail_baseline_completed_at,
               outlook.baseline_completed_at AS outlook_baseline_completed_at,
               COUNT(*) FILTER (
-                WHERE receipts.data_source = 'csv' AND receipts.receipt_type = 'uber_eats'
+                WHERE ${receiptHasSourceSql('receipts', 'csv')} AND receipts.receipt_type = 'uber_eats'
               )::int AS uber_eats_export_count,
               COUNT(*) FILTER (
-                WHERE receipts.data_source = 'csv' AND receipts.receipt_type = 'doordash'
+                WHERE ${receiptHasSourceSql('receipts', 'csv')} AND receipts.receipt_type = 'doordash'
               )::int AS doordash_export_count
        FROM (SELECT $1::UUID AS user_id) input
        LEFT JOIN user_import_preferences preferences ON preferences.user_id = input.user_id
@@ -226,13 +239,13 @@ export class ImportPreferencesQueryRepository {
            OR EXISTS (
                SELECT 1 FROM receipts uber_receipt
                WHERE uber_receipt.user_id = preferences.user_id
-                 AND uber_receipt.data_source = 'csv'
+                 AND ${receiptHasSourceSql('uber_receipt', 'csv')}
                  AND uber_receipt.receipt_type = 'uber_eats'
              )
            OR EXISTS (
                SELECT 1 FROM receipts doordash_receipt
                WHERE doordash_receipt.user_id = preferences.user_id
-                 AND doordash_receipt.data_source = 'csv'
+                 AND ${receiptHasSourceSql('doordash_receipt', 'csv')}
                  AND doordash_receipt.receipt_type = 'doordash'
              )
          )
@@ -270,7 +283,7 @@ export class ImportPreferencesQueryRepository {
              WHERE state.user_id=preferences.user_id AND state.provider='microsoft'
                AND state.baseline_completed_at IS NOT NULL)
            OR EXISTS (SELECT 1 FROM receipts receipt
-             WHERE receipt.user_id=preferences.user_id AND receipt.data_source='csv')
+             WHERE receipt.user_id=preferences.user_id AND ${receiptHasSourceSql('receipt', 'csv')})
          )
          AND EXISTS (SELECT 1 FROM mailbox_connections mailbox
            WHERE mailbox.user_id=preferences.user_id AND mailbox.provider='microsoft'

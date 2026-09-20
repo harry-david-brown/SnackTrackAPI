@@ -1,6 +1,7 @@
 import { DatabaseError } from '../../core/errors';
 import type { ImportSourceCoverage } from '../import/ImportLifecycleTypes';
 import { DatabaseQueryExecutor, DatabaseRow } from '../ports/DatabasePort';
+import { receiptHasSourceSql, receiptOrderPredicates } from './ReceiptReadPredicates';
 
 interface CoverageRow extends DatabaseRow {
   email_count: unknown;
@@ -42,47 +43,52 @@ export class ImportSourceCoverageRepository {
 
   async getForUser(userId: string): Promise<ImportSourceCoverage> {
     const result = await this.postgres.query<CoverageRow>(
-      `SELECT
-         COUNT(*) FILTER (WHERE data_source = 'email')::int AS email_count,
-         COUNT(*) FILTER (WHERE data_source = 'csv')::int AS export_count,
+      `WITH source_records AS (
+         SELECT receipt_type,
+           ${receiptHasSourceSql('r', 'email')} AS has_email,
+           ${receiptHasSourceSql('r', 'csv')} AS has_export,
+           CASE WHEN NOT ${receiptOrderPredicates('r').adjustment} THEN order_date END AS order_date
+         FROM receipts r WHERE user_id=$1
+       ) SELECT
+         COUNT(*) FILTER (WHERE has_email)::int AS email_count,
+         COUNT(*) FILTER (WHERE has_export)::int AS export_count,
          COUNT(*) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+           WHERE has_email AND receipt_type = 'uber_eats'
          )::int AS uber_eats_email_count,
          COUNT(*) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'doordash'
+           WHERE has_email AND receipt_type = 'doordash'
          )::int AS doordash_email_count,
          MIN(order_date) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+           WHERE has_email AND receipt_type = 'uber_eats'
          ) AS uber_eats_email_earliest,
          MAX(order_date) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'uber_eats'
+           WHERE has_email AND receipt_type = 'uber_eats'
          ) AS uber_eats_email_latest,
          MIN(order_date) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'doordash'
+           WHERE has_email AND receipt_type = 'doordash'
          ) AS doordash_email_earliest,
          MAX(order_date) FILTER (
-           WHERE data_source = 'email' AND receipt_type = 'doordash'
+           WHERE has_email AND receipt_type = 'doordash'
          ) AS doordash_email_latest,
          COUNT(*) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+           WHERE has_export AND receipt_type = 'uber_eats'
          )::int AS uber_eats_export_count,
          COUNT(*) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'doordash'
+           WHERE has_export AND receipt_type = 'doordash'
          )::int AS doordash_export_count,
          MIN(order_date) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+           WHERE has_export AND receipt_type = 'uber_eats'
          ) AS uber_eats_export_earliest,
          MAX(order_date) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'uber_eats'
+           WHERE has_export AND receipt_type = 'uber_eats'
          ) AS uber_eats_export_latest,
          MIN(order_date) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'doordash'
+           WHERE has_export AND receipt_type = 'doordash'
          ) AS doordash_export_earliest,
          MAX(order_date) FILTER (
-           WHERE data_source = 'csv' AND receipt_type = 'doordash'
+           WHERE has_export AND receipt_type = 'doordash'
          ) AS doordash_export_latest
-       FROM receipts
-       WHERE user_id = $1`,
+       FROM source_records`,
       [userId],
     );
     const row = result.rows[0];

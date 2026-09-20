@@ -188,11 +188,16 @@ export function selectDailyInsights(
       (candidate) => candidate.insight.id === desiredOpener.insight.id,
     );
     if (openerIndex < 0) {
+      const siblingIndex = selected.findIndex(
+        (candidate) => desiredOpener.subjectGroup && candidate.subjectGroup === desiredOpener.subjectGroup,
+      );
       const relatedIndex = selected.findIndex(
         (candidate) => !candidate.locked && related(desiredOpener, [candidate]),
       );
       const replaceIndex =
-        relatedIndex >= 0
+        siblingIndex >= 0
+          ? siblingIndex
+          : relatedIndex >= 0
           ? relatedIndex
           : selected
               .map((candidate, index) => ({ candidate, index }))

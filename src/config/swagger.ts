@@ -115,9 +115,11 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
             amountSpent: {
               type: 'number',
               format: 'float',
-              description: 'Total amount spent on the order',
+              description: 'Legacy compatibility amount. When orderOutcome is present, use its nullable netAmount and counting status instead.',
               example: 25.99,
             },
+            orderOutcome: { $ref: '#/components/schemas/ReceiptOrderOutcome' },
+            orderDay: { type: 'string', format: 'date', nullable: true, description: 'Local order day used by History filtering. Do not convert to the device timezone again.' },
             orderDate: {
               type: 'string',
               format: 'date-time',
@@ -322,10 +324,33 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
             },
           },
         },
+        HistoricalInvestment: {
+          type: 'object',
+          required: ['modelVersion', 'snapshotId', 'valuationDate', 'currencyCode', 'contributionCount', 'contributed', 'selectedBenchmark', 'outcomes'],
+          properties: {
+            modelVersion: { type: 'string', enum: ['historical-v1'] },
+            snapshotId: { type: 'string', format: 'uuid' },
+            valuationDate: { type: 'string', format: 'date' },
+            currencyCode: { type: 'string' },
+            contributionCount: { type: 'integer', minimum: 1 },
+            contributed: { type: 'number', minimum: 0 },
+            selectedBenchmark: { type: 'string', enum: ['sp500', 'nasdaq'] },
+            outcomes: { type: 'object', required: ['sp500', 'nasdaq'], properties: {
+              sp500: { $ref: '#/components/schemas/HistoricalInvestmentOutcome' },
+              nasdaq: { $ref: '#/components/schemas/HistoricalInvestmentOutcome' },
+            } },
+          },
+        },
+        HistoricalInvestmentOutcome: {
+          type: 'object', required: ['value', 'gain'], properties: {
+            value: { type: 'number', minimum: 0 }, gain: { type: 'number' },
+          },
+        },
         DashboardInsightBase: {
           type: 'object',
           required: ['id', 'presentation', 'category', 'icon', 'eyebrow', 'title'],
           properties: {
+            historicalInvestment: { $ref: '#/components/schemas/HistoricalInvestment' },
             id: { type: 'string' },
             presentation: {
               type: 'string',
@@ -344,6 +369,11 @@ Get Spotify Wrapped-style analytics with \`?includeWrapped=true\`:
             eyebrow: { type: 'string' },
             title: { type: 'string' },
             detail: { type: 'string' },
+            orderEvidence: {
+              type: 'object',
+              required: ['count'],
+              properties: { count: { type: 'integer', minimum: 1 } },
+            },
             period: {
               type: 'object',
               required: ['startDate'],

@@ -18,7 +18,7 @@ export interface ItemPersonalityProfile {
 export const ITEM_PERSONALITY_PROFILES = {
   coffee: {
     patterns: [
-      /\b(?:coffee|latte|cappuccino|espresso|americano|cold brew|frappuccino|frappe|mocha)\b/,
+      /\b(?:coffee|latte|cappuccino|espresso|americano|cold brew|frappuccino|frappe|mocha|macchiato|iced capp)\b/,
     ],
     label: 'coffees',
     minimumUnits: 5,
@@ -76,7 +76,7 @@ export const ITEM_PERSONALITY_PROFILES = {
     minimumUnits: 20,
     maximumUnits: 50000,
     icon: 'sparkles',
-    unitPatterns: [/\b(\d{1,3})\s*(?:piece\s*)?(?:mc)?nuggets?\b/],
+    unitPatterns: [/\b(\d{1,3})\s*(?:(?:piece|pc)\s*)?(?:spicy\s+)?(?:chicken\s+)?(?:mc)?nuggets?\b/],
     punchlines: [
       'At this volume, they stop being nuggets and become inventory.',
       'You could field a small, heavily breaded army.',
@@ -259,6 +259,8 @@ export const ITEM_PERSONALITY_PROFILES = {
 export type ItemPersonalityFamily = keyof typeof ITEM_PERSONALITY_PROFILES;
 
 export function classifyItemPersonality(key: string): ItemPersonalityFamily | 'other' {
+  if (/\b(?:nugget|mcnugget)s?\s+(?:sauce|dip)\b/.test(key)) return 'sauce';
+  if (/\bpizza\s+(?:sub|mozzarella)|\b(?:cookie dough|coffee|mocha)\b.*\b(?:ice cream|blizzard|cake)\b|\b(?:pearl|boba|matcha|chai)\b.*\blatte\b/.test(key)) return 'other';
   for (const [family, profile] of Object.entries(ITEM_PERSONALITY_PROFILES) as Array<
     [ItemPersonalityFamily, ItemPersonalityProfile]
   >) {
@@ -275,6 +277,7 @@ export function getItemPhysicalMultiplier(
   key: string,
   family: ItemPersonalityFamily | 'other',
 ): number {
+  key = key.replace(/\b(one|two|three|four|five|six|eight|ten|twelve|twenty)\b/g, word => ({ one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',eight:'8',ten:'10',twelve:'12',twenty:'20' }[word] ?? word));
   const genericPack = key.match(/\b(\d{1,3})\s*(?:pack|pk|piece|pc|count|ct)\b/);
   if (genericPack) return Number(genericPack[1]);
   if (family !== 'other') {

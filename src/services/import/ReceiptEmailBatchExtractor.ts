@@ -1,10 +1,13 @@
 import pLimit from 'p-limit';
 import { DataSource, Receipt, ReceiptType } from '../../models/Receipt';
-import { getDefaultTimezone, parseReceiptLocalDateTime } from '../../utils/timezone';
+import { getDefaultTimezone, getLocalDateKey, parseReceiptLocalDateTime } from '../../utils/timezone';
 import type { EmailDebugCapturePort, MailboxMessage } from '../ports/MailboxPorts';
 import type { ExtractionResult, RawEmail } from '../extraction';
 import { ServiceType } from '../extraction';
 import { decodeExtractionResult } from '../extraction/ExtractionResultDecoder';
+import { extractEmailOrderEvidence } from '../extraction/ReceiptOrderEvidenceExtractor';
+import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
+import { zonedDateTimeToUtc } from '../../utils/timezone';
 
 export interface ReceiptEmailExtractor {
   extract(email: RawEmail): unknown;
@@ -26,6 +29,7 @@ export class ReceiptEmailBatchExtractor {
     private readonly debugCapture: EmailDebugCapturePort,
     private readonly concurrency = 10,
     private readonly clock: () => number = Date.now,
+    private readonly policyVersion: ReceiptPolicyVersion = ACTIVE_RECEIPT_POLICY,
   ) {}
 
   async extract(
@@ -53,7 +57,30 @@ export class ReceiptEmailBatchExtractor {
         continue;
       }
       const receipt = this.toReceipt(email.userId, result, userTimezone || getDefaultTimezone());
-      if (receipt) extractedReceipts.push(receipt);
+      if (receipt) {
+        const orderEvidence = this.policyVersion === 3 ? extractEmailOrderEvidence({ text: result.rawText, total: result.data.total, receivedAt: email.receivedAt, timezone: userTimezone || getDefaultTimezone() }) : undefined;
+        if (orderEvidence) {
+          receipt.amountSpent = orderEvidence.recordedTotal ?? 0;
+          const placed = orderEvidence.timestamps.find(t => t.role === 'placed' && t.instant);
+          const day = orderEvidence.orderHeaderDay?.split('-').map(Number);
+          receipt.orderDate = placed?.instant ? new Date(placed.instant) : day ? zonedDateTimeToUtc({ year:day[0],month:day[1],day:day[2],hour:12,minute:0,second:0 }, userTimezone || getDefaultTimezone()) ?? undefined : undefined;
+          const delivered = orderEvidence.timestamps.find(t => t.role === 'delivered' && t.instant);
+          receipt.deliveryTime = delivered?.instant ? new Date(delivered.instant) : undefined;
+        }
+        const receivedTimeFallback = !receipt.orderDate && email.receivedAt;
+        if (receivedTimeFallback) receipt.orderDate = receivedTimeFallback;
+        receipt.resolution = { version: 1, amountBasis: 'receipt_total',
+          ...(orderEvidence?.recordedTotal === null ? {} : { receiptTotal: receipt.amountSpent }),
+          ...(orderEvidence ? { orderEvidence } : {}),
+          adjustments: result.data?.adjustments ?? [], issues: [], sourceMessageId: `${email.provider}:${email.providerMessageId}`,
+          sourceRevisionAt: email.receivedAt?.toISOString(), sources: ['email'],
+          timestamp: { raw: receivedTimeFallback ? receivedTimeFallback.toISOString() : receipt.orderDate ? getLocalDateKey(receipt.orderDate,userTimezone || getDefaultTimezone()) || '' : '',
+            role: receivedTimeFallback || (orderEvidence && !orderEvidence.timestamps.some(t => t.role === 'placed')) ? 'receipt' : 'placed', timezone:userTimezone || getDefaultTimezone(),
+            precision: receivedTimeFallback ? 'received' : (orderEvidence ? orderEvidence.timestamps.some(t => t.role === 'placed') : result.data.orderTime) ? 'minute' : 'day',
+            convention: receivedTimeFallback ? 'Email received time; order placement time unavailable' : 'Extracted receipt date and optional time' },
+          headlineSavings: result.data?.headlineSavings };
+        extractedReceipts.push(receipt);
+      }
       else errors.push('Failed to convert a supported receipt email');
     }
 
@@ -106,12 +133,12 @@ export class ReceiptEmailBatchExtractor {
       return null;
     }
     const receiptType = this.receiptType(data.service);
-    if (data.total === null || data.total === undefined) return null;
+    if ((data.total === null || data.total === undefined) && !(this.policyVersion === 3 && data.orderEvidence && ['refund','updated','cancellation'].includes(data.orderEvidence.documentKind))) return null;
     const localOrderDate = parseReceiptLocalDateTime(data.orderDate, data.orderTime, timezone);
     return new Receipt(
       userId,
-      [],
-      data.total,
+      data.items ?? [],
+      data.total ?? 0,
       receiptType,
       data.merchant || 'Unknown Restaurant',
       localOrderDate || data.parsedDate || undefined,

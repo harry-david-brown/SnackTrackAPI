@@ -6,11 +6,12 @@ import { config } from './config/AppConfig';
 import { redisConfig, redisLockStore } from './config/redis';
 import { container } from './services/core/ServiceContainer';
 import { ImportJobProcessor } from './services/import/ImportJobProcessor';
+import { ACTIVE_RECEIPT_POLICY } from './services/receipt/ReceiptPolicy';
 import { ImportPushNotificationService } from './services/notifications/ImportPushNotificationService';
 import { createQueueWorker, EXPORT_IMPORT_QUEUE, ImportQueuePublisher, MAILBOX_IMPORT_QUEUE, NOTIFICATION_QUEUE, OutboxDispatcher, queueAttemptFailureMessage, type QueuePayload } from './services/queue/ImportQueues';
 
 const queueConfig = config.getQueueConfig();
-const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService, container.importTestScenarioRepository, container.gmailPushTrackingService);
+const processor = new ImportJobProcessor(container.importJobRepository, container.importObjectStorage, container.zipExtractor, container.csvImportUseCase, container.historicalGmailImportService, container.historicalOutlookImportService, container.manualTrackingCheckService, container.ongoingTrackingService, container.importTestScenarioRepository, container.gmailPushTrackingService, container.receiptRebuildService, container.receiptRepository);
 const push = new ImportPushNotificationService(container.importJobRepository, container.pushDeviceRepository, config.getPushConfig().deliveryMode, logger);
 const publisher = new ImportQueuePublisher(container.importJobRepository, queueConfig);
 const dispatcher = new OutboxDispatcher(container.importJobRepository, publisher, logger);
@@ -46,7 +47,7 @@ const startLockDependentWorkers = async (): Promise<void> => {
   exportWorker = createQueueWorker(EXPORT_IMPORT_QUEUE, queueConfig.redisUrl, queueConfig.exportConcurrency, (job) => processor.process(job));
   observe(mailboxWorker);
   observe(exportWorker);
-  logger.info('Lock-dependent import workers started', { operation: 'import_worker_start', mailboxConcurrency: queueConfig.mailboxConcurrency, exportConcurrency: queueConfig.exportConcurrency });
+  logger.info('Lock-dependent import workers started', { operation: 'import_worker_start', receiptPolicyVersion: ACTIVE_RECEIPT_POLICY, mailboxConcurrency: queueConfig.mailboxConcurrency, exportConcurrency: queueConfig.exportConcurrency });
 };
 
 const unsubscribeRedis = redisLockStore.onStateChange((snapshot) => {

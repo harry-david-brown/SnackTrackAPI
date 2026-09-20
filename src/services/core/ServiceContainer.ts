@@ -1,3 +1,8 @@
+import { MarketHistoryRepository } from '../data/MarketHistoryRepository';
+import { FinazonMarketHistory } from '../market/FinazonMarketHistory';
+import { RefreshMarketHistoryService } from '../market/RefreshMarketHistoryService';
+import { InvestmentContextService } from '../market/InvestmentContextService';
+import { ReceiptRebuildService } from '../receipt/ReceiptRebuildService';
 import { AccountDeletionService } from '../account/AccountDeletionService';
 import { ReceiptClearService } from '../account/ReceiptClearService';
 import { AlertingService } from '../monitoring/AlertingService';
@@ -13,6 +18,7 @@ import { SessionService } from '../auth/SessionService';
 import { TokenService } from '../auth/TokenService';
 import { AuthenticationActivityService } from '../auth/AuthenticationActivityService';
 import { WrappedAnalyticsService } from '../analytics/WrappedAnalyticsService';
+import { FrankfurterRecapRates } from '../analytics/FrankfurterRecapRates';
 import { WrappedAnalyticsQueryRepository } from '../analytics/WrappedAnalyticsQueryRepository';
 import { AccountResetService } from '../data/AccountResetService';
 import { GmailSyncRunRepository } from '../data/GmailSyncRunRepository';
@@ -103,10 +109,12 @@ import { GmailPushMaintenanceService } from '../import/GmailPushMaintenanceServi
 /** The process-wide, typed composition root and resource owner. */
 export class ServiceContainer {
   readonly postgres: PostgresService;
+  readonly refreshMarketHistoryService: RefreshMarketHistoryService;
   readonly userRepository: UserRepository;
   readonly oauthRepository: OAuthRepository;
   readonly microsoftLoginAttemptRepository: MicrosoftLoginAttemptRepository;
   readonly receiptRepository: ReceiptRepository;
+  readonly receiptRebuildService: ReceiptRebuildService;
   readonly importEventRepository: ImportEventRepository;
   readonly importLifecycleRepository: ImportLifecycleRepository;
   readonly gmailSyncRunRepository: GmailSyncRunRepository;
@@ -288,6 +296,7 @@ export class ServiceContainer {
           )
         : null;
     this.sessionService = new SessionService(this.userRepository, this.tokenService);
+    this.receiptRebuildService = new ReceiptRebuildService(this.receiptRepository, this.cacheService, ImportLockService);
     this.csvImportService = new CsvImportService(logger);
     this.csvImportUseCase = new CsvImportUseCase(
       this.csvImportService,
@@ -296,6 +305,7 @@ export class ServiceContainer {
       this.importLifecycleRepository,
       this.cacheService,
       ImportLockService,
+      this.receiptRepository,
     );
     this.zipExtractor = new ZipExtractor();
     this.emailDebugCapture = new RedactingFileEmailDebugCapture(
@@ -331,6 +341,7 @@ export class ServiceContainer {
       this.receiptRepository,
       this.cacheService,
       ImportLockService,
+      this.receiptRepository,
     );
     this.gmailImportLifecycleService = new GmailImportLifecycleService(
       this.gmailSyncRunRepository,
@@ -405,6 +416,7 @@ export class ServiceContainer {
       ImportLockService,
       this.mailboxConnectionRepository,
       this.outlookImportService,
+      this.receiptRepository,
     );
     this.historicalOutlookImportService = new HistoricalOutlookImportService(
       this.userRepository,
@@ -496,6 +508,12 @@ export class ServiceContainer {
       this.adminRepository,
       this.gmailWatchService,
     );
+    const marketHistoryRepository = new MarketHistoryRepository(this.postgres);
+    this.refreshMarketHistoryService = new RefreshMarketHistoryService(
+      marketHistoryRepository,
+      new FinazonMarketHistory(config.getMarketHistoryConfig().apiKey),
+    );
+    const investmentContextService = new InvestmentContextService(config.getMarketHistoryConfig().enabled, marketHistoryRepository, message => logger.warn(message));
     this.wrappedAnalyticsQueryRepository = new WrappedAnalyticsQueryRepository(this.postgres);
     this.wrappedAnalyticsService = new WrappedAnalyticsService(
       this.wrappedAnalyticsQueryRepository,
@@ -506,11 +524,14 @@ export class ServiceContainer {
       this.receiptRepository,
       this.wrappedAnalyticsService,
       this.cacheService,
+      new FrankfurterRecapRates(fetch, Date.now, message => logger.warn(message)),
+      investmentContextService,
     );
     this.getDashboardInsightsService = new GetDashboardInsightsService(
       this.userRepository,
       this.receiptRepository,
       this.cacheService,
+      investmentContextService,
     );
     this.administratorQueryRepository = new AdministratorQueryRepository(this.postgres);
     this.administratorService = new AdministratorService(this.administratorQueryRepository);
@@ -522,6 +543,7 @@ export class ServiceContainer {
       this.mailboxSecurityPolicyRepository,
       this.importTestScenarioRepository,
       this.gmailConnectionService,
+      this.administratorQueryRepository,
     );
     this.adminAnalyticsQueryService = new AdminAnalyticsQueryService(this.postgres);
     this.adminAuthService = new AdminAuthService(this.adminRepository, this.emailSender, {

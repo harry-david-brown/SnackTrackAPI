@@ -8,6 +8,7 @@ const { ReceiptClearService } = require('../dist/services/account/ReceiptClearSe
 const { AccountResetService } = require('../dist/services/data/AccountResetService');
 const { MigrationRunner } = require('../dist/services/data/MigrationRunner');
 const { migrations } = require('../dist/services/data/migrations');
+const { orderEventsMigration } = require('../dist/services/data/migrations/027_order_events');
 
 const databaseUrl = process.env.MIGRATION_TEST_DATABASE_URL;
 const userId = '11111111-1111-4111-8111-111111111111';
@@ -35,7 +36,8 @@ const withTemporaryDatabase = async (label, operation) => {
     options: `-c search_path=${schema}`,
   });
   try {
-    await new MigrationRunner({ getClient: () => pool.connect() }, migrations).run();
+    await new MigrationRunner({ getClient: () => pool.connect() },
+      migrations.some((m) => m.version === 27) ? migrations : [...migrations, orderEventsMigration]).run();
     await operation(pool);
   } finally {
     await pool.end();
@@ -114,6 +116,29 @@ const seedAllData = async (pool) => {
   );
 };
 
+const seedReconciliation = async (pool) => {
+  await pool.query("INSERT INTO receipt_import_batches(id,user_id,provider,observed_start,observed_end,accepted_orders) VALUES('batch',$1,'doordash',NOW(),NOW(),1)",[userId]);
+  await pool.query("INSERT INTO receipt_repair_manifests(id,user_id,import_generation,policy_version,before_fingerprint,before_state,after_state) VALUES('44444444-4444-4444-8444-444444444444',$1,0,2,'fingerprint','{}','{}')",[userId]);
+  await pool.query("INSERT INTO receipt_reconciliation_lineage(id,user_id,old_receipt_id,new_receipt_id,policy_version) VALUES('55555555-5555-4555-8555-555555555555',$1,'22222222-2222-4222-8222-222222222222','33333333-3333-4333-8333-333333333333',2)",[userId]);
+  await pool.query(`INSERT INTO receipt_observations(id,user_id,receipt_id,document_key,import_generation,parser_version,payload,association_enabled)
+    VALUES('66666666-6666-4666-8666-666666666666',$1,'22222222-2222-4222-8222-222222222222','source-1',1,3,'{}',true),
+      ('77777777-7777-4777-8777-777777777777',$1,NULL,'source-2',1,3,'{}',false)`, [userId]);
+  await pool.query(`INSERT INTO receipt_order_events(user_id,receipt_id,event_key,kind,amount,currency_code,confidence,payload)
+    VALUES($1,'22222222-2222-4222-8222-222222222222','charge','charge',10,'CAD','confirmed','{}')`, [userId]);
+  await pool.query(`INSERT INTO receipt_order_event_observations(user_id,receipt_id,event_key,observation_id)
+    VALUES($1,'22222222-2222-4222-8222-222222222222','charge','66666666-6666-4666-8666-666666666666')`, [userId]);
+  await pool.query(`INSERT INTO receipt_repair_source_batches(id,user_id,import_generation,parser_version,fingerprint,provenance)
+    VALUES('88888888-8888-4888-8888-888888888888',$1,1,3,repeat('a',64),'{}')`, [userId]);
+  await pool.query(`INSERT INTO receipt_repair_source_observations(id,user_id,batch_id,document_key,payload)
+    VALUES('99999999-9999-4999-8999-999999999999',$1,'88888888-8888-4888-8888-888888888888',repeat('b',64),'{}')`, [userId]);
+  await pool.query(`INSERT INTO receipt_association_reviews(id,user_id,import_generation,decision,observation_ids,reason,reviewer)
+    VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',$1,1,'keep_separate',ARRAY['66666666-6666-4666-8666-666666666666','77777777-7777-4777-8777-777777777777']::uuid[],'test','test operator')`, [userId]);
+  await pool.query(`INSERT INTO receipt_association_reviews(id,user_id,import_generation,decision,observation_ids,supersedes_id,reason,reviewer)
+    VALUES('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',$1,1,'revoke','{}','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','test revoke','test operator')`, [userId]);
+};
+const reconciliationTables=['receipt_import_batches','receipt_repair_manifests','receipt_reconciliation_lineage',
+  'receipt_observations','receipt_order_events','receipt_order_event_observations',
+  'receipt_repair_source_batches','receipt_repair_source_observations','receipt_association_reviews'];
 const count = async (pool, table) =>
   (await pool.query(`SELECT COUNT(*)::int AS count FROM ${table}`)).rows[0].count;
 
@@ -125,6 +150,7 @@ test(
   async () => {
     await withTemporaryDatabase('delete', async (pool) => {
       await seedAllData(pool);
+      await seedReconciliation(pool);
       const service = new AccountDeletionService(
         transactions(pool),
         { invalidateAllUserCaches: async () => {} },
@@ -135,6 +161,7 @@ test(
 
       assert.deepEqual(await service.deleteAccount(userId, 'refresh-token'), { deleted: true });
       for (const table of [
+        ...reconciliationTables,
         'users',
         'receipts',
         'oauth_accounts',
@@ -159,6 +186,7 @@ test(
   async () => {
     await withTemporaryDatabase('clear', async (pool) => {
       await seedAllData(pool);
+      await seedReconciliation(pool);
       const service = new ReceiptClearService(
         transactions(pool),
         { invalidateAllUserCaches: async () => {} },
@@ -169,6 +197,7 @@ test(
       assert.equal(await count(pool, 'users'), 1);
       assert.equal(await count(pool, 'oauth_accounts'), 1);
       assert.equal(await count(pool, 'receipts'), 0);
+      for(const table of reconciliationTables)assert.equal(await count(pool,table),0);
       assert.equal(await count(pool, 'gmail_sync_runs'), 0);
       assert.equal(await count(pool, 'user_import_preference_events'), 1);
       const preferences = (
@@ -209,6 +238,7 @@ test(
   async () => {
     await withTemporaryDatabase('reset', async (pool) => {
       await seedAllData(pool);
+      await seedReconciliation(pool);
       const service = new AccountResetService(
         transactions(pool),
         { invalidateAllUserCaches: async () => {} },
@@ -221,6 +251,7 @@ test(
       assert.equal(await count(pool, 'oauth_accounts'), 1);
       assert.equal(await count(pool, 'verification_codes'), 1);
       for (const table of [
+        ...reconciliationTables,
         'receipts',
         'user_export_provider_preferences',
         'user_import_preference_events',
