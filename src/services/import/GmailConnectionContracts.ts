@@ -13,6 +13,7 @@ export const isGmailConnectionMode = (value: unknown): value is GmailConnectionM
   typeof value === 'string' && GMAIL_CONNECTION_MODES.some((mode) => mode === value);
 
 export interface GmailOAuthState {
+  readonly codeVerifier?: string;
   readonly userId: string;
   readonly redirectUri: string;
   readonly purpose: GmailConnectionPurpose;
@@ -29,5 +30,5 @@ export interface GmailOAuthGrant {
 export interface GmailOAuthPort {
   createAuthorizationUrl(state: GmailOAuthState): string;
   verifyState(state: string): GmailOAuthState;
-  exchangeAuthorizationCode(code: string): Promise<GmailOAuthGrant>;
+  exchangeAuthorizationCode(code: string, state: GmailOAuthState): Promise<GmailOAuthGrant>;
 }

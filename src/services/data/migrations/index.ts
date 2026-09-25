@@ -33,6 +33,8 @@ import { gmailPushAndQuotaMigration } from './023_gmail_push_and_quota';
 import { receiptProviderIdentityMigration } from './025_receipt_provider_identity';
 
 import { exportReadyAlertsMigration } from './033_export_ready_alerts';
+import { authSecurityMigration } from './034_auth_security';
+import { importObjectCleanupMigration } from './035_import_object_cleanup';
 
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
@@ -68,4 +70,6 @@ export const migrations: readonly Migration[] = [
   receiptReviewEvidenceMigration,
   marketHistoryMigration,
   exportReadyAlertsMigration,
+  authSecurityMigration,
+  importObjectCleanupMigration,
 ];

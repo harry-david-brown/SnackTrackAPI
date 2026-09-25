@@ -94,6 +94,10 @@ export const createNotificationDeviceRouter = (dependencies: NotificationDeviceR
     await dependencies.devices.upsert(authenticatedUserId(request), installationId, token, platform);
     response.json({ success: true });
   }));
+  router.get('/device/:installationId', dependencies.authenticate, asyncHandler(async (request: Request, response: Response) => {
+    if (request.params.installationId.length>128) throw new ValidationError('Invalid notification installation.');
+    response.json({ enabled: await dependencies.devices.isInstallationEnabled(authenticatedUserId(request),request.params.installationId) });
+  }));
   router.delete('/device/:installationId', dependencies.authenticate, asyncHandler(async (request: Request, response: Response) => {
     await dependencies.devices.disableInstallation(authenticatedUserId(request), request.params.installationId);
     response.status(204).send();

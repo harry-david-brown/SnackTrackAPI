@@ -6,9 +6,13 @@ Status: implementation prepared; historical mode and provider refresh default to
 
 Use Finazon US Equities Basic, as a business account. Confirm the configured plan's final price (the public $19/month is a starting price), commercial calculated-result display, storage/retention, and permitted use after cancellation. Keep the agreement with operational records. Public pages: https://finazon.io/dataset/us_stocks_essential and https://finazon.io/terms.
 
-In an entitled environment verify `SPY` and `QQQ` daily history from 1999-03-10 (the common fund-history horizon) through the previous completed month. The adapter uses Finazon's documented `/latest/finazon/us_stocks_essential/time_series`, `adjust=all`, `prepost=false`, ascending order, and 1,000-row pages. Confirm UTC date interpretation, symbol identity, pagination, and dividend/split treatment against actual responses. Check several independently sourced total-return intervals, including dividend dates and a falling market. These live checks need an entitled API key and are not replaced by synthetic regression fixtures.
+In an entitled environment verify `SPY` and `QQQ` daily history from 1999-03-10 (the common fund-history horizon) through the previous completed month. The adapter uses Finazon's documented `/latest/finazon/us_stocks_essential/time_series`, `adjust=all`, `prepost=false`, ascending order, and 1,000-row pages starting at page 1. Live verification showed that page 0 aliases page 1, despite the documented default of 0. Confirm UTC date interpretation, symbol identity, pagination, and dividend/split treatment against actual responses. Check several independently sourced total-return intervals, including dividend dates and a falling market. These live checks need an entitled API key and are not replaced by synthetic regression fixtures.
 
 The validation calendar covers regular US market holidays and known exceptional closures since 1999. Missing expected sessions reject the entire snapshot. Unexpected future closures require a calendar update rather than guessing a price. Contributions before the common horizon omit the story; they are never silently dropped from a historical comparison.
+
+## Live validation blocker
+
+Development verification found a zero daily close for SPY on 2023-08-28, both in the full-history page and in a separate narrow date-range request, with `adjust=all` and `adjust=none`. Snapshot validation correctly rejects it. Finazon must correct the observation and the complete series must be revalidated before activation; do not discard the day, replace the price, or silently change providers.
 
 ## Deploy in order
 
@@ -17,6 +21,8 @@ The validation calendar covers regular US market holidays and known exceptional 
 3. After provider acceptance, configure `FINAZON_API_KEY` on a separate scheduler service using `railway.market-history.json`. This service runs `npm run start:market-history` daily at 08:00 UTC. Set `MARKET_HISTORY_REFRESH_ENABLED=true` there; no key is needed in the app or API read process.
 4. Run the command once in that environment, inspect its `published` result and database snapshot. Both funds are published as one immutable record, only after complete validation. The refresh lease is fenced at publication; overlapping runs cannot publish with an expired lease.
 5. Enable `HISTORICAL_INVESTMENTS_ENABLED=true` on the API only after verifying values and updated mobile presentation. Restart the API for configuration changes.
+
+When Finazon returns HTTP 429 without retry timing, the adapter waits 60 seconds before retrying the same page, with at most three attempts per page. Explicit long cooldowns defer to the next scheduled run.
 
 The job fetches only when the completed-month snapshot is missing, re-fetching full adjusted history to avoid mixing adjustment bases. A provider failure leaves the prior snapshot untouched. Inspect `market_history_refresh` failures and the published valuation date in existing logs; alert operationally if no new snapshot has published by the fifth day of the month. Never attach a provider's raw error body or key to logs.
 

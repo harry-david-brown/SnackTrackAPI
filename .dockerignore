@@ -1,0 +1,20 @@
+# Only application inputs enter the build context. Runtime secrets come from deployment configuration.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!src/
+!src/**
+
+# Never re-include credentials or local captures, even if placed under src.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.keystore
+**/credentials*.json
+**/service-account*.json
+**/debug-emails/**
+**/debug-events/**

@@ -5,7 +5,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://snacktrack:password@postgres:5432/snacktrack_prod
+      - DATABASE_URL=postgresql://snacktrack:${POSTGRES_PASSWORD:?Set a strong URL-safe POSTGRES_PASSWORD}@postgres:5432/snacktrack_prod
     env_file:
       - .env
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
     command: node dist/scripts/migrate.js
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://snacktrack:password@postgres:5432/snacktrack_prod
+      DATABASE_URL: postgresql://snacktrack:${POSTGRES_PASSWORD:?Set a strong URL-safe POSTGRES_PASSWORD}@postgres:5432/snacktrack_prod
     env_file: [.env]
     depends_on:
       postgres: { condition: service_healthy }
@@ -33,7 +33,7 @@ services:
     command: npm run start:market-history-scheduler
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://snacktrack:password@postgres:5432/snacktrack_prod
+      DATABASE_URL: postgresql://snacktrack:${POSTGRES_PASSWORD:?Set a strong URL-safe POSTGRES_PASSWORD}@postgres:5432/snacktrack_prod
     env_file: [.env]
     restart: unless-stopped
     init: true
@@ -46,9 +46,7 @@ services:
     environment:
       - POSTGRES_DB=snacktrack_prod
       - POSTGRES_USER=snacktrack
-      - POSTGRES_PASSWORD=password
-    ports:
-      - "5432:5432"
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set a strong URL-safe POSTGRES_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U snacktrack -d snacktrack_prod"]
       interval: 5s

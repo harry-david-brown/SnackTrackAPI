@@ -55,10 +55,18 @@ export const createOutlookRouter = (dependencies: OutlookRouterDependencies): Ro
           authenticatedUserId(request),
           redirectUri,
           body.purpose,
+          requireStringField(body, 'handoffChallenge'),
+          request.user?.sessionVersion ?? 0,
         ),
       });
     }),
   );
+
+  router.post('/complete', dependencies.authenticate, asyncHandler(async (request, response) => {
+    await dependencies.connections.finishAuthorization(authenticatedUserId(request),
+      requireStringField(request.body, 'completionToken'), requireStringField(request.body, 'verifier'));
+    response.json({ success: true, message: 'Outlook connected successfully' });
+  }));
 
   router.get(
     '/callback',
@@ -71,6 +79,8 @@ export const createOutlookRouter = (dependencies: OutlookRouterDependencies): Ro
           optionalQueryString(request.query.code, 'code'),
           optionalQueryString(request.query.error, 'error'),
         );
+        response.set('Cache-Control', 'no-store');
+        response.set('Referrer-Policy', 'no-referrer');
         response.redirect(result.redirectUri);
       } catch (error) {
         dependencies.logger.warn('Outlook OAuth callback failed', {

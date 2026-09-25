@@ -28,9 +28,10 @@ export class GmailPushRepository implements GmailPushStatePort {
            AND u.gmail_connected=TRUE AND u.gmail_connection_mode='offline'
            AND u.gmail_refresh_token IS NOT NULL
            AND (p.ongoing_tracking_consent_state='granted' OR (
-             p.monitoring_consent_state='granted' AND EXISTS (
+             EXISTS (
                SELECT 1 FROM user_export_provider_preferences export
-               WHERE export.user_id=u.id AND export.provider='uber_eats' AND export.status='requested'
+               WHERE export.user_id=u.id AND export.status='requested'
+                 AND export.alert_consent='granted' AND export.alert_consent_version='export-ready-background-v1'
              )
            ))
          LIMIT 2`,
@@ -132,10 +133,11 @@ export class GmailPushRepository implements GmailPushStatePort {
         `INSERT INTO gmail_push_state(user_id)
          SELECT u.id FROM users u JOIN user_import_preferences p ON p.user_id=u.id
          WHERE u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
-           AND (p.ongoing_tracking_consent_state='granted' OR (p.monitoring_consent_state='granted' AND EXISTS (
-             SELECT 1 FROM user_export_provider_preferences export
-             WHERE export.user_id=u.id AND export.provider='uber_eats' AND export.status='requested'
-           )))
+           AND (p.ongoing_tracking_consent_state='granted' OR (EXISTS (
+               SELECT 1 FROM user_export_provider_preferences export
+               WHERE export.user_id=u.id AND export.status='requested'
+                 AND export.alert_consent='granted' AND export.alert_consent_version='export-ready-background-v1'
+             )))
          ON CONFLICT(user_id) DO NOTHING`,
       );
       const result = await transaction.query<Row>(
@@ -143,9 +145,10 @@ export class GmailPushRepository implements GmailPushStatePort {
            SELECT s.user_id FROM gmail_push_state s
            JOIN users u ON u.id=s.user_id JOIN user_import_preferences p ON p.user_id=u.id
            WHERE u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
-             AND (p.ongoing_tracking_consent_state='granted' OR (p.monitoring_consent_state='granted' AND EXISTS (
+             AND (p.ongoing_tracking_consent_state='granted' OR (EXISTS (
                SELECT 1 FROM user_export_provider_preferences export
-               WHERE export.user_id=u.id AND export.provider='uber_eats' AND export.status='requested'
+               WHERE export.user_id=u.id AND export.status='requested'
+                 AND export.alert_consent='granted' AND export.alert_consent_version='export-ready-background-v1'
              )))
              AND (s.watch_expiration IS NULL OR s.watch_expiration<NOW()+INTERVAL '5 days')
              AND (s.watch_renewal_lease_until IS NULL OR s.watch_renewal_lease_until<NOW())

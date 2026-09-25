@@ -36,7 +36,7 @@ The worker downloads using `If-Match` with the submitted ETag. It counts bytes w
 
 This means a spoofed client filename or size field cannot increase the worker's accepted byte budget. Temporary directories are private, files are created without overwrite permission, and only SnackTrack-generated directories are recursively removed. Workers sweep generated temporary directories older than 24 hours on startup. The scheduler removes terminal-job objects from storage after a one-hour safety window and retries cleanup on a later run if storage is unavailable.
 
-Configure an object-storage lifecycle rule as a final backstop to expire all objects under `imports/` after a short retention period (recommended: seven days). The application cleanup remains necessary for prompt deletion; the bucket rule covers interrupted deployments and database/storage drift.
+Configure an object-storage lifecycle rule to expire `imports/` objects after 24 hours, including noncurrent versions and abandoned multipart uploads when those features are enabled. Application cleanup remains necessary for prompt deletion; the bucket rule covers interrupted deployments and database/storage drift. Migration 035 preserves deletion work when accounts or jobs are removed. The hourly scheduler deletes immediately when it sees that work, repeats deletion during a 24-hour signed-upload grace period, and retains failed work until storage confirms deletion. Signed upload URLs are capped at one hour.
 
 ## ZIP rules
 
@@ -111,4 +111,3 @@ Recommended manual cases before release:
 Run the API, worker, and scheduler as separate Railway services from the same image. The API should not process imports. Start with export worker concurrency `1` and mailbox concurrency `2`, then scale workers horizontally based on queue delay, database headroom, mailbox quotas, memory, and temporary-disk usage. Keep the sum of database pools across all replicas below the Railway PostgreSQL connection limit.
 
 Alert on queue age/depth, repeated object cleanup failures, temporary-disk pressure, import failure codes, rejected-message spikes, decoded-byte budget failures, mailbox throttling, and database saturation. Redis provides buffering, not infinite capacity: retain the waiting-job admission cap and the no-eviction policy.
-

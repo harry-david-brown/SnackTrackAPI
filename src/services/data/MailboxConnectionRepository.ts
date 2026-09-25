@@ -80,10 +80,10 @@ export class MailboxConnectionRepository {
     scopes: readonly string[];
     tokenExpiresAt: Date | null;
     credentials: MicrosoftMailboxCredentials;
-  }): Promise<void> {
+  }, executor: DatabaseQueryExecutor = this.database): Promise<void> {
     const encrypted = this.cipher.encrypt(JSON.stringify(input.credentials));
     try {
-      await this.database.query(
+      await executor.query(
         `INSERT INTO mailbox_connections (
          user_id, provider, provider_account_id, email, scopes, connection_mode,
          status, encrypted_token_cache, token_expires_at

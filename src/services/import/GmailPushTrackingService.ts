@@ -8,7 +8,7 @@ import type { GmailWatchService } from './GmailWatchService';
 
 export class GmailPushTrackingService {
   constructor(
-    private readonly preferences: Pick<ImportPreferencesService, 'checkGmailExportReady'>,
+    private readonly preferences: Pick<ImportPreferencesService, 'get'>,
     private readonly tracking: Pick<OngoingTrackingService, 'checkGmailUserWithLock'>,
     private readonly pushes: Pick<GmailPushStatePort, 'markProcessed'|'releaseDispatch'>,
     private readonly watches: Pick<GmailWatchService, 'stopForUser'>,
@@ -25,7 +25,7 @@ export class GmailPushTrackingService {
       : null;
     try {
       await this.exportAlerts?.enqueueEligible(2,userId);
-      const exportReady = await this.preferences.checkGmailExportReady(userId);
+      const preferences = await this.preferences.get(userId);
       const tracking = await this.tracking.checkGmailUserWithLock(userId, lock, execution);
       if (tracking && !tracking.success) {
         throw new AppError({
@@ -34,13 +34,13 @@ export class GmailPushTrackingService {
         });
       }
       await this.pushes.markProcessed(userId);
-      if (exportReady.detected && exportReady.preferences.ongoingTracking.consentState !== 'granted' &&
-        !Object.values(exportReady.preferences.export.providers).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted')) {
+      if (preferences.ongoingTracking.consentState !== 'granted' &&
+        !Object.values(preferences.export.providers).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted')) {
         await this.watches.stopForUser(userId);
       }
       return {
         success: true,
-        exportReadyDetected: exportReady.detected,
+        exportReadyDetected: false,
         newOrders: tracking?.newOrders ?? 0,
         updatedOrders: tracking?.updatedOrders ?? 0,
         unchangedOrders: tracking?.unchangedOrders ?? 0,

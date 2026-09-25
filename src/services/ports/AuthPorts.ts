@@ -77,3 +77,13 @@ export interface TransactionalEmailPort {
   sendPasswordResetEmail(email: string, code: string): Promise<void>;
   sendProviderLoginVerificationEmail(email: string, code: string): Promise<void>;
 }
+
+export interface ProviderAccountIdentity {
+  readonly provider: AuthProvider;
+  readonly providerUserId: string;
+  readonly email?: string;
+  readonly emailVerified: boolean;
+}
+export interface ProviderAccountPort {
+  resolve(identity: ProviderAccountIdentity): Promise<User>;
+}

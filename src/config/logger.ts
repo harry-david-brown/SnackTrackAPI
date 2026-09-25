@@ -342,6 +342,8 @@ const isSensitiveLogKey = (key: string): boolean => {
     normalized.includes('cookie') ||
     normalized.includes('verificationcode') ||
     normalized.includes('resetcode') ||
+    normalized.includes('verifier') ||
+    normalized === 'state' || normalized === 'code' ||
     normalized === 'otp' ||
     normalized.includes('emailbody') ||
     normalized.includes('emailcontent') ||
@@ -353,14 +355,25 @@ const isSensitiveLogKey = (key: string): boolean => {
   );
 };
 
+export const redactLogString = (value: string): string => value.replace(
+  /(?:[a-z][a-z0-9+.-]*:\/\/|\/)[^\s"'<>]*[?#][^\s"'<>]*/gi,
+  (url) => url.split(/[?#]/, 1)[0] + '?[REDACTED]',
+);
+
 export const redactLogMetadata = (value: unknown, seen = new WeakSet<object>()): unknown => {
-  if (Array.isArray(value)) return value.map((entry) => redactLogMetadata(entry, seen));
+  if (typeof value === 'string') {
+    if (value.startsWith('{') || value.startsWith('[')) {
+      try { return JSON.stringify(redactLogMetadata(JSON.parse(value), seen)); } catch { /* Not serialized JSON. */ }
+    }
+    return redactLogString(value);
+  }
   if (typeof value !== 'object' || value === null) return value;
   if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack };
+    return { name: value.name, message: redactLogString(value.message), stack: value.stack ? redactLogString(value.stack) : undefined };
   }
   if (seen.has(value)) return '[Circular]';
   seen.add(value);
+  if (Array.isArray(value)) return value.map((entry) => redactLogMetadata(entry, seen));
 
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [
@@ -373,7 +386,7 @@ export const redactLogMetadata = (value: unknown, seen = new WeakSet<object>()):
 const redactionFormat = winston.format((info) => {
   for (const [key, value] of Object.entries(info)) {
     if (isSensitiveLogKey(key)) info[key] = '[REDACTED]';
-    else if (typeof value === 'object' && value !== null) info[key] = redactLogMetadata(value);
+    else info[key] = redactLogMetadata(value);
   }
   return info;
 });

@@ -14,7 +14,7 @@
 
 import * as Sentry from '@sentry/node';
 import { Express } from 'express';
-import { logger } from './logger';
+import { logger, redactLogMetadata, redactLogString } from './logger';
 import { config as appConfig } from './AppConfig';
 
 interface SentryConfig {
@@ -108,7 +108,17 @@ class SentryConfigManager {
           delete event.request.headers.cookie;
         }
 
-        return event;
+        if (event.request) {
+          delete event.request.data;
+          delete event.request.query_string;
+          if (event.request.url) event.request.url = redactLogString(event.request.url);
+        }
+        return redactLogMetadata(event) as typeof event;
+      },
+      beforeBreadcrumb(breadcrumb) { return redactLogMetadata(breadcrumb) as typeof breadcrumb; },
+      beforeSendTransaction(event) {
+        if (event.request) { delete event.request.data; delete event.request.query_string; }
+        return redactLogMetadata(event) as typeof event;
       },
 
       // Ignore common non-critical errors

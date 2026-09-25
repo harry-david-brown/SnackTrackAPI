@@ -312,7 +312,7 @@ export class ImportJobRepository {
   }
 
   async listRecent(userId: string, limit = 10): Promise<ImportJob[]> {
-    const result = await this.database.query<Row>(`SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, [userId, Math.max(1, Math.min(limit, 50))]);
+    const result = await this.database.query<Row>(`SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1 AND kind<>'export_ready_check' ORDER BY created_at DESC LIMIT $2`, [userId, Math.max(1, Math.min(limit, 50))]);
     return result.rows.map(decode);
   }
 
@@ -410,14 +410,24 @@ export class ImportJobRepository {
     await this.database.withTransaction(async (transaction) => {
       if (job.kind === 'export_ready_check') {
         let detected = false;
+        await transaction.query(`UPDATE user_export_provider_preferences p
+          SET alert_last_checked_at=CASE WHEN $5='succeeded' THEN NOW() ELSE alert_last_checked_at END,
+              alert_last_error_code=$6
+          FROM users u
+          WHERE p.user_id=$1 AND p.provider=$2 AND p.request_id=$3::uuid
+            AND p.alert_consent='granted' AND u.id=p.user_id AND u.import_generation=$4`,
+          [job.userId,job.exportProvider,job.checkpoint.requestId,job.importGeneration,status,code]);
+
         if (status === 'succeeded' && result?.exportReadyDetected === true) {
           const ready = await transaction.query(`UPDATE user_export_provider_preferences p
-            SET status='file_ready',ready_source='detected_email',updated_at=NOW(),alert_last_checked_at=NOW()
+            SET status='file_ready',ready_source='detected_email',updated_at=NOW(),alert_last_checked_at=NOW(),alert_next_check_at=NULL
             FROM users u, import_jobs j
             WHERE p.user_id=$1 AND p.provider=$2 AND p.request_id=$3::uuid
               AND p.status='requested' AND p.alert_consent='granted'
               AND p.alert_consent_version='export-ready-background-v1'
               AND u.id=p.user_id AND u.import_generation=$4
+              AND ((u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL)
+                OR EXISTS(SELECT 1 FROM mailbox_connections m WHERE m.user_id=p.user_id AND m.status='connected' AND m.connection_mode='offline'))
               AND j.id=$5 AND j.status='running' AND j.import_generation=u.import_generation
             RETURNING p.request_id`, [job.userId,job.exportProvider,job.checkpoint.requestId,job.importGeneration,job.id]);
           detected = (ready.rowCount ?? 0)>0;

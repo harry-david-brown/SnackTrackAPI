@@ -140,7 +140,8 @@ for (const event of [false, true]) {
     assert.deepEqual(eras.map(c => c.insight.events[0].value), ['2015', '2018', '2021']);
     assert.deepEqual(eras.map(c => c.orderIds.length), [9, 6, 6]);
     assert.deepEqual(former.map(c => c.insight.events[0].value), [15, 6, 6]);
-    assert.ok(former.every(c => c.insight.detail.includes('history may be incomplete')));
+    assert.deepEqual(former.map(c => c.insight.detail), [15, 6, 6].map(count =>
+      `${count} tracked orders historically, but none recorded in the latest 180 days.`));
     rows.push(make('recent', 'Burger Kitchen', day(now.toISOString(), -180)));
     assert.equal(group(rows, 'former-favourites').length, 2);
     assert.ok(group(rows, 'former-favourites').every(c => !c.insight.title.includes('Burger')));

@@ -10,6 +10,7 @@ async function main() {
   const db = new PostgresService({
     connectionString: config.getDatabaseConnectionString(),
     useSsl: config.shouldUseDatabaseSSL(),
+    sslCa: config.getDatabaseSslCa(),
     maxConnections: 1,
     minimumConnections: 0,
   });

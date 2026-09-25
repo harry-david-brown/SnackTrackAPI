@@ -48,6 +48,9 @@ export const isProviderRelevance = (value: unknown): value is ProviderRelevance 
   includes(PROVIDER_RELEVANCE_VALUES, value);
 
 export interface ProviderReadyAlert {
+  lastCheckedAt?: string | null;
+  errorCode?: string | null;
+  effectiveState?: 'off' | 'active' | 'reconnect_required' | 'unavailable' | 'error';
   consentState: MonitoringConsentState;
   consentVersion: string | null;
   consentedAt: string | null;

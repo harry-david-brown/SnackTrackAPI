@@ -185,3 +185,30 @@ test('Gmail import validates and forwards the onboarding automatic updates choic
   await assert.rejects(invoke(router, '/import', 'post', { user: { userId: 'user-automatic' }, body: { journeyContext: 'onboarding', automaticUpdates: 'yes' } }), error => error.code === 'VALIDATION_ERROR');
   assert.equal(calls.length, 1);
 });
+
+test('provider ready-alert routes bind consent and checks to the authenticated account', async () => {
+  const calls = [];
+  const router = createGmailPreferencesRouter({
+    authenticate: passThrough,
+    preferences: {
+      setProviderReadyAlertConsent: async (...args) => { calls.push(args); return { saved: true }; },
+      queueProviderReadyCheck: async (...args) => { calls.push(args); return { queued: true }; },
+    },
+  });
+  await invoke(router, '/preferences/provider-ready-alert-consent', 'put', {
+    user: { userId: 'token-user' },
+    body: { userId: 'untrusted-user', provider: 'doordash', decision: 'granted', consentVersion: 'export-ready-background-v1' },
+  });
+  assert.deepEqual(calls[0], ['token-user', 'doordash', 'granted', 'export-ready-background-v1']);
+  await invoke(router, '/preferences/check-provider-ready', 'post', {
+    user: { userId: 'token-user' }, body: { provider: 'uber_eats' },
+  });
+  assert.deepEqual(calls[1], ['token-user', 'uber_eats']);
+  await assert.rejects(invoke(router, '/preferences/provider-ready-alert-consent', 'put', {
+    user: { userId: 'token-user' }, body: { provider: 'gmail', decision: 'granted', consentVersion: 'export-ready-background-v1' },
+  }));
+  await assert.rejects(invoke(router, '/preferences/provider-ready-alert-consent', 'put', {
+    user: { userId: 'token-user' }, body: { provider: 'doordash', decision: 'granted' },
+  }));
+  assert.equal(calls.length, 2);
+});

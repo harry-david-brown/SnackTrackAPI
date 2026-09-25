@@ -27,9 +27,9 @@ const hashToken = (token: string): string => createHash('sha256').update(token).
 const token = (): string => randomBytes(32).toString('base64url');
 
 const validatePassword = (password: string): void => {
-  if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password)) {
+  if (password.length < 12 || password.length > 128 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password)) {
     throw new ValidationError(
-      'Must be at least 12 characters and include uppercase, lowercase, and a number',
+      'Must be 12–128 characters and include uppercase, lowercase, and a number',
       'password',
     );
   }
@@ -101,8 +101,7 @@ export class AdminAuthService {
 
   async acceptInvitation(invitationToken: string, password: string): Promise<CreatedAdminSession> {
     validatePassword(password);
-    const passwordHash = await bcrypt.hash(password, 12);
-    const admin = await this.repository.acceptInvitation(hashToken(invitationToken), passwordHash);
+    const admin = await this.repository.acceptInvitation(hashToken(invitationToken), () => bcrypt.hash(password, 12));
     return this.createSession(admin);
   }
 
@@ -121,7 +120,7 @@ export class AdminAuthService {
 
   async resetPassword(resetToken: string, password: string): Promise<void> {
     validatePassword(password);
-    await this.repository.resetPassword(hashToken(resetToken), await bcrypt.hash(password, 12));
+    await this.repository.resetPassword(hashToken(resetToken), () => bcrypt.hash(password, 12));
   }
 
   listAdministrators() {

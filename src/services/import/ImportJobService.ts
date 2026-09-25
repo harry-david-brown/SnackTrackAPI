@@ -46,6 +46,7 @@ export class ImportJobService {
   }
 
   private async createUploadIntent(input: UploadIntentInput): Promise<{ operation: ImportJob; uploadUrl: string; headers: Readonly<Record<string,string>>; expiresAt: string }> {
+    const signingDate = new Date();
     const filename = cleanFilename(input.filename);
     const contentType = input.contentType.toLowerCase().split(';', 1)[0].trim();
     if (!supportedContentTypes.has(contentType)) throw new ValidationError('Unsupported upload content type.', 'contentType');
@@ -88,25 +89,29 @@ export class ImportJobService {
     }
     if (!operation.objectKey || !operation.contentType) throw new Error('Upload operation metadata was not persisted');
     if (!operation.contentLength) throw new Error('Upload operation content length was not persisted');
-    const uploadUrl = await this.storage.createUploadUrl(operation.objectKey, operation.contentType, operation.contentLength);
+    if (operation.status !== 'awaiting_upload' || !operation.expiresAt || new Date(operation.expiresAt).getTime() <= Date.now()) {
+      throw new AppError({ code: 'UPLOAD_NOT_SUBMITTABLE', message: 'This import is no longer waiting for an upload.' });
+    }
+    const uploadUrl = await this.storage.createUploadUrl(operation.objectKey, operation.contentType, operation.contentLength, signingDate);
     return {
       operation,
       uploadUrl,
       headers: { 'Content-Type': operation.contentType, 'Content-Length': String(operation.contentLength) },
-      expiresAt: this.storage.uploadUrlExpiresAt(),
+      expiresAt: this.storage.uploadUrlExpiresAt(signingDate.getTime()),
     };
   }
 
   async refreshUploadUrl(userId: string, jobId: string): Promise<{ operation: ImportJob; uploadUrl: string; headers: Readonly<Record<string,string>>; expiresAt: string }> {
+    const signingDate = new Date();
     const job = await this.jobs.findForUser(userId, jobId);
     if (job.status !== 'awaiting_upload' || !job.objectKey || !job.contentType || !job.contentLength || !job.expiresAt || new Date(job.expiresAt).getTime() <= Date.now()) {
       throw new AppError({ code: 'UPLOAD_NOT_SUBMITTABLE', message: 'This import is no longer waiting for an upload.' });
     }
     return {
       operation: job,
-      uploadUrl: await this.storage.createUploadUrl(job.objectKey, job.contentType, job.contentLength),
+      uploadUrl: await this.storage.createUploadUrl(job.objectKey, job.contentType, job.contentLength, signingDate),
       headers: { 'Content-Type': job.contentType, 'Content-Length': String(job.contentLength) },
-      expiresAt: this.storage.uploadUrlExpiresAt(),
+      expiresAt: this.storage.uploadUrlExpiresAt(signingDate.getTime()),
     };
   }
 

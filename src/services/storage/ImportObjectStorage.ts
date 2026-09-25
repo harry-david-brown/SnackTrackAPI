@@ -28,12 +28,12 @@ export class ImportObjectStorage {
     this.signingClient = client(options, options.publicEndpoint);
   }
 
-  async createUploadUrl(objectKey: string, contentType: string, contentLength: number): Promise<string> {
+  async createUploadUrl(objectKey: string, contentType: string, contentLength: number, signingDate = new Date()): Promise<string> {
     const { PutObjectCommand } = await import('@aws-sdk/client-s3');
     return getSignedUrl(
       this.signingClient,
       new PutObjectCommand({ Bucket: this.options.bucket, Key: objectKey, ContentType: contentType, ContentLength: contentLength }),
-      { expiresIn: this.options.uploadUrlTtlSeconds },
+      { expiresIn: this.options.uploadUrlTtlSeconds, signingDate },
     );
   }
 

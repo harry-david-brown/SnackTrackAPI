@@ -148,7 +148,7 @@ export class MicrosoftGraphMailboxClient {
 
   async getEmails(
     connection: MicrosoftMailboxConnection,
-    options?: { after?: Date; safety?: MailboxReadSafety },
+    options?: { after?: Date; safety?: MailboxReadSafety; exportReadyProvider?: ExportProvider },
   ): Promise<MailboxMessage[]> {
     const byId = new Map<string, MailboxMessage>();
     for await (const page of this.getEmailPages(connection, options)) {
@@ -170,7 +170,7 @@ export class MicrosoftGraphMailboxClient {
 
   async *getEmailPages(
     connection: MicrosoftMailboxConnection,
-    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety },
+    options?: { after?: Date; cursor?: string; safety?: MailboxReadSafety; exportReadyProvider?: ExportProvider },
   ): AsyncIterable<MailboxMessagePage> {
     const token = await this.tokens.acquire(connection);
     let cursor = options?.cursor
@@ -180,7 +180,7 @@ export class MicrosoftGraphMailboxClient {
     while (true) {
       const windowStart = new Date(cursor.windowStart);
       const windowEnd = new Date(cursor.windowEnd);
-      const requestUrl = cursor.nextLink ?? this.searchUrl(windowStart, windowEnd, options?.safety?.allowForwardedReceipts ?? false);
+      const requestUrl = cursor.nextLink ?? this.searchUrl(windowStart, windowEnd, options?.safety?.allowForwardedReceipts ?? false, options?.exportReadyProvider);
       const page = decodePage(await this.request(requestUrl, token, 2 * 1024 * 1024));
       const limit = pLimit(5);
       const fetched = await Promise.all(page.candidates.map((candidate) => limit(async () => {
@@ -258,8 +258,8 @@ export class MicrosoftGraphMailboxClient {
   ): Promise<boolean> {
     const after = new Date(requestedAt);
     if (Number.isNaN(after.getTime())) return false;
-    const messages = await this.getEmails(connection, { after });
-    return messages.some(message => isExportReadyMessage(provider,message.from,message.subject ?? '',message.body));
+    const messages = await this.getEmails(connection, { after, exportReadyProvider: provider });
+    return messages.some(message => Boolean(message.receivedAt && message.receivedAt >= after) && isExportReadyMessage(provider,message.from,message.subject ?? '',message.body));
   }
 
   private initialCursor(after?: Date): GraphCursor {
@@ -276,9 +276,11 @@ export class MicrosoftGraphMailboxClient {
     };
   }
 
-  private searchUrl(start: Date, end: Date, allowForwardedReceipts: boolean): string {
+  private searchUrl(start: Date, end: Date, allowForwardedReceipts: boolean, exportReadyProvider?: ExportProvider): string {
     const search = [
-      allowForwardedReceipts
+      exportReadyProvider
+        ? `(${exportReadyProvider === 'doordash' ? 'from:doordash.com' : '(from:uber.com OR from:ubereats.com)'} AND (subject:data OR subject:archive OR subject:download))`
+        : allowForwardedReceipts
         ? '((from:uber.com OR from:ubereats.com OR from:doordash.com) OR (subject:Uber OR subject:DoorDash))'
         : '(from:uber.com OR from:ubereats.com OR from:noreply@uber.com OR from:noreply@ubereats.com OR from:doordash.com)',
       `received>=${utcDate(start)}`,

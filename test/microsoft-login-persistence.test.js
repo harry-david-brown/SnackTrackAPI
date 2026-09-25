@@ -129,7 +129,7 @@ test(
 );
 
 test(
-  'unused Microsoft email creates an unverified account while an existing email requires proof',
+  'Microsoft verified email creates a new identity but cannot merge into an existing account',
   { skip: databaseUrl ? false : 'MIGRATION_TEST_DATABASE_URL is not configured' },
   async () => {
     await withDatabase(async (database) => {
@@ -143,17 +143,17 @@ test(
         new Date(Date.now() + 10 * 60 * 1000),
       );
 
-      const user = await attempts.completeUnverifiedNewAccount(
+      const user = await attempts.complete(
         firstAttemptId,
         'tenant:first-object',
         email,
       );
       assert.equal(user.email, email);
-      assert.equal(user.emailVerified, false);
+      assert.equal(user.emailVerified, true);
       assert.equal((await database.query('SELECT id FROM users')).rowCount, 1);
       assert.equal((await database.query('SELECT id FROM oauth_accounts')).rowCount, 1);
       await assert.rejects(
-        attempts.completeUnverifiedNewAccount(firstAttemptId, 'tenant:first-object', email),
+        attempts.complete(firstAttemptId, 'tenant:first-object', email),
         (error) => error.code === 'MICROSOFT_ATTEMPT_EXPIRED',
       );
 
@@ -164,12 +164,10 @@ test(
         createHash('sha256').update('collision-nonce').digest('hex'),
         new Date(Date.now() + 10 * 60 * 1000),
       );
-      const collision = await attempts.completeUnverifiedNewAccount(
-        collisionAttemptId,
-        'tenant:second-object',
-        email,
+      await assert.rejects(
+        attempts.complete(collisionAttemptId, 'tenant:second-object', email),
+        (error) => error.code === 'OAUTH_ACCOUNT_CONFLICT',
       );
-      assert.equal(collision, undefined);
       assert.equal((await database.query('SELECT id FROM users')).rowCount, 1);
       assert.equal((await database.query('SELECT id FROM oauth_accounts')).rowCount, 1);
     });

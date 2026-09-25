@@ -11,6 +11,7 @@ export const exportReadyAlertsMigration: Migration = {
       ADD COLUMN alert_consented_at TIMESTAMPTZ,
       ADD COLUMN alert_revoked_at TIMESTAMPTZ,
       ADD COLUMN alert_next_check_at TIMESTAMPTZ,
+      ADD COLUMN alert_last_error_code VARCHAR(96),
       ADD COLUMN alert_last_checked_at TIMESTAMPTZ`,
     `CREATE INDEX idx_export_alert_due ON user_export_provider_preferences(alert_next_check_at) WHERE status='requested' AND alert_consent='granted'`,
     `ALTER TABLE import_jobs DROP CONSTRAINT import_jobs_kind_check`,

@@ -11,6 +11,7 @@ import {
 export interface PostgresOptions {
   readonly connectionString: string;
   readonly useSsl: boolean;
+  readonly sslCa?: string;
   readonly maxConnections: number;
   readonly minimumConnections?: number;
   readonly idleTimeoutMs?: number;
@@ -19,6 +20,23 @@ export interface PostgresOptions {
 }
 
 type PoolFactory = (options: PoolConfig) => Pool;
+
+/** URL SSL parameters otherwise override pg's explicit TLS policy. */
+export const databaseConnectionUrl = (connectionString: string): string => {
+  const parsed = new URL(connectionString);
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (key.toLowerCase().startsWith('ssl') || key.toLowerCase() === 'uselibpqcompat') {
+      parsed.searchParams.delete(key);
+    }
+  }
+  return parsed.toString();
+};
+
+const urlRequestsTls = (connectionString: string): boolean => {
+  const options = new URL(connectionString).searchParams;
+  const mode = options.get('sslmode');
+  return Boolean((mode && mode !== 'disable') || ['true', '1'].includes(options.get('ssl') ?? ''));
+};
 
 /** Owns the PostgreSQL pool and scoped query/transaction execution only. */
 export class PostgresService implements DatabaseConnection {
@@ -29,9 +47,10 @@ export class PostgresService implements DatabaseConnection {
     options: PostgresOptions,
     poolFactory: PoolFactory = (poolOptions) => new Pool(poolOptions),
   ) {
+    const useSsl = options.useSsl || urlRequestsTls(options.connectionString);
     this.pool = poolFactory({
-      connectionString: options.connectionString,
-      ssl: options.useSsl ? { rejectUnauthorized: false } : false,
+      connectionString: databaseConnectionUrl(options.connectionString),
+      ssl: useSsl ? { rejectUnauthorized: true, ...(options.sslCa ? { ca: options.sslCa } : {}) } : false,
       max: options.maxConnections,
       min: options.minimumConnections ?? 2,
       idleTimeoutMillis: options.idleTimeoutMs ?? 30000,
@@ -47,7 +66,7 @@ export class PostgresService implements DatabaseConnection {
     });
     logger.info('PostgreSQL connection pool initialized', {
       maxConnections: options.maxConnections,
-      sslEnabled: options.useSsl,
+      sslEnabled: useSsl,
     });
   }
 

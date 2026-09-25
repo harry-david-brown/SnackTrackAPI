@@ -79,7 +79,10 @@ export class ImportPreferencesService {
     if (decision==='granted' && version!==BACKGROUND_ALERT_CONSENT_VERSION) throw new ConflictError('CONSENT_VERSION_REQUIRED','Review the current ready-alert consent.');
     const lock=await ImportLockService.acquireLockWithWait(userId,5_000);
     if (!lock) throw new ConflictError('IMPORT_IN_PROGRESS','Please try again when the current operation finishes.');
-    try { await this.readyAlerts.setConsent(userId,provider,decision); }
+    try {
+      await this.readyAlerts.setConsent(userId,provider,decision);
+      if (provider === 'uber_eats' && decision !== 'granted') await this.lifecycle.setMonitoringConsent(userId, decision);
+    }
     finally { await ImportLockService.releaseLock(lock); }
     await this.syncGmailWatchForCurrentPurpose(userId);
     return this.status.getPreferences(userId);
@@ -132,8 +135,13 @@ export class ImportPreferencesService {
     decision: ConsentDecision,
     consentVersion?: string,
   ): Promise<ImportPreferencesProjection> {
-    await this.lifecycle.setMonitoringConsent(userId, decision, consentVersion);
-    await this.syncGmailWatch(userId, decision);
+    const lock=await ImportLockService.acquireLockWithWait(userId,5_000);
+    if (!lock) throw new ConflictError('IMPORT_IN_PROGRESS','Please try again when the current operation finishes.');
+    try {
+      await this.lifecycle.setMonitoringConsent(userId, decision, consentVersion);
+      if (decision !== 'granted' && this.readyAlerts) await this.readyAlerts.setConsent(userId, 'uber_eats', decision);
+    } finally { await ImportLockService.releaseLock(lock); }
+    await this.syncGmailWatchForCurrentPurpose(userId);
     return this.status.getPreferences(userId);
   }
 
@@ -189,7 +197,6 @@ export class ImportPreferencesService {
       this.queries.getProviderExports(userId),
     ]);
     const active = current.ongoingTrackingConsentState === 'granted' ||
-      (current.monitoringConsentState === 'granted' && exports.uber_eats.status === 'requested') ||
       Object.values(exports).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted');
     if (active) await this.gmailWatches.ensureForUser(userId).catch(() => false);
     else await this.gmailWatches.stopForUser(userId);
@@ -200,7 +207,7 @@ export class ImportPreferencesService {
     provider: ExportProvider,
   ): Promise<ImportPreferencesProjection> {
     await this.lifecycle.markExportRequested(userId, provider);
-    if (provider === 'uber_eats') await this.gmailWatches?.ensureForUser(userId).catch(() => false);
+    await this.gmailWatches?.ensureForUser(userId).catch(() => false);
     return this.status.getPreferences(userId);
   }
 

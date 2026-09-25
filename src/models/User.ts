@@ -5,6 +5,7 @@ import type { GmailConnectionMode } from '../services/import/GmailConnectionCont
 export interface User {
   id: string;
   email: string;
+  sessionVersion?: number;
   password?: string; // Optional - not returned in API responses
   emailVerified?: boolean; // Email verification status
   timezone?: string; // IANA timezone (e.g., 'America/New_York', 'Europe/London')

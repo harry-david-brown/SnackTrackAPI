@@ -1,3 +1,9 @@
+import { GmailCredentialCipher } from '../mailbox/GmailCredentialCipher';
+import { ImportObjectDeletionRepository } from '../data/ImportObjectDeletionRepository';
+import { ImportObjectCleanupService } from '../import/ImportObjectCleanupService';
+import { AuthenticationAbuseService } from '../auth/AuthenticationAbuseService';
+import { MailboxAuthorizationRepository } from '../data/MailboxAuthorizationRepository';
+import { ProviderAccountRepository } from '../data/ProviderAccountRepository';
 import { ExportReadyAlertRepository } from '../data/ExportReadyAlertRepository';
 import { ExportReadyAlertService } from '../import/ExportReadyAlertService';
 import { MarketHistoryRepository } from '../data/MarketHistoryRepository';
@@ -71,7 +77,7 @@ import { CacheService } from './CacheService';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/AppConfig';
 import logger from '../../config/logger';
-import { refreshTokenStore } from '../../config/redis';
+import { refreshTokenStore, authAbuseBudgetStore } from '../../config/redis';
 import appleSignin from 'apple-signin-auth';
 import { ZipExtractor } from '../import/ZipExtractor';
 import { ImportLockService } from '../import/ImportLockService';
@@ -127,6 +133,7 @@ export class ServiceContainer {
   readonly cacheService: CacheService;
   readonly tokenService: TokenService;
   readonly credentialAuthService: CredentialAuthService;
+  readonly authenticationAbuseService: AuthenticationAbuseService;
   readonly providerAuthService: ProviderAuthService;
   readonly microsoftLoginService: MicrosoftLoginService;
   readonly sessionService: SessionService;
@@ -203,14 +210,18 @@ export class ServiceContainer {
   readonly gmailPushDispatchService: GmailPushDispatchService;
   readonly gmailPushTrackingService: GmailPushTrackingService;
   readonly gmailPushMaintenanceService: GmailPushMaintenanceService;
+  readonly importObjectCleanupService: ImportObjectCleanupService;
 
   constructor() {
     this.postgres = new PostgresService({
       connectionString: config.getDatabaseConnectionString(),
       useSsl: config.shouldUseDatabaseSSL(),
+      sslCa: config.getDatabaseSslCa(),
       maxConnections: config.getDatabaseMaxConnections(),
     });
-    this.userRepository = new UserRepository(this.postgres);
+    const microsoftMailboxConfig = config.getMicrosoftMailboxConfig();
+    const mailboxCipher = new MailboxSecretCipher(microsoftMailboxConfig.tokenEncryptionKey);
+    this.userRepository = new UserRepository(this.postgres, new GmailCredentialCipher(mailboxCipher));
     this.oauthRepository = new OAuthRepository(this.postgres);
     this.microsoftLoginAttemptRepository = new MicrosoftLoginAttemptRepository(this.postgres);
     this.receiptRepository = new ReceiptRepository(this.postgres);
@@ -223,8 +234,7 @@ export class ServiceContainer {
       this.postgres,
       this.importEventRepository,
     );
-    const microsoftMailboxConfig = config.getMicrosoftMailboxConfig();
-    const mailboxCipher = new MailboxSecretCipher(microsoftMailboxConfig.tokenEncryptionKey);
+    const mailboxAuthorization = new MailboxAuthorizationRepository(this.postgres, mailboxCipher);
     this.mailboxConnectionRepository = new MailboxConnectionRepository(
       this.postgres,
       mailboxCipher,
@@ -255,6 +265,9 @@ export class ServiceContainer {
     this.experienceStateRepository = new ExperienceStateRepository(this.postgres);
     this.experienceStateService = new ExperienceStateService(this.experienceStateRepository);
     this.importObjectStorage = new ImportObjectStorage(config.getObjectStorageConfig());
+    this.importObjectCleanupService = new ImportObjectCleanupService(
+      new ImportObjectDeletionRepository(this.postgres), this.importObjectStorage,
+    );
     this.importJobService = new ImportJobService(this.importJobRepository, this.importObjectStorage);
     this.pushDeviceRepository = new PushDeviceRepository(this.postgres);
     this.cacheService = new CacheService();
@@ -280,9 +293,9 @@ export class ServiceContainer {
       logger,
     );
     this.credentialAuthService = new CredentialAuthService(this.userRepository, this.tokenService, this.authenticationActivityService);
+    this.authenticationAbuseService = new AuthenticationAbuseService(authAbuseBudgetStore, config.getAuthConfig().jwtSecret);
     this.providerAuthService = new ProviderAuthService(
-      this.userRepository,
-      this.oauthRepository,
+      new ProviderAccountRepository(this.postgres),
       this.tokenService,
       new GoogleIdentityTokenVerifier(new OAuth2Client(googleAudiences[0]), googleAudiences),
       new AppleIdentityTokenVerifier(appleSignin, config.getAppleConfig().clientIds),
@@ -395,6 +408,7 @@ export class ServiceContainer {
       this.importLifecycleRepository,
       this.mailboxSyncRunRepository,
       this.microsoftMailboxConnectionHealthService,
+      mailboxAuthorization,
     );
     this.outlookImportAcquisitionService = new OutlookImportAcquisitionService(
       this.mailboxConnectionRepository,
@@ -439,10 +453,11 @@ export class ServiceContainer {
       this.importLifecycleRepository,
       this.gmailSyncRunRepository,
       this.gmailConnectionHealthService,
+      mailboxAuthorization,
       this.mailboxConnectionRepository,
       this.gmailWatchService,
     );
-    const backgroundAlertsEnabled = process.env.EXPORT_READY_BACKGROUND_ENABLED === 'true';
+    const backgroundAlertsEnabled = process.env.EXPORT_READY_BACKGROUND_ENABLED === 'true' && (!config.isProduction() || config.getPushConfig().deliveryMode === 'expo');
     this.exportReadyAlertRepository = new ExportReadyAlertRepository(this.postgres);
     this.importStatusService = new ImportStatusService(
       this.userRepository,
@@ -475,6 +490,8 @@ export class ServiceContainer {
     this.gmailPushDispatchService = new GmailPushDispatchService(
       this.gmailPushRepository,
       this.importJobRepository,
+      this.importStatusService,
+      this.exportReadyAlertService,
     );
     this.gmailPushMaintenanceService = new GmailPushMaintenanceService(
       this.gmailPushDispatchService,

@@ -32,10 +32,21 @@ test('upload intent signs persisted metadata and preserves idempotency and journ
     userId: 'user-1', filename: 'export.zip', contentType: 'application/zip', contentLength: 1024,
     idempotencyKey: 'same-request', journeyContext: 'post_onboarding',
   });
-  assert.deepEqual(signed, [['imports/user-1/persisted/export.zip', 'application/zip', 1024]]);
+  assert.deepEqual(signed[0].slice(0, 3), ['imports/user-1/persisted/export.zip', 'application/zip', 1024]);
+  assert.ok(signed[0][3] instanceof Date);
   assert.equal(result.operation.id, job().id);
   assert.equal(result.expiresAt, '2026-09-02T12:15:00.000Z');
   assert.equal(created[0].journeyContext, 'post_onboarding');
+});
+
+test('accepted or expired intents cannot mint another URL that overwrites their object', async () => {
+  for (const current of [job({ status: 'queued' }), job({ expiresAt: '2020-01-01T00:00:00Z' })]) {
+    const service = new ImportJobService({ create: async () => current }, {
+      createUploadUrl: async () => assert.fail('an accepted/expired object must not be overwritten'),
+    });
+    await assert.rejects(service.createUberEatsUploadIntent({ userId: 'user-1', filename: 'export.zip',
+      contentType: 'application/zip', contentLength: 1024, journeyContext: 'post_onboarding' }), error => error.code === 'UPLOAD_NOT_SUBMITTABLE');
+  }
 });
 
 test('upload intent rejects files above the type-specific limit before creating a job', async () => {

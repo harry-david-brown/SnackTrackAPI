@@ -73,6 +73,8 @@ const mapProvider = (value: unknown): ProviderExportPreference => {
   return {
     requestId: databaseNullableString(row, 'request_id'),
     readyAlert: {
+      lastCheckedAt: databaseTimestamp(row, 'alert_last_checked_at'),
+      errorCode: databaseNullableString(row, 'alert_last_error_code'),
       consentState: row.alert_consent === 'granted' || row.alert_consent === 'declined' || row.alert_consent === 'revoked' ? row.alert_consent : 'not_offered',
       consentVersion: databaseNullableString(row, 'alert_consent_version'),
       consentedAt: databaseTimestamp(row, 'alert_consented_at'),
@@ -135,6 +137,7 @@ export class ImportPreferencesQueryRepository {
               END AS status,
               preferences.requested_at, preferences.request_id, preferences.alert_consent,
               preferences.alert_consent_version, preferences.alert_consented_at, preferences.alert_revoked_at,
+              preferences.alert_last_checked_at, preferences.alert_last_error_code,
               CASE
                 WHEN preferences.updated_at IS NULL THEN (
                   SELECT MAX(receipts.created_at) FROM receipts

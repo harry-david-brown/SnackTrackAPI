@@ -3,8 +3,8 @@ export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 export interface AppConfig {
   environment: Environment;
-  database: { useSSL: boolean; connectionString: string; maxConnections: number };
-  server: { port: number; host: string; trackingIntervalMinutes: number; analyticsMaintenanceEnabled: boolean };
+  database: { useSSL: boolean; sslCa?: string; connectionString: string; maxConnections: number };
+  server: { port: number; host: string; trustProxy: false | string[]; trackingIntervalMinutes: number; analyticsMaintenanceEnabled: boolean };
   gmail: {
     useRealApi: boolean;
     useMockData: boolean;
@@ -284,7 +284,7 @@ class ConfigManager {
       );
     }
     const tokenEncryptionKey =
-      isProduction && microsoftMailboxConfigured
+      isProduction
         ? requiredSecret(
             'MAILBOX_TOKEN_ENCRYPTION_KEY',
             process.env.MAILBOX_TOKEN_ENCRYPTION_KEY,
@@ -298,6 +298,7 @@ class ConfigManager {
       environment: currentEnvironment,
       database: {
         useSSL: isProduction,
+        sslCa: optional(process.env.DATABASE_SSL_CA)?.replace(/\\n/g, '\n'),
         connectionString: databaseConnectionString,
         maxConnections: integer(
           'DATABASE_POOL_MAX',
@@ -307,6 +308,8 @@ class ConfigManager {
         ),
       },
       server: {
+        // Trust only explicitly configured ingress addresses, never arbitrary hop counts.
+        trustProxy: optional(process.env.TRUSTED_PROXY_CIDRS)?.split(',').map((value) => value.trim()).filter(Boolean) || false,
         port: integer('PORT', process.env.PORT, 3000, 1),
         host: optional(process.env.HOST) ?? 'localhost',
         trackingIntervalMinutes: integer(
@@ -416,7 +419,7 @@ class ConfigManager {
           ? requiredSecret('OBJECT_STORAGE_SECRET_ACCESS_KEY', process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY, 16)
           : optional(process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY) ?? 'snacktrack-local-secret',
         forcePathStyle: boolean('OBJECT_STORAGE_FORCE_PATH_STYLE', process.env.OBJECT_STORAGE_FORCE_PATH_STYLE, true),
-        uploadUrlTtlSeconds: integer('OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS', process.env.OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS, 900, 60),
+        uploadUrlTtlSeconds: boundedInteger('OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS', process.env.OBJECT_STORAGE_UPLOAD_URL_TTL_SECONDS, 900, 60, 3600),
       },
       marketHistory: { enabled: boolean('HISTORICAL_INVESTMENTS_ENABLED', process.env.HISTORICAL_INVESTMENTS_ENABLED, false), refreshEnabled: boolean('MARKET_HISTORY_REFRESH_ENABLED', process.env.MARKET_HISTORY_REFRESH_ENABLED, false), apiKey: optional(process.env.FINAZON_API_KEY) ?? '' },
       push: { deliveryMode: pushDeliveryMode },
@@ -479,12 +482,14 @@ export const config = {
   shouldUseMockData: () => appConfig.get().gmail.useMockData,
   shouldUseRealGmailApi: () => appConfig.get().gmail.useRealApi,
   shouldUseDatabaseSSL: () => appConfig.get().database.useSSL,
+  getDatabaseSslCa: () => appConfig.get().database.sslCa,
   getDatabaseConnectionString: () => appConfig.get().database.connectionString,
   shouldEnableDetailedLogging: () => appConfig.get().debug.enableDetailedLogging,
   shouldShowEmailContent: () => appConfig.get().debug.showEmailContent,
   shouldSaveDebugEmails: () => appConfig.get().debug.saveDebugEmails,
   getServerPort: () => appConfig.get().server.port,
   getServerHost: () => appConfig.get().server.host,
+  getTrustedProxies: () => appConfig.get().server.trustProxy,
   getTrackingIntervalMinutes: () => appConfig.get().server.trackingIntervalMinutes,
   isAnalyticsMaintenanceEnabled: () => appConfig.get().server.analyticsMaintenanceEnabled,
   getGmailConfig: () => appConfig.get().gmail,

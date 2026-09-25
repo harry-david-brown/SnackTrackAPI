@@ -118,6 +118,7 @@ test('required and optional authentication apply explicit credential policies', 
         return { userId: user.id, email: user.email, type: 'access' };
       },
     },
+    sessions: { verifyAccessSession: async () => {} },
     observability: { setUserContext() {} },
     logger: { ...silentLogger, warn: (_message, metadata) => warnings.push(metadata) },
   };
@@ -240,7 +241,7 @@ test('authentication route factories validate once and delegate to narrow capabi
   );
 });
 
-test('provider authentication validates identity payloads and links a verified account', async () => {
+test('provider authentication validates identity payloads and delegates verified claims to the atomic account resolver', async () => {
   const links = [];
   const google = createProviderFake({
     providerUserId: 'google-user',
@@ -248,16 +249,7 @@ test('provider authentication validates identity payloads and links a verified a
     emailVerified: true,
   });
   const service = new ProviderAuthService(
-    {
-      findByEmail: async () => undefined,
-      createUser: async () => user.id,
-      findById: async () => ({ ...user, emailVerified: false }),
-      updateEmailVerified: async () => true,
-    },
-    {
-      findByProvider: async () => undefined,
-      create: async (record) => (links.push(record), 'link-id'),
-    },
+    { resolve: async (identity) => { links.push(identity); return user; } },
     { generateTokens: () => ({ accessToken: 'a', refreshToken: 'r' }) },
     google,
     {

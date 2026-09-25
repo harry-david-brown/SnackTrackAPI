@@ -1,9 +1,13 @@
+import type { ImportStatusService } from './ImportStatusService';
+import type { ExportReadyAlertService } from './ExportReadyAlertService';
 import type { GmailPushJobPort, GmailPushStatePort } from '../ports/GmailPushPorts';
 
 export class GmailPushDispatchService {
   constructor(
     private readonly pushes: Pick<GmailPushStatePort, 'claimDue'|'markDispatched'|'releaseDispatch'>,
     private readonly jobs: GmailPushJobPort,
+    private readonly status?: Pick<ImportStatusService, 'getPreferences'>,
+    private readonly alerts?: Pick<ExportReadyAlertService, 'enqueueEligible'>,
   ) {}
 
   async dispatchDue(limit = 500): Promise<{ claimed: number; queued: number; deferred: number }> {
@@ -12,6 +16,13 @@ export class GmailPushDispatchService {
     let deferred = 0;
     for (const wakeup of due) {
       try {
+        await this.alerts?.enqueueEligible(2, wakeup.userId, undefined, `gmail:${wakeup.historyId ?? wakeup.notificationCount}`);
+        const preferences = await this.status?.getPreferences(wakeup.userId);
+        if (preferences && preferences.ongoingTracking.consentState !== 'granted') {
+          await this.pushes.markDispatched(wakeup.userId, wakeup.historyId, wakeup.notificationCount);
+          queued += 1;
+          continue;
+        }
         await this.jobs.create({
           userId: wakeup.userId,
           kind: 'gmail_push_tracking',

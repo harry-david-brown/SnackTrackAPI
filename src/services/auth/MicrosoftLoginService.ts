@@ -106,18 +106,6 @@ export class MicrosoftLoginService {
       return { status: 'authenticated', session: await this.issueSession(user) };
     }
 
-    const unverifiedEmail = identity.email ?? identity.suggestedEmail;
-    if (unverifiedEmail) {
-      const user = await this.attempts.completeUnverifiedNewAccount(
-        attempt.id,
-        identity.providerUserId,
-        unverifiedEmail,
-      );
-      if (user) {
-        return { status: 'authenticated', session: await this.issueSession(user) };
-      }
-    }
-
     await this.attempts.requireEmailVerification(
       attempt.id,
       identity.providerUserId,

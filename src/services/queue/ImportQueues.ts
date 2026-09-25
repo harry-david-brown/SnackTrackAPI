@@ -84,7 +84,7 @@ export class ImportQueuePublisher {
       ? this.queues.notifications
       : queueForImportKind(job.kind) === MAILBOX_IMPORT_QUEUE ? this.queues.mailbox : this.queues.exports;
     await queue.add(event.eventType, { jobId: event.jobId }, {
-      jobId: `${event.eventType}-${event.jobId}`,
+      jobId: `${event.eventType}-${event.jobId}${event.eventType === 'notify' && typeof event.payload.deliveryRetry === 'number' ? `-retry-${event.payload.deliveryRetry}` : ''}`,
       attempts: importAttemptLimit(job.kind, event.eventType),
       // Gmail enforces a per-user, per-project one-minute quota window. A mailbox
       // retry must begin after that window instead of immediately consuming the

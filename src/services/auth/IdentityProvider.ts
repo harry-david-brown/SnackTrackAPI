@@ -37,7 +37,10 @@ export class GoogleIdentityTokenVerifier implements IdentityTokenVerifier {
     return {
       providerUserId: record.sub,
       email: typeof record.email === 'string' ? record.email : undefined,
-      emailVerified: record.email_verified === true,
+      emailVerified: record.email_verified === true && (
+        (typeof record.email === 'string' && /@gmail\.com$/i.test(record.email)) ||
+        (typeof record.hd === 'string' && record.hd.length > 0)
+      ),
     };
   }
 }
@@ -66,7 +69,7 @@ export class AppleIdentityTokenVerifier implements IdentityTokenVerifier {
     return {
       providerUserId: record.sub,
       email: typeof record.email === 'string' ? record.email : undefined,
-      emailVerified: true,
+      emailVerified: record.email_verified === true || record.email_verified === 'true',
     };
   }
 }

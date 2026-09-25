@@ -46,6 +46,7 @@ export const createPasswordResetRouter = (
   );
   router.post(
     '/complete',
+    dependencies.rateLimitVerification,
     asyncHandler(async (req, res) => {
       await dependencies.passwords.complete(
         emailField(req.body),

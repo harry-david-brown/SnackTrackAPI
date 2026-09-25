@@ -6,6 +6,9 @@ const { mapReceiptResponse } = require('../dist/http/mappers/receiptResponse');
 const { buildDashboardInsightCatalogue } = require('../dist/services/analytics/dashboard');
 const { reconstructUberItems } = require('../dist/services/receipt/OrderReconstruction');
 const { createUberItemPriceResolver } = require('../dist/services/receipt/UberItemPriceResolver');
+const { CsvImportService } = require('../dist/services/import/CsvImportService');
+const { decodeReceiptObservation } = require('../dist/services/data/receiptObservationCodec');
+const { decodeItemEvidence } = require('../dist/models/ReceiptResolution');
 
 const row = (name, quantity, price) => ({
   Item_Name: name,
@@ -19,6 +22,46 @@ const document = (date, rows, merchant = 'Tim Hortons', currency = 'CAD') => ({
   currency,
   orderDate: date,
   rows,
+});
+
+test('blank Uber quantities default to one in every item-price reconstruction path', () => {
+  const source = { ...row('Sandwich', '', 8.96), Customizations: 'Extra cheese', Customization_Cost_Local: '1' };
+  const context = document('2025-01-01', [source]);
+  const resolve = createUberItemPriceResolver([context]);
+  for (const items of [
+    reconstructUberItems([source]),
+    reconstructUberItems([source], 9.96),
+    reconstructUberItems([source], undefined, false, 'per_item', item => resolve(context, item)),
+  ]) {
+    assert.equal(items[0].quantity, 1);
+    assert.equal(items[0].price, 9.96);
+    assert.equal(items[0].evidence.baseLineTotal, 8.96);
+    assert.equal(items[0].evidence.modifierTotal, 1);
+    assert.deepEqual(decodeItemEvidence(JSON.parse(JSON.stringify(items[0].evidence))), items[0].evidence);
+  }
+  assert.equal(source.Item_quantity, '');
+});
+
+test('Uber exports with blank quantities survive staging without losing orders or source evidence', async () => {
+  const headers = ['City_Name', 'Restaurant_Name', 'Request_Time_Local', 'Final_Delivery_Time_Local',
+    'Order_Status', 'Item_Name', 'Item_quantity', 'Customizations', 'Customization_Cost_Local',
+    'Special_Instructions', 'Item_Price', 'Order_Price', 'Currency'];
+  const rows = ['completed', 'failed'].map((status, index) => [
+    'Toronto', 'Example restaurant', `2025-01-0${index + 1}T12:00:00Z`, '',
+    status, 'Sandwich', '', '', '', '', '8.96', '21.29', 'CAD',
+  ]);
+  const csv = [headers, ...rows].map(values => values.join(',')).join('\n');
+  const result = await new CsvImportService().parseCsvFile(Buffer.from(csv), 'user', 'America/Toronto', 3);
+  assert.equal(result.receipts.length, 2);
+  assert.equal(result.rejectedRecords, 0);
+  const staged = result.receipts.map(receipt => decodeReceiptObservation(JSON.parse(JSON.stringify(receipt))));
+  assert.deepEqual(staged.map(receipt => receipt.resolution.orderEvidence.fulfillment), ['completed', 'failed']);
+  for (const receipt of staged) {
+    assert.equal(receipt.items[0].quantity, 1);
+    assert.equal(receipt.items[0].price, 8.96);
+    assert.equal(receipt.resolution.rows[0].Item_quantity, '');
+    assert.equal(receipt.resolution.orderEvidence.recordedTotal, 21.29);
+  }
 });
 
 test('same-item quantity-one anchors distinguish old unit prices from line totals', () => {

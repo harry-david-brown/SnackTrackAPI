@@ -1,5 +1,5 @@
 import type { HistoricalInvestmentResult } from '../shared/historicalInvestment';
-export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v23';
+export const DASHBOARD_INSIGHT_METRIC_VERSION = 'daily-v24';
 
 import type { ExportProvider } from '../../import/ImportLifecycleTypes';
 

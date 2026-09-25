@@ -26,6 +26,7 @@ async function main(commandFactory: () => ReceiptRepairSourceCommand) {
   const db = new PostgresService({
     connectionString: config.getDatabaseConnectionString(),
     useSsl: config.shouldUseDatabaseSSL(),
+    sslCa: config.getDatabaseSslCa(),
     maxConnections: 2,
     minimumConnections: 0,
   });

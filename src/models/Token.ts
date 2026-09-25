@@ -6,6 +6,7 @@ export interface TokenPayload {
   userId: string;
   email: string;
   type: 'access' | 'refresh';
+  sessionVersion?: number; // Missing legacy claims are generation zero.
   iat?: number; // issued at
   exp?: number; // expiration
   jti?: string; // JWT ID for revocation

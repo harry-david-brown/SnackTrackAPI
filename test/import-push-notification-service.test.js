@@ -19,7 +19,7 @@ const harness = (currentJob) => {
   const service = new ImportPushNotificationService(
     { findById: async () => currentJob },
     {
-      listEnabled: async () => {
+      listPendingForJob: async () => {
         deviceLookups += 1;
         return [{ id: 'device-1', token: 'ExponentPushToken[test]' }];
       },
@@ -74,4 +74,18 @@ test('legacy export totals are checked orders, not proof of new purchases', asyn
   const current = harness(job({ trigger: 'user', result: { importedCount: 8 } }));
   await current.service.notify('operation-1');
   assert.equal(current.logs[0].metadata.body, '8 orders checked. View your history for details.');
+});
+
+
+test('ready checks stay silent on no detection and failures', async () => {
+  for (const status of ['succeeded', 'failed']) {
+    const current = harness(job({ kind: 'export_ready_check', status, result: { exportReadyDetected: false } }));
+    await current.service.notify('operation-1');
+    assert.equal(current.deviceLookups(), 0);
+  }
+});
+test('DoorDash ready notifications name the matching provider', async () => {
+  const current = harness(job({ kind: 'export_ready_check', exportProvider: 'doordash', result: { exportReadyDetected: true } }));
+  await current.service.notify('operation-1');
+  assert.equal(current.logs[0].metadata.title, 'Your DoorDash data is ready');
 });

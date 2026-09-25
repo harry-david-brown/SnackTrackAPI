@@ -124,7 +124,7 @@ export class AdminRepository {
     });
   }
 
-  async acceptInvitation(tokenHash: string, passwordHash: string): Promise<AdminIdentity> {
+  async acceptInvitation(tokenHash: string, createPasswordHash: () => Promise<string>): Promise<AdminIdentity> {
     return this.database.withTransaction(async (transaction) => {
       const invitation = await transaction.query<AdminRow & { invitation_id: unknown }>(
         `SELECT id AS invitation_id, email, role, 'active' AS status
@@ -134,6 +134,7 @@ export class AdminRepository {
       );
       const row = invitation.rows[0];
       if (!row) throw new NotFoundError('Active administrator invitation');
+      const passwordHash = await createPasswordHash();
       const email = text(row.email, 'email');
       const invitedRole = role(row.role);
       const created = await transaction.query<AdminRow>(
@@ -163,7 +164,7 @@ export class AdminRepository {
     });
   }
 
-  async resetPassword(tokenHash: string, passwordHash: string): Promise<void> {
+  async resetPassword(tokenHash: string, createPasswordHash: () => Promise<string>): Promise<void> {
     await this.database.withTransaction(async (transaction) => {
       const result = await transaction.query<{ admin_user_id: unknown } & DatabaseRow>(
         `SELECT admin_user_id FROM admin_password_reset_tokens
@@ -172,6 +173,7 @@ export class AdminRepository {
       );
       const row = result.rows[0];
       if (!row) throw new NotFoundError('Active administrator password reset');
+      const passwordHash = await createPasswordHash();
       const adminId = text(row.admin_user_id, 'admin_user_id');
       await transaction.query('UPDATE admin_users SET password_hash = $2, updated_at = NOW() WHERE id = $1', [adminId, passwordHash]);
       await transaction.query('UPDATE admin_password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [tokenHash]);

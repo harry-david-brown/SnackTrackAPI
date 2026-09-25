@@ -1,3 +1,5 @@
+import type { MailboxAuthorizationPort } from '../ports/MailboxAuthorizationPort';
+import { parseMailboxRedirect } from '../mailbox/MailboxRedirect';
 import { AppError, ValidationError } from '../../core/errors';
 import type {
   GmailSyncRunPort,
@@ -17,12 +19,6 @@ const REQUIRED_GMAIL_SCOPES = new Set([
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://mail.google.com/',
-]);
-const ALLOWED_APP_REDIRECT_SCHEMES = new Set([
-  'snacktrack:',
-  'exp+snack-track:',
-  'https:',
-  'http:',
 ]);
 
 type UserPort = Pick<
@@ -58,17 +54,22 @@ export class GmailConnectionService {
     private readonly lifecycle: LifecyclePort,
     private readonly syncRuns: SyncRunPort,
     private readonly connectionHealth: ConnectionHealthCachePort,
+    private readonly authorization: MailboxAuthorizationPort,
     private readonly mailboxConnections?: Pick<MicrosoftMailboxConnectionPort, 'findMicrosoft'>,
     private readonly gmailWatches?: GmailWatchLifecycle,
   ) {}
 
-  createAuthorizationUrl(
+  async createAuthorizationUrl(
     userId: string,
     redirectUri: string,
     purpose: GmailConnectionPurpose = 'receipt_import',
-  ): string {
-    this.parseAppRedirectUri(redirectUri);
-    return this.oauth.createAuthorizationUrl({ userId, redirectUri, purpose });
+    handoffChallenge: string,
+    sessionVersion: number,
+  ): Promise<string> {
+    parseMailboxRedirect(redirectUri);
+    const url = this.oauth.createAuthorizationUrl({ userId, redirectUri, purpose });
+    await this.authorization.register(userId, 'gmail', url, handoffChallenge, sessionVersion);
+    return url;
   }
 
   async completeAuthorization(
@@ -77,7 +78,8 @@ export class GmailConnectionService {
     providerError?: string,
   ): Promise<GmailOAuthCallbackResult> {
     const state = this.oauth.verifyState(stateToken);
-    this.parseAppRedirectUri(state.redirectUri);
+    parseMailboxRedirect(state.redirectUri);
+    const completionToken = await this.authorization.receive('gmail', stateToken, providerError ? undefined : code);
     if (providerError) {
       return {
         redirectUri: this.callbackRedirect(state, 'error', providerError),
@@ -87,24 +89,23 @@ export class GmailConnectionService {
     }
     if (!code) throw new ValidationError('Missing authorization code', 'code');
 
-    const grant = await this.oauth.exchangeAuthorizationCode(code);
+    const redirect = new URL(this.callbackRedirect(state, 'pending'));
+    redirect.searchParams.set('completionToken', completionToken);
+    return { redirectUri: redirect.toString(), userId: state.userId, purpose: state.purpose };
+  }
+
+  async finishAuthorization(userId: string, completionToken: string, verifier: string): Promise<void> {
+    const claim = await this.authorization.consume(userId, 'gmail', completionToken, verifier);
+    const state = this.oauth.verifyState(claim.state);
+    const grant = await this.oauth.exchangeAuthorizationCode(claim.code, state);
     this.assertRequiredScope(grant);
-    const connectionMode = grant.refreshToken ? 'offline' : 'temporary';
-    await this.users.updateGmailTokens(state.userId, {
-      refreshToken: grant.refreshToken,
-      accessToken: grant.accessToken,
-      expiryDate: grant.expiryDate,
-      gmailEmail: grant.email,
-      scopes: [...grant.scopes],
-      connectionMode,
-    });
-    this.connectionHealth.invalidate(state.userId);
-    await this.gmailWatches?.ensureForUser(state.userId).catch(() => false);
-    return {
-      redirectUri: this.callbackRedirect(state, 'success', undefined, connectionMode),
-      userId: state.userId,
-      purpose: state.purpose,
-    };
+    await this.authorization.persist(claim, (transaction) => this.users.updateGmailTokens(userId, {
+      refreshToken: grant.refreshToken, accessToken: grant.accessToken,
+      expiryDate: grant.expiryDate, gmailEmail: grant.email, scopes: [...grant.scopes],
+      connectionMode: grant.refreshToken ? 'offline' : 'temporary',
+    }, transaction));
+    this.connectionHealth.invalidate(userId);
+    await this.gmailWatches?.ensureForUser(userId).catch(() => false);
   }
 
   failureRedirect(stateToken: string | undefined, error: unknown): string {
@@ -112,7 +113,7 @@ export class GmailConnectionService {
     if (stateToken) {
       try {
         state = this.oauth.verifyState(stateToken);
-        this.parseAppRedirectUri(state.redirectUri);
+        parseMailboxRedirect(state.redirectUri);
       } catch {
         state = undefined;
       }
@@ -127,6 +128,7 @@ export class GmailConnectionService {
   }
 
   async disconnect(userId: string, resetImportStatus: boolean): Promise<void> {
+    await this.authorization.cancel(userId, 'gmail');
     const [preferences, microsoft] = await Promise.all([
       this.queries.get(userId),
       this.mailboxConnections?.findMicrosoft(userId),
@@ -163,30 +165,15 @@ export class GmailConnectionService {
     }
   }
 
-  private parseAppRedirectUri(value: string): URL {
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch (cause) {
-      throw new ValidationError('redirectUri must be a valid absolute URI', 'redirectUri', cause);
-    }
-    if (!ALLOWED_APP_REDIRECT_SCHEMES.has(parsed.protocol)) {
-      throw new ValidationError('redirectUri uses an unsupported scheme', 'redirectUri');
-    }
-    return parsed;
-  }
-
   private callbackRedirect(
     state: GmailOAuthState,
-    outcome: 'success' | 'error',
+    outcome: 'pending' | 'error',
     error?: string,
-    connectionMode?: 'temporary' | 'offline',
   ): string {
     const redirect = new URL(state.redirectUri);
     redirect.searchParams.set('gmail', outcome);
     redirect.searchParams.set('gmailPurpose', state.purpose);
     if (error) redirect.searchParams.set('error', error);
-    if (connectionMode) redirect.searchParams.set('connectionMode', connectionMode);
     return redirect.toString();
   }
 }

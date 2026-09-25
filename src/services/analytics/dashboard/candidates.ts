@@ -1112,7 +1112,7 @@ function addRestaurantStories(
           icon: 'heart',
           eyebrow: `Former favourite #${index + 1}`,
           title: `Whatever happened to ${former.label}?`,
-          detail: `${former.count} tracked orders historically, but none recorded in the latest 180 days. Your imported history may be incomplete.`,
+          detail: `${former.count} tracked orders historically, but none recorded in the latest 180 days.`,
           events: [
             { label: 'All-time orders', value: former.count },
             { label: 'Latest visit', value: dateLabel(formerLatestDate) },

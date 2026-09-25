@@ -22,6 +22,7 @@ import { asyncHandler, errorHandler } from './middleware/errorHandler';
 import { setupSwagger } from './config/swagger';
 import { sentryConfig } from './config/sentry';
 import { redisConfig } from './config/redis';
+import { createAuthenticationAbuseMiddleware } from './middleware/authenticationAbuse';
 import { getLogLevel, getRecentLogs, logger, logRequest, setLogLevel } from './config/logger';
 import * as Sentry from '@sentry/node';
 import { container } from './services/core/ServiceContainer';
@@ -85,6 +86,7 @@ const adminQueueOperations = new AdminQueueOperationsService(
 
 const authenticateToken = createAuthenticateToken({
   tokens: container.tokenService,
+  sessions: container.sessionService,
   observability: sentryConfig,
   logger,
 });
@@ -98,7 +100,7 @@ sentryConfig.initialize(app);
 app.use(requestContext);
 
 // Trust proxy for accurate IP addresses (important for rate limiting)
-app.set('trust proxy', 1);
+app.set('trust proxy', config.getTrustedProxies());
 
 // Security middleware (must be applied early)
 app.use(securityHeaders);
@@ -138,8 +140,11 @@ app.use(
   }),
 );
 // Body parsing (with size limits)
+app.use(['/auth', '/admin/v1/auth', '/admin/v1/invitations'],
+  express.json({ limit: '32kb' }), express.urlencoded({ extended: false, limit: '32kb' }));
 app.use(express.json({ limit: config.isProduction() ? '10mb' : '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: config.isProduction() ? '10mb' : '50mb' }));
+app.use(createAuthenticationAbuseMiddleware(container.authenticationAbuseService));
 
 // Initialize database
 const postgresService = container.postgres;

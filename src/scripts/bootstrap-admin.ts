@@ -39,6 +39,7 @@ const readSecret = (prompt: string): Promise<string> => new Promise((resolve, re
 const postgres = new PostgresService({
   connectionString: config.getDatabaseConnectionString(),
   useSsl: config.shouldUseDatabaseSSL(),
+  sslCa: config.getDatabaseSslCa(),
   maxConnections: 1,
 });
 

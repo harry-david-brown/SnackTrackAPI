@@ -23,12 +23,12 @@ const role = (value: string): string | undefined => {
 type PriceResolver = (row: ExportItemRow) => ItemPriceResolution;
 const inferredLinePrice = (row: ExportItemRow): ItemPriceResolution => {
   const recordedAmount = Number(row.Item_Price);
-  const quantity = Number(row.Item_quantity);
+  const quantity = Number(row.Item_quantity || 1);
   return { status: 'line_inferred', recordedAmount, unitAmount: recordedAmount / quantity, lineAmount: recordedAmount, reasons: ['legacy_line_interpretation'] };
 };
 const forcedPrice = (basis: 'unit' | 'line'): PriceResolver => (row) => {
   const recordedAmount = Number(row.Item_Price);
-  const quantity = Number(row.Item_quantity);
+  const quantity = Number(row.Item_quantity || 1);
   return basis === 'unit'
     ? { status: 'unit_inferred', recordedAmount, unitAmount: recordedAmount, lineAmount: moneySum([recordedAmount * quantity]), reasons: ['subtotal_candidate'] }
     : { status: 'line_inferred', recordedAmount, unitAmount: recordedAmount / quantity, lineAmount: recordedAmount, reasons: ['subtotal_candidate'] };
@@ -71,7 +71,8 @@ export function reconstructUberItems(
     const partitions = canCombine ? Array.from({length:multiplicity},(_,index) => distinct.map(group => group[index])) : entries.map(entry => [entry]);
     for (const partition of partitions) {
       const row = partition[0].row;
-      const quantity = Number(row.Item_quantity);
+      // Match CSV validation and contextual pricing: an omitted quantity means one.
+      const quantity = Number(row.Item_quantity || 1);
       const base = Number(row.Item_Price);
       const sourcePrice = priceResolver(row);
       const modifiers = moneySum(partition.map(({ row: r }) => cost(r.Customization_Cost_Local) * (customizationBasis === 'per_item' ? quantity : 1)));

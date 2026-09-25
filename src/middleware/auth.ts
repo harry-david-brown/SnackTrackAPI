@@ -1,5 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
-import { AuthenticationError, AuthorizationError } from '../core/errors';
+import { AppError, AuthenticationError, AuthorizationError } from '../core/errors';
 import { TokenPayload } from '../models/Token';
 import { TokenService } from '../services/auth/TokenService';
 import { StructuredLogger } from '../services/core/StructuredLogger';
@@ -18,6 +18,7 @@ interface AuthenticationObservability {
 
 export interface AuthenticationMiddlewareDependencies {
   readonly tokens: Pick<TokenService, 'verifyAccessToken'>;
+  readonly sessions: { verifyAccessSession(payload: TokenPayload): Promise<void> };
   readonly observability: AuthenticationObservability;
   readonly logger: StructuredLogger;
 }
@@ -36,17 +37,18 @@ const bearerToken = (req: Request): string | undefined => {
 export const createAuthenticateToken = (
   dependencies: AuthenticationMiddlewareDependencies,
 ): RequestHandler => {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     try {
       const token = bearerToken(req);
       if (!token) throw new AuthenticationError('Access token is required');
       const payload = dependencies.tokens.verifyAccessToken(token);
+      await dependencies.sessions.verifyAccessSession(payload);
       req.user = payload;
       dependencies.observability.setUserContext(payload.userId, payload.email);
       next();
     } catch (error) {
       next(
-        error instanceof AuthenticationError
+        error instanceof AppError
           ? error
           : new AuthenticationError('Access token is invalid', 'ACCESS_TOKEN_INVALID'),
       );
@@ -64,11 +66,12 @@ export const createOptionalAuthentication = (
   dependencies: AuthenticationMiddlewareDependencies,
   invalidCredentialPolicy: InvalidOptionalCredentialPolicy = 'reject',
 ): RequestHandler => {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     try {
       const token = bearerToken(req);
       if (!token) return next();
       const payload = dependencies.tokens.verifyAccessToken(token);
+      await dependencies.sessions.verifyAccessSession(payload);
       req.user = payload;
       dependencies.observability.setUserContext(payload.userId, payload.email);
       return next();
@@ -82,7 +85,7 @@ export const createOptionalAuthentication = (
       });
       if (invalidCredentialPolicy === 'continue_anonymous' && known) return next();
       return next(
-        known ? error : new AuthenticationError('Access token is invalid', 'ACCESS_TOKEN_INVALID'),
+        error instanceof AppError ? error : new AuthenticationError('Access token is invalid', 'ACCESS_TOKEN_INVALID'),
       );
     }
   };

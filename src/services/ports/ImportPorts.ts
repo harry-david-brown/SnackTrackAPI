@@ -1,3 +1,4 @@
+import type { DatabaseQueryExecutor } from './DatabasePort';
 import type { User } from '../../models/User';
 import type {
   ExportProvider,
@@ -36,6 +37,7 @@ export interface MailboxUserPort {
       scopes: string[];
       connectionMode: Exclude<GmailConnectionMode, 'none'>;
     },
+    executor?: DatabaseQueryExecutor,
   ): Promise<void>;
   disconnectGmail(userId: string): Promise<void>;
   markGmailReconnectRequired(userId: string): Promise<void>;

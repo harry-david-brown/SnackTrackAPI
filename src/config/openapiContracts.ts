@@ -35,6 +35,18 @@ const providerState = {
   additionalProperties: false,
   required: ['provider', 'status', 'requestedAt', 'updatedAt', 'errorCode', 'readySource', 'relevance'],
   properties: {
+    requestId: { type: 'string', format: 'uuid', nullable: true },
+    readyAlert: {
+      type: 'object',
+      properties: {
+        consentState: { type: 'string', enum: ['not_offered','granted','declined','revoked'] },
+        consentVersion: { type: 'string', nullable: true },
+        consentedAt: nullableTimestamp, revokedAt: nullableTimestamp, lastCheckedAt: nullableTimestamp,
+        errorCode: { type: 'string', nullable: true },
+        effectiveState: { type: 'string', enum: ['off','active','reconnect_required','unavailable','error'] },
+        backgroundAvailable: { type: 'boolean' }, canMonitor: { type: 'boolean' },
+      },
+    },
     provider: { type: 'string', enum: ['uber_eats', 'doordash'] },
     status: {
       type: 'string',
@@ -329,8 +341,9 @@ export const contractSchemas = {
   GmailAuthUrlRequest: {
     type: 'object',
     additionalProperties: false,
-    required: ['redirectUri'],
+    required: ['redirectUri', 'handoffChallenge'],
     properties: {
+      handoffChallenge: { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'SHA-256 hex digest of a private 32-byte device verifier, encoded as hex. Required by the secure mailbox handoff protocol.' },
       redirectUri: { type: 'string', minLength: 1, maxLength: 2048 },
       purpose: {
         type: 'string',
@@ -342,6 +355,13 @@ export const contractSchemas = {
           'manage_connection',
         ],
       },
+    },
+  },
+  MailboxAuthorizationCompleteRequest: {
+    type: 'object', additionalProperties: false, required: ['completionToken', 'verifier'],
+    properties: {
+      completionToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      verifier: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     },
   },
   GmailDisconnectRequest: {
@@ -356,6 +376,14 @@ export const contractSchemas = {
     properties: {
       decision: { type: 'string', enum: ['granted', 'declined', 'revoked'] },
       consentVersion: { type: 'string', maxLength: 50 },
+    },
+  },
+  ProviderReadyAlertConsentRequest: {
+    type: 'object', additionalProperties: false, required: ['provider','decision'],
+    properties: {
+      provider: { type: 'string', enum: ['uber_eats','doordash'] },
+      decision: { type: 'string', enum: ['granted','declined','revoked'] },
+      consentVersion: { type: 'string', enum: ['export-ready-background-v1'] },
     },
   },
   ExportProviderRequest: {
@@ -724,7 +752,7 @@ export const contractSchemas = {
     required: ['id', 'kind', 'trigger', 'journeyContext', 'status', 'phase', 'progress', 'result', 'errorCode', 'errorMessage', 'attempts', 'provider', 'presentation', 'createdAt', 'queuedAt', 'startedAt', 'completedAt', 'updatedAt'],
     properties: {
       id: { type: 'string', format: 'uuid' },
-      kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'gmail_push_tracking', 'export_file'] },
+      kind: { type: 'string', enum: ['gmail_historical', 'outlook_historical', 'manual_tracking', 'scheduled_tracking', 'gmail_push_tracking', 'export_file', 'receipt_rebuild', 'receipt_publish', 'receipt_rollback', 'export_ready_check'] },
       trigger: { type: 'string', enum: ['user', 'scheduler'] },
       journeyContext: { type: 'string', enum: ['onboarding', 'post_onboarding', 'routine', 'legacy'] },
       status: { type: 'string', enum: ['awaiting_upload', 'pending_dispatch', 'queued', 'running', 'retrying', 'succeeded', 'failed', 'expired', 'superseded', 'cancelled'] },
@@ -944,6 +972,18 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
     'EmailCodeRequest',
     'OperationResult',
   ),
+  ...Object.fromEntries(['gmail', 'outlook'].map((provider) => [`/${provider}/complete`, {
+    post: {
+      summary: 'Complete a one-use mailbox handoff on the initiating authenticated device',
+      security: secured,
+      requestBody: jsonBody('MailboxAuthorizationCompleteRequest'),
+      responses: {
+        '200': { description: 'Mailbox credentials persisted', content: { 'application/json': { schema: { $ref: '#/components/schemas/OperationResult' } } } },
+        '401': { $ref: '#/components/responses/Unauthorized' },
+        '409': { description: 'Expired, replayed, or mismatched authorization attempt' },
+      },
+    },
+  }])),
   '/gmail/auth-url': {
     post: {
       summary: 'Create an allowlisted Gmail authorization URL',
@@ -1059,6 +1099,10 @@ export const contractPaths: Readonly<Record<string, unknown>> = {
       },
     },
   },
+  '/gmail/preferences/provider-ready-alert-consent': {
+    put: gmailPreferenceMutation('Set provider-specific background ready-email consent', 'ProviderReadyAlertConsentRequest').post,
+  },
+  '/gmail/preferences/check-provider-ready': gmailPreferenceMutation('Queue a consented provider ready-email check', 'ExportProviderRequest'),
   '/gmail/preferences/monitoring-consent': {
     put: gmailPreferenceMutation('Set export-ready monitoring consent', 'ConsentRequest').post,
   },

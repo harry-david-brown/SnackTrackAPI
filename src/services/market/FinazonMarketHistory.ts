@@ -15,7 +15,8 @@ export class FinazonMarketHistory implements MarketHistoryProviderPort {
   ): Promise<MarketPoint[]> {
     if (!this.apiKey) throw new Error('Market provider credentials are missing');
     const points: MarketPoint[] = [];
-    for (let page = 0; page < 100; page++) {
+    // The live dataset is one-based: page 0 aliases page 1.
+    for (let page = 1; page <= 100; page++) {
       const url = new URL('https://api.finazon.io/latest/finazon/us_stocks_essential/time_series');
       url.search = new URLSearchParams({
         ticker: symbols[benchmark],
@@ -78,8 +79,14 @@ export class FinazonMarketHistory implements MarketHistoryProviderPort {
       }
       if (response.status !== 429 && response.status < 500)
         throw new Error('Market provider rejected request');
-      if (attempt === 2) throw new Error('Market provider retry limit reached');
+      if (attempt === 2) throw new Error(`Market provider retry limit reached (HTTP ${response.status})`);
       const retry = response.headers.get('Retry-After');
+      // Finazon can omit Retry-After on its per-minute quota response.
+      // Preserve this page and give the quota a full window to recover.
+      if (response.status === 429 && retry === null) {
+        await this.sleep(60000);
+        continue;
+      }
       const seconds =
         retry === null
           ? 0

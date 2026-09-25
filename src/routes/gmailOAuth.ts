@@ -18,7 +18,7 @@ interface GmailOAuthRouterContext {
   readonly authenticate: RequestHandler;
   readonly connections: Pick<
     GmailConnectionService,
-    'createAuthorizationUrl' | 'completeAuthorization' | 'failureRedirect' | 'disconnect'
+    'createAuthorizationUrl' | 'completeAuthorization' | 'finishAuthorization' | 'failureRedirect' | 'disconnect'
   >;
   readonly logger: {
     info(message: string, metadata: Readonly<Record<string, unknown>>): void;
@@ -52,10 +52,17 @@ export const createGmailOAuthRouter = ({
       }
       res.json({
         success: true,
-        authUrl: connections.createAuthorizationUrl(userId, redirectUri, purpose),
+        authUrl: await connections.createAuthorizationUrl(userId, redirectUri, purpose,
+          requireStringField(body, 'handoffChallenge'), req.user?.sessionVersion ?? 0),
       });
     }),
   );
+
+  router.post('/complete', authenticate, asyncHandler(async (req, res) => {
+    await connections.finishAuthorization(authenticatedUserId(req),
+      requireStringField(req.body, 'completionToken'), requireStringField(req.body, 'verifier'));
+    res.json({ success: true, message: 'Gmail connected successfully' });
+  }));
 
   router.get(
     '/callback',
@@ -68,6 +75,8 @@ export const createGmailOAuthRouter = ({
           optionalQueryString(req.query.code, 'code'),
           optionalQueryString(req.query.error, 'error'),
         );
+        res.set('Cache-Control', 'no-store');
+        res.set('Referrer-Policy', 'no-referrer');
         res.redirect(result.redirectUri);
       } catch (error) {
         logger.warn('Gmail OAuth callback failed', {

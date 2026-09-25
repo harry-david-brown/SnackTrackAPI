@@ -1,5 +1,7 @@
 import { Auth, google } from 'googleapis';
-import jwt from 'jsonwebtoken';
+import { createHash, randomBytes } from 'crypto';
+import { CodeChallengeMethod } from 'google-auth-library';
+import { MailboxSecretCipher } from '../mailbox/MailboxSecretCipher';
 import { AppError, ValidationError } from '../../core/errors';
 import {
   GMAIL_CONNECTION_PURPOSES,
@@ -27,29 +29,30 @@ const GOOGLE_AUTH_SCOPES = [
 const isPurpose = (value: unknown): value is GmailConnectionPurpose =>
   typeof value === 'string' && GMAIL_CONNECTION_PURPOSES.includes(value as GmailConnectionPurpose);
 
-/** Google/JWT adapter for Gmail connection authorization. */
+/** Google OAuth adapter with PKCE and encrypted, expiring state. */
 export class GmailOAuthProvider implements GmailOAuthPort {
-  constructor(private readonly configuration: GmailOAuthProviderConfig) {}
+  private readonly cipher: MailboxSecretCipher;
+  constructor(private readonly configuration: GmailOAuthProviderConfig) {
+    this.cipher = new MailboxSecretCipher(configuration.stateSecret);
+  }
 
   createAuthorizationUrl(state: GmailOAuthState): string {
+    const codeVerifier = randomBytes(32).toString('base64url');
     return this.client().generateAuthUrl({
+      code_challenge: createHash('sha256').update(codeVerifier).digest('base64url'),
+      code_challenge_method: CodeChallengeMethod.S256,
       access_type: 'offline',
       prompt: 'consent',
       include_granted_scopes: true,
       scope: [...GOOGLE_AUTH_SCOPES],
-      state: jwt.sign(state, this.configuration.stateSecret, {
-        expiresIn: '10m',
-        issuer: 'snacktrack-gmail-oauth',
-      }),
+      state: this.cipher.encrypt(JSON.stringify({ ...state, codeVerifier, expiresAt: Date.now() + 600_000 })),
     });
   }
 
   verifyState(state: string): GmailOAuthState {
     let decoded: unknown;
     try {
-      decoded = jwt.verify(state, this.configuration.stateSecret, {
-        issuer: 'snacktrack-gmail-oauth',
-      });
+      decoded = JSON.parse(this.cipher.decrypt(state)) as unknown;
     } catch (cause) {
       throw new ValidationError('OAuth state is invalid or expired', 'state', cause);
     }
@@ -60,20 +63,24 @@ export class GmailOAuthProvider implements GmailOAuthPort {
     if (
       typeof record.userId !== 'string' ||
       typeof record.redirectUri !== 'string' ||
+      typeof record.codeVerifier !== 'string' ||
+      typeof record.expiresAt !== 'number' || record.expiresAt <= Date.now() ||
       !isPurpose(record.purpose)
     ) {
       throw new ValidationError('OAuth state payload is invalid', 'state');
     }
     return {
+      codeVerifier: record.codeVerifier,
       userId: record.userId,
       redirectUri: record.redirectUri,
       purpose: record.purpose,
     };
   }
 
-  async exchangeAuthorizationCode(code: string): Promise<GmailOAuthGrant> {
+  async exchangeAuthorizationCode(code: string, state: GmailOAuthState): Promise<GmailOAuthGrant> {
     const client = this.client();
-    const tokens = decodeGoogleOAuthTokens(await client.getToken(code));
+    if (!state.codeVerifier) throw new ValidationError('Missing OAuth verifier', 'state');
+    const tokens = decodeGoogleOAuthTokens(await client.getToken({ code, codeVerifier: state.codeVerifier }));
     client.setCredentials({
       access_token: tokens.accessToken,
       refresh_token: tokens.refreshToken,

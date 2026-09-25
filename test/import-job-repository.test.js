@@ -274,3 +274,35 @@ test('idempotent retry returns the accepted job without changing a later opt-out
   assert.equal(result.id, persistedJob.id);
   assert.equal(writes, 0);
 });
+
+test('ready transition and notification outbox share one transaction and stale cycles stay silent', async () => {
+  for (const transitioned of [true, false]) {
+    const statements = [];
+    let insideTransaction = false;
+    const readyRow = { ...persistedJob, kind: 'export_ready_check', trigger_type: 'scheduler',
+      status: 'running', export_provider: 'doordash', checkpoint: { requestId: '98bb78e4-3b64-4daa-b1c4-d0bb8df09128' } };
+    const query = async (sql, params) => {
+      statements.push({ sql, params, insideTransaction });
+      if (sql.includes("SET status='file_ready'")) return { rows: transitioned ? [{ request_id: readyRow.checkpoint.requestId }] : [], rowCount: transitioned ? 1 : 0 };
+      if (sql.includes('UPDATE import_jobs j SET status=$2')) return { rows: [{ ...readyRow, status: 'succeeded', result: JSON.parse(params[3]) }], rowCount: 1 };
+      if (sql.startsWith('SELECT ')) return { rows: [readyRow], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    };
+    const repository = new ImportJobRepository({ query, withTransaction: async action => {
+      insideTransaction = true;
+      try { return await action({ query }); } finally { insideTransaction = false; }
+    } });
+    const job = await repository.findById(readyRow.id);
+    await repository.succeed(job, { exportReadyDetected: true });
+    const transition = statements.find(entry => entry.sql.includes("SET status='file_ready'"));
+    assert.equal(transition.insideTransaction, true);
+    assert.match(transition.sql, /p.request_id=\$3::uuid/);
+    assert.match(transition.sql, /u.import_generation=\$4/);
+    assert.match(transition.sql, /p.alert_consent='granted'/);
+    const notification = statements.find(entry => entry.sql.includes('INSERT INTO import_job_outbox'));
+    assert.equal(Boolean(notification), transitioned);
+    if (notification) assert.equal(notification.insideTransaction, true);
+    const finished = statements.find(entry => entry.sql.includes('UPDATE import_jobs j SET status=$2'));
+    assert.equal(JSON.parse(finished.params[3]).exportReadyDetected, transitioned);
+  }
+});

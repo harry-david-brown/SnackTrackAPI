@@ -56,10 +56,7 @@ const setup = (options = {}) => {
       events.push(['completed_atomic', id, providerUserId, email]);
       return user;
     },
-    async completeUnverifiedNewAccount(id, providerUserId, email) {
-      events.push(['completed_unverified', id, providerUserId, email]);
-      return options.emailCollision ? undefined : { ...user, emailVerified: false };
-    },
+
   };
   const service = new MicrosoftLoginService(
     options.enabled !== false,
@@ -123,12 +120,11 @@ test('authenticates trusted Microsoft email and returning linked identities', as
   assert.equal(returning.events[0][3], undefined);
 });
 
-test('creates a new unverified account without interrupting Microsoft sign-in', async () => {
+test('requires email verification before creating an unverified Microsoft account', async () => {
   const { service, events } = setup({ identity: { ...identity, emailVerified: false } });
   const result = await service.login('identity-token', attemptToken);
-  assert.equal(result.status, 'authenticated');
-  assert.equal(result.session.user.emailVerified, false);
-  assert.equal(events[0][0], 'completed_unverified');
+  assert.equal(result.status, 'email_verification_required');
+  assert.equal(events[0][0], 'email_required');
 });
 
 test('requires verification before an untrusted email can link an existing account', async () => {

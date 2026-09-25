@@ -37,7 +37,9 @@ const tokenPayload = (value: unknown, expectedType: TokenPayload['type']): Token
     record.type === expectedType &&
     (record.iat === undefined || typeof record.iat === 'number') &&
     (record.exp === undefined || typeof record.exp === 'number') &&
-    (record.jti === undefined || typeof record.jti === 'string');
+    (record.jti === undefined || typeof record.jti === 'string') &&
+    (record.sessionVersion === undefined || (Number.isSafeInteger(record.sessionVersion) &&
+      (record.sessionVersion as number) >= 0));
   if (!valid) {
     throw new AuthenticationError(
       `Invalid ${expectedType} token`,
@@ -59,7 +61,7 @@ export class TokenService {
 
   generateTokens(user: User): AuthTokens {
     const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, type: 'access' } satisfies TokenPayload,
+      { userId: user.id, email: user.email, type: 'access', sessionVersion: user.sessionVersion ?? 0 } satisfies TokenPayload,
       this.options.accessSecret,
       { expiresIn: this.options.accessTokenExpiry as SignOptions['expiresIn'] },
     );
@@ -68,6 +70,7 @@ export class TokenService {
         userId: user.id,
         email: user.email,
         type: 'refresh',
+        sessionVersion: user.sessionVersion ?? 0,
         jti: this.createId(),
       } satisfies TokenPayload,
       this.options.refreshSecret,

@@ -18,8 +18,9 @@ export class MailboxSecretCipher {
   }
 
   decrypt(envelope: string): string {
-    const [version, encodedIv, encodedTag, encodedCiphertext] = envelope.split('.');
-    if (version !== 'v1' || !encodedIv || !encodedTag || !encodedCiphertext) {
+    const parts = envelope.split('.');
+    const [version, encodedIv, encodedTag, encodedCiphertext] = parts;
+    if (parts.length !== 4 || version !== 'v1' || !encodedIv || !encodedTag || !encodedCiphertext) {
       throw new Error('Invalid encrypted mailbox secret');
     }
     try {

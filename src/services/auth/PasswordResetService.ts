@@ -61,12 +61,12 @@ export class PasswordResetService {
     const validation = UserModel.validatePassword(newPassword);
     if (!validation.valid) throw new ValidationError(validation.errors.join('; '), 'newPassword');
     const normalizedEmail = normalizeEmail(email);
-    const passwordHash = await UserModel.hashPassword(newPassword);
     const result = await this.codes.consumeOTP(
       normalizedEmail,
       code,
       'password_reset',
       async (transaction) => {
+        const passwordHash = await UserModel.hashPassword(newPassword);
         if (!(await this.users.updatePassword(normalizedEmail, passwordHash, transaction))) {
           throw new NotFoundError('User');
         }

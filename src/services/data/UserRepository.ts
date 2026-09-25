@@ -1,10 +1,12 @@
 import { User } from '../../models/User';
+import type { GmailCredentialCipherPort } from '../ports/GmailCredentialCipherPort';
 import { DatabaseError, DuplicateUserEmailError } from '../../core/errors';
 import type { UserProjectionProfile } from '../ports/ProjectionPorts';
 import { DatabaseQueryExecutor } from '../ports/DatabasePort';
 import { v4 as uuidv4 } from 'uuid';
 import {
   databaseBoolean,
+  databaseNonNegativeInteger,
   databaseNullableString,
   databaseRow,
   databaseString,
@@ -40,6 +42,7 @@ const mapUser = (value: unknown, includePassword = false): User => {
       ? { password: databaseNullableString(row, 'password') ?? undefined }
       : {}),
     emailVerified: databaseBoolean(row, 'email_verified'),
+    sessionVersion: databaseNonNegativeInteger(row, 'session_version'),
     timezone: databaseString(row, 'timezone'),
     createdAt: requiredTimestamp(row, 'created_at'),
   };
@@ -52,7 +55,12 @@ const gmailConnectionMode = (value: unknown): User['gmailConnectionMode'] => {
 
 /** Typed persistence adapter for account identity and Gmail credential records. */
 export class UserRepository {
-  constructor(private readonly postgres: DatabaseQueryExecutor) {}
+  constructor(private readonly postgres: DatabaseQueryExecutor, private readonly gmailCipher?: GmailCredentialCipherPort) {}
+
+  private credentialCipher(): GmailCredentialCipherPort {
+    if (!this.gmailCipher) throw new Error('Gmail credential encryption is not configured');
+    return this.gmailCipher;
+  }
 
   async createUser(email: string, timezone = 'America/New_York'): Promise<string> {
     const existingUser = await this.findByEmail(email);
@@ -75,7 +83,7 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               created_at FROM users WHERE id = $1`,
       [id],
     );
@@ -99,7 +107,7 @@ export class UserRepository {
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               created_at FROM users WHERE email = $1`,
       [email],
     );
@@ -108,7 +116,7 @@ export class UserRepository {
 
   async findByEmailWithPassword(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, password, email_verified,
+      `SELECT id, email, password, session_version, email_verified,
               COALESCE(timezone, 'America/New_York') AS timezone, created_at
        FROM users WHERE email = $1`,
       [email],
@@ -156,7 +164,13 @@ export class UserRepository {
     executor: DatabaseQueryExecutor = this.postgres,
   ): Promise<boolean> {
     const result = await executor.query(
-      'UPDATE users SET password = $1, updated_at = NOW() WHERE email = $2',
+      `WITH recovered AS (
+         UPDATE users SET password = $1, email_verified = TRUE,
+           session_version = session_version + 1, updated_at = NOW()
+         WHERE email = $2 RETURNING id
+       ), removed_links AS (
+         DELETE FROM oauth_accounts USING recovered WHERE user_id = recovered.id
+       ) SELECT id FROM recovered`,
       [hashedPassword, email],
     );
     return Boolean(result.rowCount);
@@ -180,16 +194,17 @@ export class UserRepository {
       scopes: string[];
       connectionMode: Exclude<GmailConnectionMode, 'none'>;
     },
+    executor: DatabaseQueryExecutor = this.postgres,
   ): Promise<void> {
-    await this.postgres.query(
+    await executor.query(
       `UPDATE users SET
          gmail_refresh_token = $1, gmail_access_token = $2, gmail_token_expiry = $3,
          gmail_connected = TRUE, gmail_email = $4, gmail_scopes = $5,
          gmail_connection_mode = $6, updated_at = NOW()
        WHERE id = $7`,
       [
-        input.refreshToken ?? null,
-        input.accessToken,
+        input.refreshToken == null ? null : this.credentialCipher().encrypt(userId, 'refresh', input.refreshToken),
+        this.credentialCipher().encrypt(userId, 'access', input.accessToken),
         input.expiryDate,
         input.gmailEmail ?? null,
         input.scopes,
@@ -201,7 +216,7 @@ export class UserRepository {
 
   async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               gmail_refresh_token, gmail_access_token, gmail_token_expiry, gmail_connected,
               gmail_email, gmail_scopes, gmail_connection_mode, created_at
        FROM users WHERE id = $1`,
@@ -209,10 +224,12 @@ export class UserRepository {
     );
     if (!result.rows[0]) return undefined;
     const row = databaseRow(result.rows[0], 'Gmail user');
+    const refreshToken = databaseNullableString(row, 'gmail_refresh_token');
+    const accessToken = databaseNullableString(row, 'gmail_access_token');
     return {
       ...mapUser(row),
-      gmailRefreshToken: databaseNullableString(row, 'gmail_refresh_token') ?? undefined,
-      gmailAccessToken: databaseNullableString(row, 'gmail_access_token') ?? undefined,
+      gmailRefreshToken: refreshToken == null ? undefined : this.credentialCipher().decrypt(userId, 'refresh', refreshToken),
+      gmailAccessToken: accessToken == null ? undefined : this.credentialCipher().decrypt(userId, 'access', accessToken),
       gmailTokenExpiry: databaseTimestamp(row, 'gmail_token_expiry') ?? undefined,
       gmailConnected: databaseBoolean(row, 'gmail_connected'),
       gmailEmail: databaseNullableString(row, 'gmail_email') ?? undefined,

@@ -30,6 +30,14 @@ export class PushDeviceRepository {
     });
   }
 
+  async isInstallationEnabled(userId: string, installationId: string): Promise<boolean> {
+    const result=await this.database.query(
+      'SELECT id FROM push_devices WHERE user_id=$1 AND installation_id=$2 AND enabled',
+      [userId,installationId],
+    );
+    return Boolean(result.rows[0]);
+  }
+
   async disableInstallation(userId: string, installationId: string): Promise<void> {
     await this.database.query(`UPDATE push_devices SET enabled=FALSE,disabled_at=NOW(),updated_at=NOW() WHERE user_id=$1 AND installation_id=$2`, [userId,installationId]);
   }
@@ -81,6 +89,14 @@ export class PushDeviceRepository {
   }
 
   async recordReceipt(deliveryId: string, status: 'delivered'|'failed'|'device_disabled', errorCode?: string): Promise<void> {
-    await this.database.query(`UPDATE push_deliveries SET status=$2,error_code=$3,updated_at=NOW() WHERE id=$1`, [deliveryId,status,errorCode ?? null]);
+    await this.database.withTransaction(async transaction => {
+      await transaction.query(`UPDATE push_deliveries SET status=$2,error_code=$3,updated_at=NOW() WHERE id=$1`, [deliveryId,status,errorCode ?? null]);
+      if (status === 'failed') {
+        await transaction.query(`INSERT INTO import_job_outbox(job_id,event_type,available_at)
+          SELECT job_id,'notify',NOW()+INTERVAL '5 minutes' FROM push_deliveries WHERE id=$1 AND attempts<5
+          ON CONFLICT(job_id,event_type) DO UPDATE SET published_at=NULL,available_at=EXCLUDED.available_at,
+            payload=jsonb_build_object('deliveryRetry',COALESCE((import_job_outbox.payload->>'deliveryRetry')::int,0)+1)`, [deliveryId]);
+      }
+    });
   }
 }

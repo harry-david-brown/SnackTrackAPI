@@ -2,6 +2,7 @@ import { createClient, type RedisClientType } from 'redis';
 import { config as appConfig } from './AppConfig';
 import logger from './logger';
 import { AppError } from '../core/errors';
+import type { AuthAbuseBudgetPort } from '../services/ports/AuthAbuseBudgetPort';
 
 export type RedisLifecycleState = 'connecting' | 'ready' | 'recovering' | 'unavailable' | 'closed';
 export interface RedisLifecycleSnapshot {
@@ -169,7 +170,27 @@ export class RedisRefreshTokenStore {
   async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> { return (await this.connection.requireReady('SESSION_STORE_UNAVAILABLE').set(key, value, { NX: true, EX: ttlSeconds })) === 'OK'; }
 }
 
+export class RedisAuthAbuseBudgetStore implements AuthAbuseBudgetPort {
+  constructor(private readonly connection: RedisConnectionManager) {}
+  async consume(key: string, maximum: number, windowSeconds: number): Promise<number> {
+    const client = this.connection.requireReady('SESSION_STORE_UNAVAILABLE');
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        client.eval(`local count = redis.call('INCR', KEYS[1])
+          local ttl = redis.call('TTL', KEYS[1])
+          if ttl < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]); ttl = tonumber(ARGV[2]) end
+          if count > tonumber(ARGV[1]) then return math.max(1, ttl) end
+          return 0`, { keys: [key], arguments: [String(maximum), String(windowSeconds)] }),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Auth budget unavailable')), 2000); }),
+      ]);
+      return Number(result);
+    } finally { if (timeout) clearTimeout(timeout); }
+  }
+}
+
 export const redisConfig = new RedisConnectionManager();
 export const redisCacheStore = new RedisCacheStore(redisConfig);
 export const redisLockStore = new RedisLockStore(redisConfig);
 export const refreshTokenStore = new RedisRefreshTokenStore(redisConfig);
+export const authAbuseBudgetStore = new RedisAuthAbuseBudgetStore(redisConfig);

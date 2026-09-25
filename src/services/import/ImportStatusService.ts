@@ -330,6 +330,10 @@ export class ImportStatusService {
       if (provider.readyAlert) {
         provider.readyAlert.backgroundAvailable = this.backgroundAlertsEnabled;
         provider.readyAlert.canMonitor = durableMailbox;
+        provider.readyAlert.effectiveState = !this.backgroundAlertsEnabled ? 'unavailable'
+          : (provider.readyAlert.consentState !== 'granted' || provider.readyAlert.consentVersion !== 'export-ready-background-v1') ? 'off'
+          : !durableMailbox ? (status.connectionHealth === 'unavailable' || outlookConnection.connectionHealth === 'unavailable' ? 'unavailable' : 'reconnect_required')
+          : provider.readyAlert.errorCode ? 'error' : 'active';
       }
     }
     const mailboxConnectionHealth: GmailConnectionHealth = durableMailbox

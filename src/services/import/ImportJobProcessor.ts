@@ -78,6 +78,10 @@ export class ImportJobProcessor {
     let operation: ImportJob | null = null;
     let heartbeat: NodeJS.Timeout | null = null;
     try {
+      if (pending.kind === 'export_ready_check' && await this.jobs.findActive(pending.userId)) {
+        await queueJob.moveToDelayed(Date.now()+30_000,queueJob.token);
+        throw new DelayedError();
+      }
       operation = await this.jobs.claimForRun(queueJob.data.jobId);
       if (!operation) return;
       if (operation.kind === 'gmail_historical' && operation.trigger === 'user') {

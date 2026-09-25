@@ -146,14 +146,30 @@ test('Finazon paginates and requests adjusted regular-session data', async () =>
   }));
   const provider = new FinazonMarketHistory('test-key', async (url, options) => {
     calls.push({ url, options });
-    return new Response(JSON.stringify({ data: calls.length === 1 ? rows : [] }));
+    // Model the live endpoint: page zero aliases the first page.
+    const page = Number(url.searchParams.get('page'));
+    return new Response(JSON.stringify({ data: page <= 1 ? rows : [] }));
   });
   const result = await provider.history('nasdaq', '2020-01-01', '2023-01-01');
   assert.equal(result.length, 1000);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].url.searchParams.get('adjust'), 'all');
   assert.equal(calls[0].url.searchParams.get('prepost'), 'false');
-  assert.equal(calls[1].url.searchParams.get('page'), '1');
+  assert.equal(calls[0].url.searchParams.get('page'), '1');
+  assert.equal(calls[1].url.searchParams.get('page'), '2');
+});
+test('Finazon waits a full quota window when rate limiting omits retry-after', async () => {
+  const pages = [];
+  const sleeps = [];
+  const provider = new FinazonMarketHistory('test-key', async url => {
+    pages.push(url.searchParams.get('page'));
+    return pages.length === 1
+      ? new Response('', { status: 429 })
+      : new Response(JSON.stringify({ data: [] }));
+  }, async ms => sleeps.push(ms));
+  await provider.history('sp500', '2026-07-01', '2026-07-31');
+  assert.deepEqual(pages, ['1', '1']);
+  assert.deepEqual(sleeps, [60000]);
 });
 test('Finazon respects retry-after and rejects malformed data without leaking provider bodies', async () => {
   let calls = 0;

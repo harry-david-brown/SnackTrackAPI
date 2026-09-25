@@ -1,4 +1,4 @@
-import { Expo, type ExpoPushMessage, type ExpoPushTicket } from 'expo-server-sdk';
+import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
 import type { ImportJobRepository } from '../data/ImportJobRepository';
 import type { PushDeviceRepository } from './PushDeviceRepository';
 import { importCompletionResult } from '../import/ImportCompletionResult';
@@ -45,23 +45,24 @@ export class ImportPushNotificationService {
       body,
       data: job.kind==='export_ready_check' ? {type:'export_ready',provider:job.exportProvider,requestId:job.checkpoint.requestId} : { type: 'import_operation', operationId: job.id, route: '/(tabs)/upload' },
     }));
-    const tickets: ExpoPushTicket[] = [];
-    for (const chunk of this.expo.chunkPushNotifications(messages)) {
-      tickets.push(...await this.expo.sendPushNotificationsAsync(chunk));
-    }
     let retryableFailure=false;
-    for (let index = 0; index < eligible.length; index += 1) {
-      const device = eligible[index];
-      const ticket = tickets[index];
-      if (ticket?.status === 'ok') {
-        await this.devices.recordDelivery(job.id, device.id, 'sent', ticket.id);
-      } else {
-        const code = ticket?.status === 'error' ? ticket.details?.error : 'PUSH_FAILED';
-        const disabled = code === 'DeviceNotRegistered';
-        if (!disabled) retryableFailure=true;
-        if (disabled) await this.devices.markDisabled(device.id);
-        await this.devices.recordDelivery(job.id, device.id, disabled ? 'device_disabled' : 'failed', undefined, code);
+    let offset=0;
+    for (const chunk of this.expo.chunkPushNotifications(messages)) {
+      const tickets=await this.expo.sendPushNotificationsAsync(chunk);
+      for (let index=0;index<chunk.length;index+=1) {
+        const device=eligible[offset+index];
+        const ticket=tickets[index];
+        if (ticket?.status==='ok') {
+          await this.devices.recordDelivery(job.id,device.id,'sent',ticket.id);
+        } else {
+          const code=ticket?.status==='error'?ticket.details?.error:'PUSH_FAILED';
+          const disabled=code==='DeviceNotRegistered';
+          if (!disabled) retryableFailure=true;
+          if (disabled) await this.devices.markDisabled(device.id);
+          await this.devices.recordDelivery(job.id,device.id,disabled?'device_disabled':'failed',undefined,code);
+        }
       }
+      offset+=chunk.length;
     }
     if (retryableFailure) throw new Error('Push delivery needs retry');
   }

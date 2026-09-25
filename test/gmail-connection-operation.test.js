@@ -45,6 +45,12 @@ const dependencies = (overrides = {}) => ({
   },
   syncRuns: { resetGmailImportStatus: async () => {}, ...overrides.syncRuns },
   health: { invalidate: () => {}, ...overrides.health },
+  authorization: {
+    register: async () => {}, receive: async () => 'c'.repeat(64), cancel: async () => {},
+    consume: async () => ({ userId, state: 'signed-state', code: 'authorization-code' }),
+    persist: async (_claim, write) => write({ query: async () => ({ rows: [] }) }),
+    ...overrides.authorization,
+  },
 });
 
 const serviceFor = (overrides) => {
@@ -58,11 +64,12 @@ const serviceFor = (overrides) => {
       ports.lifecycle,
       ports.syncRuns,
       ports.health,
+      ports.authorization,
     ),
   };
 };
 
-test('Gmail authorization URL validates the app redirect before signing state', () => {
+test('Gmail authorization URL validates the app redirect before signing state', async () => {
   let received;
   const { service } = serviceFor({
     oauth: {
@@ -74,17 +81,17 @@ test('Gmail authorization URL validates the app redirect before signing state', 
   });
 
   assert.equal(
-    service.createAuthorizationUrl(userId, state.redirectUri, 'ongoing_tracking'),
+    await service.createAuthorizationUrl(userId, state.redirectUri, 'ongoing_tracking', 'a'.repeat(64), 0),
     'auth-url',
   );
   assert.deepEqual(received, state);
-  assert.throws(
-    () => service.createAuthorizationUrl(userId, 'javascript:alert(1)'),
+  await assert.rejects(
+    service.createAuthorizationUrl(userId, 'javascript:alert(1)', 'receipt_import', 'a'.repeat(64), 0),
     (error) => error.code === 'VALIDATION_ERROR',
   );
 });
 
-test('Gmail callback validates scope, persists durable credentials, then invalidates health', async () => {
+test('Gmail callback only stages the code; authenticated completion persists then invalidates health', async () => {
   const events = [];
   const { service } = serviceFor({
     users: { updateGmailTokens: async (_id, grant) => events.push(['persist', grant]) },
@@ -95,8 +102,10 @@ test('Gmail callback validates scope, persists durable credentials, then invalid
 
   assert.equal(result.userId, userId);
   assert.match(result.redirectUri, /^snacktrack:\/\/oauth-callback/);
-  assert.match(result.redirectUri, /gmail=success/);
-  assert.match(result.redirectUri, /connectionMode=offline/);
+  assert.match(result.redirectUri, /gmail=pending/);
+  assert.match(result.redirectUri, /completionToken=/);
+  assert.deepEqual(events, []);
+  await service.finishAuthorization(userId, 'c'.repeat(64), 'a'.repeat(64));
   assert.equal(events[0][0], 'persist');
   assert.equal(events[0][1].connectionMode, 'offline');
   assert.equal(events[1][0], 'invalidate');
@@ -122,7 +131,7 @@ test('Gmail callback rejects grants without a Gmail read scope before persistenc
   });
 
   await assert.rejects(
-    service.completeAuthorization('signed-state', 'authorization-code'),
+    service.finishAuthorization(userId, 'c'.repeat(64), 'a'.repeat(64)),
     (error) => error.code === 'VALIDATION_ERROR',
   );
   assert.equal(wrote, false);
@@ -206,4 +215,31 @@ test('Gmail OAuth state decoder rejects malformed signed payloads', () => {
     () => provider.verifyState(malformed),
     (error) => error.code === 'VALIDATION_ERROR',
   );
+});
+
+for (const rejectedUri of ['https://attacker.test/callback', 'snacktrack://attacker', 'snacktrack://oauth-callback/other', 'snacktrack://oauth-callback?completionToken=injected']) {
+  test(`rejects unauthorized callback destination ${rejectedUri}`, async () => {
+    const { service } = serviceFor();
+    await assert.rejects(service.createAuthorizationUrl(userId, rejectedUri, 'receipt_import', 'a'.repeat(64), 0),
+      (error) => error.code === 'VALIDATION_ERROR');
+  });
+}
+
+test('failed handoff never exchanges a code or invalidates the connection cache', async () => {
+  const { service } = serviceFor({
+    authorization: { consume: async () => { throw new Error('handoff rejected'); } },
+    oauth: { exchangeAuthorizationCode: async () => assert.fail('exchange not authorized') },
+    health: { invalidate: () => assert.fail('no committed connection') },
+  });
+  await assert.rejects(service.finishAuthorization(userId, 'c'.repeat(64), 'a'.repeat(64)), /handoff rejected/);
+});
+
+test('Gmail uses PKCE and keeps its verifier inside encrypted state', () => {
+  const provider = new GmailOAuthProvider({ stateSecret: 'a-secure-test-secret-that-is-long-enough',
+    clientId: 'client', clientSecret: 'secret', callbackRedirectUri: 'https://api.test/gmail/callback' });
+  const url = new URL(provider.createAuthorizationUrl(state));
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
+  const decoded = provider.verifyState(url.searchParams.get('state'));
+  assert.equal(url.searchParams.get('code_challenge'), require('node:crypto').createHash('sha256').update(decoded.codeVerifier).digest('base64url'));
+  assert.equal(url.toString().includes(decoded.codeVerifier), false);
 });

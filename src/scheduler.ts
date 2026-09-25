@@ -8,6 +8,7 @@ import { config } from './config/AppConfig';
 const run = async (): Promise<void> => {
   try {
     const expiredUploads = await container.importJobRepository.expireUploads();
+    const deletedAccountObjects = await container.importObjectCleanupService.run();
     const cleanupCandidates = await container.importJobRepository.listObjectCleanupCandidates();
     let cleanedUploadObjects = 0;
     for (const candidate of cleanupCandidates) {
@@ -31,7 +32,7 @@ const run = async (): Promise<void> => {
       logger,
     ).processReceipts();
     logger.info('Import scheduler completed', {
-      operation: 'import_scheduler', expiredUploads, cleanedUploadObjects, recoveredJobs,
+      operation: 'import_scheduler', expiredUploads, cleanedUploadObjects, deletedAccountObjects, recoveredJobs,
       pushReceipts, gmailPush, outlookTracking, exportReadyChecks,
     });
   } finally {

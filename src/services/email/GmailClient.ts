@@ -226,7 +226,7 @@ export class GmailClient implements MailboxClient {
     if (config.shouldUseMockData() && !config.isProduction()) {
       const emails = this.loadEmailsFromDebugFolder(user);
       return emails.some((email) =>
-        isExportReadyMessage(provider, email.from, email.subject ?? '', email.body),
+        Boolean(email.receivedAt && email.receivedAt.getTime() >= requestedTimestamp) && isExportReadyMessage(provider, email.from, email.subject ?? '', email.body),
       );
     }
 
@@ -256,7 +256,7 @@ export class GmailClient implements MailboxClient {
             id: messageId,
           }),
         );
-        if (!message.internalDate || Number(message.internalDate)<requestedTimestamp) continue;
+        if (!message.internalDate || !Number.isFinite(Number(message.internalDate)) || Number(message.internalDate)<requestedTimestamp) continue;
         const payload = message.payload;
         let from = '';
         let to = '';
@@ -286,8 +286,10 @@ export class GmailClient implements MailboxClient {
 
       return false;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown Gmail API error';
-      throw new Error(`Failed to check for an Uber export-ready email: ${errorMessage}`);
+      if (error instanceof AppError) throw error;
+      const failure = classifyGmailRequestFailure(error);
+      throw new AppError({ code: failure.code, message: 'Export-ready email check failed',
+        publicMessage: 'Ready-email checks could not finish. Please try again.', cause: error });
     }
   }
 

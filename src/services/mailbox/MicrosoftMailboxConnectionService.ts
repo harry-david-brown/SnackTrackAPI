@@ -1,3 +1,5 @@
+import type { MailboxAuthorizationPort } from '../ports/MailboxAuthorizationPort';
+import { parseMailboxRedirect } from '../mailbox/MailboxRedirect';
 import { AppError, ValidationError } from '../../core/errors';
 import type { UserRepository } from '../data/UserRepository';
 import type { ImportLifecycleRepository } from '../data/ImportLifecycleRepository';
@@ -10,12 +12,6 @@ import {
   type MicrosoftMailboxOAuthProvider,
 } from './MicrosoftMailboxOAuthProvider';
 
-const ALLOWED_APP_REDIRECT_SCHEMES = new Set([
-  'snacktrack:',
-  'exp+snack-track:',
-  'https:',
-  'http:',
-]);
 
 export class MicrosoftMailboxConnectionService {
   constructor(
@@ -29,15 +25,20 @@ export class MicrosoftMailboxConnectionService {
     >,
     private readonly syncRuns: Pick<MailboxSyncRunRepository, 'resetMicrosoftImportStatus'>,
     private readonly health: Pick<MicrosoftMailboxConnectionHealthService, 'invalidate'>,
+    private readonly authorization: MailboxAuthorizationPort,
   ) {}
 
   async createAuthorizationUrl(
     userId: string,
     appRedirectUri: string,
     purpose: MailboxConnectionPurpose = 'receipt_import',
+    handoffChallenge: string,
+    sessionVersion: number,
   ): Promise<string> {
-    this.parseAppRedirectUri(appRedirectUri);
-    return this.oauth.createAuthorizationUrl({ userId, appRedirectUri, purpose });
+    parseMailboxRedirect(appRedirectUri);
+    const url = await this.oauth.createAuthorizationUrl({ userId, appRedirectUri, purpose });
+    await this.authorization.register(userId, 'outlook', url, handoffChallenge, sessionVersion);
+    return url;
   }
 
   async completeAuthorization(
@@ -46,7 +47,8 @@ export class MicrosoftMailboxConnectionService {
     providerError?: string,
   ): Promise<{ redirectUri: string; userId: string; purpose: MailboxConnectionPurpose }> {
     const state = this.oauth.verifyState(stateToken);
-    this.parseAppRedirectUri(state.appRedirectUri);
+    parseMailboxRedirect(state.appRedirectUri);
+    const completionToken = await this.authorization.receive('outlook', stateToken, providerError ? undefined : code);
     if (providerError) {
       return {
         redirectUri: this.callbackRedirect(
@@ -60,7 +62,15 @@ export class MicrosoftMailboxConnectionService {
       };
     }
     if (!code) throw new ValidationError('Missing authorization code', 'code');
-    const grant = await this.oauth.exchangeAuthorizationCode(code, state);
+    const redirect = new URL(this.callbackRedirect(state.appRedirectUri, state.purpose, 'pending'));
+    redirect.searchParams.set('completionToken', completionToken);
+    return { redirectUri: redirect.toString(), userId: state.userId, purpose: state.purpose };
+  }
+
+  async finishAuthorization(userId: string, completionToken: string, verifier: string): Promise<void> {
+    const claim = await this.authorization.consume(userId, 'outlook', completionToken, verifier);
+    const state = this.oauth.verifyState(claim.state);
+    const grant = await this.oauth.exchangeAuthorizationCode(claim.code, state);
     if (
       !grant.scopes.some((scope) => {
         const normalized = scope.toLowerCase();
@@ -69,8 +79,8 @@ export class MicrosoftMailboxConnectionService {
     ) {
       throw new ValidationError('Outlook access was granted without Mail.Read.', 'scope');
     }
-    await this.connections.saveMicrosoft({
-      userId: state.userId,
+    await this.authorization.persist(claim, (transaction) => this.connections.saveMicrosoft({
+      userId,
       providerAccountId: grant.providerAccountId,
       email: grant.email,
       scopes: grant.scopes,
@@ -79,13 +89,8 @@ export class MicrosoftMailboxConnectionService {
         tokenCache: grant.tokenCache,
         homeAccountId: grant.providerAccountId,
       },
-    });
-    this.health.invalidate(state.userId);
-    return {
-      redirectUri: this.callbackRedirect(state.appRedirectUri, state.purpose, 'success', undefined),
-      userId: state.userId,
-      purpose: state.purpose,
-    };
+    }, transaction));
+    this.health.invalidate(userId);
   }
 
   failureRedirect(stateToken: string | undefined, error: unknown): string {
@@ -94,7 +99,7 @@ export class MicrosoftMailboxConnectionService {
     if (stateToken) {
       try {
         const state = this.oauth.verifyState(stateToken);
-        this.parseAppRedirectUri(state.appRedirectUri);
+        parseMailboxRedirect(state.appRedirectUri);
         appRedirectUri = state.appRedirectUri;
         purpose = state.purpose;
       } catch {
@@ -106,6 +111,7 @@ export class MicrosoftMailboxConnectionService {
   }
 
   async disconnect(userId: string, resetImportStatus: boolean): Promise<void> {
+    await this.authorization.cancel(userId, 'outlook');
     const [preferences, gmailUser] = await Promise.all([
       this.preferences.get(userId),
       this.users.findByIdWithGmailTokens(userId),
@@ -128,23 +134,10 @@ export class MicrosoftMailboxConnectionService {
     if (resetImportStatus) await this.syncRuns.resetMicrosoftImportStatus(userId);
   }
 
-  private parseAppRedirectUri(value: string): URL {
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch (cause) {
-      throw new ValidationError('redirectUri must be a valid absolute URI', 'redirectUri', cause);
-    }
-    if (!ALLOWED_APP_REDIRECT_SCHEMES.has(parsed.protocol)) {
-      throw new ValidationError('redirectUri uses an unsupported scheme', 'redirectUri');
-    }
-    return parsed;
-  }
-
   private callbackRedirect(
     appRedirectUri: string,
     purpose: MailboxConnectionPurpose,
-    outcome: 'success' | 'error',
+    outcome: 'pending' | 'error',
     error?: string,
   ): string {
     const redirect = new URL(appRedirectUri);

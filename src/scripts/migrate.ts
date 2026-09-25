@@ -8,6 +8,7 @@ import { PostgresService } from '../services/data/PostgresService';
 const postgres = new PostgresService({
   connectionString: config.getDatabaseConnectionString(),
   useSsl: config.shouldUseDatabaseSSL(),
+  sslCa: config.getDatabaseSslCa(),
   maxConnections: 2,
   minimumConnections: 0,
 });

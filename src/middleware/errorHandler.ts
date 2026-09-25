@@ -89,6 +89,7 @@ export const statusForError = (error: AppError): number => {
     case 'REFRESH_TOKEN_INVALID':
     case 'REFRESH_TOKEN_REVOKED':
     case 'PROVIDER_AUTH_FAILED':
+    case 'PROVIDER_EMAIL_VERIFICATION_REQUIRED':
     case 'MICROSOFT_TOKEN_INVALID':
     case 'VERIFICATION_CODE_INVALID':
       return 401;
@@ -117,6 +118,7 @@ export const statusForError = (error: AppError): number => {
     case 'MICROSOFT_ATTEMPT_EXPIRED':
     case 'MICROSOFT_EMAIL_VERIFICATION_REQUIRED':
     case 'OAUTH_ACCOUNT_CONFLICT':
+    case 'MAILBOX_AUTHORIZATION_EXPIRED':
     case 'ACCOUNT_ALREADY_EXISTS':
     case 'EMAIL_ALREADY_VERIFIED':
     case 'IMPORT_IN_PROGRESS':
