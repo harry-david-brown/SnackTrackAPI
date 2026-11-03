@@ -110,6 +110,7 @@ export interface ImportPreferencesProjection {
       readonly errorCode: string | null;
     };
   };
+  readonly automaticUpdatesOfferSeenAt?: string | null;
   readonly ongoingTracking: {
     readonly consentState: ImportPreferences['ongoingTrackingConsentState'];
     readonly consentVersion: string | null;
@@ -389,6 +390,7 @@ export class ImportStatusService {
           errorCode: resolvedOutlookState.errorCode,
         },
       },
+      automaticUpdatesOfferSeenAt: preferences.automaticUpdatesOfferSeenAt ?? null,
       ongoingTracking: {
         consentState: preferences.ongoingTrackingConsentState,
         consentVersion: preferences.ongoingTrackingConsentVersion,

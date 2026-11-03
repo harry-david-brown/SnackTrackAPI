@@ -12,6 +12,7 @@ import { deduplicateReceipts } from './ReceiptDeduplicator';
 import type { ReceiptImportPersistenceService } from './ReceiptImportPersistenceService';
 import { receiptImportOutcomeFields, type ReceiptImportOutcome } from './ReceiptImportOutcome';
 import { receiptImportAccounting } from './ReceiptImportExecution';
+import { prefetchMailboxPages } from './PrefetchedMailboxPages';
 import { ACTIVE_RECEIPT_POLICY, type ReceiptPolicyVersion } from '../receipt/ReceiptPolicy';
 import {
   restoreMailboxCheckpoint,
@@ -28,7 +29,17 @@ const MAX_IMPORT_PAGES = 1_000;
 const HISTORICAL_BYTE_BUDGET = 500 * 1024 * 1024;
 const TRACKING_BYTE_BUDGET = 100 * 1024 * 1024;
 
+export interface MailboxImportOutcome {
+  readonly mailbox: 'gmail' | 'outlook';
+  readonly email: string | null;
+  readonly success: boolean;
+  readonly newOrders: number;
+  readonly updatedOrders: number;
+  readonly unchangedOrders: number;
+  readonly errorCode: string | null;
+}
 export interface GmailImportResult {
+  mailboxOutcomes?: readonly MailboxImportOutcome[];
   success: boolean;
   totalEmailsFound: number;
   totalReceiptsProcessed: number;
@@ -126,7 +137,7 @@ export class GmailImportService {
     try {
       if (!state.done) {
         const acquired = await this.acquisition.acquire(user, trigger, state.cursor ?? undefined);
-        for await (const page of acquired.pages) {
+        const pages = prefetchMailboxPages(acquired.pages, (page) => {
           const byteBudget = trigger === 'manual' ? HISTORICAL_BYTE_BUDGET : TRACKING_BYTE_BUDGET;
           if (state.counters.pages >= MAX_IMPORT_PAGES || state.counters.matchedMessages + page.matchedCount > MAX_IMPORT_MESSAGES) {
             throw new AppError({
@@ -138,10 +149,17 @@ export class GmailImportService {
           if (state.counters.decodedBytesExamined + (page.decodedBytes ?? 0) > byteBudget) {
             throw new AppError({ code: 'MAILBOX_IMPORT_LIMIT_REACHED', message: 'Gmail import exceeded its decoded byte budget', publicMessage: 'This mailbox is too large to import safely in one operation.' });
           }
+        });
+        let waitingSince = Date.now();
+        for await (const page of pages) {
+          const batchStartedAt = Date.now();
+          const fetchWaitMs = batchStartedAt - waitingSince;
           const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
           const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
           const deduplicated = deduplicateReceipts(eligible);
+          const persistenceStartedAt = Date.now();
           const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock, accounting);
+          const persistenceMs = Date.now() - persistenceStartedAt;
           const counters = state.counters;
           counters.pages += 1;
           counters.matchedMessages += page.matchedCount;
@@ -162,7 +180,16 @@ export class GmailImportService {
           counters.decodedBytesExamined += page.decodedBytes ?? 0;
           counters.errorCount += page.rejectedCount ?? 0;
           state = { ...state, cursor: page.nextCursor, done: page.nextCursor === null };
+          const checkpointStartedAt = Date.now();
           await saveMailboxCheckpoint(execution, state, page.estimatedTotalCount);
+          this.logger.info('Gmail import batch committed', {
+            userId: user.id, importId: syncRunId, operation: 'gmail_import_batch',
+            outcome: 'success', matchedCount: page.matchedCount,
+            fetchWaitMs, extractionMs: extracted.durationMs, persistenceMs,
+            checkpointMs: Date.now() - checkpointStartedAt,
+            durationMs: Date.now() - batchStartedAt,
+          });
+          waitingSince = Date.now();
         }
       }
       const receiptOutcome = accounting ? await this.persistence.getOutcome(user.id, lock, accounting) : undefined;

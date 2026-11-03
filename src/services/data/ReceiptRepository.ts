@@ -1,3 +1,4 @@
+import { writeDatabaseBatches } from './DatabaseBatchWriter';
 import { ReceiptReconciliationStore } from './ReceiptReconciliationStore';
 import type { ReceiptReviewChange } from '../receipt/ReceiptReviewDecisions';
 import { ReceiptRepairSourceStore } from './ReceiptRepairSourceStore';
@@ -77,8 +78,8 @@ export class ReceiptRepository {
   ): Promise<ReceiptUpsertResult> {
     this.validateExport(userId, receipts);
     return this.postgres.withTransaction((tx) =>
-      new ReceiptReconciliationStore((executor, receipt) =>
-        this.writeProjection(executor, receipt),
+      new ReceiptReconciliationStore((executor, receipts) =>
+        this.writeProjection(executor, receipts),
         this.policyVersion,
       ).ingest(tx, receipts, assertWriteAllowed, batch, accounting),
     );
@@ -99,8 +100,8 @@ export class ReceiptRepository {
     assertWriteAllowed: () => Promise<void>,
     accounting?: ReceiptImportAccounting,
   ): Promise<ReceiptUpsertResult> {
-    return new ReceiptReconciliationStore((executor, receipt) =>
-      this.writeProjection(executor, receipt),
+    return new ReceiptReconciliationStore((executor, receipts) =>
+      this.writeProjection(executor, receipts),
       this.policyVersion,
     ).ingest(tx, incoming, assertWriteAllowed, undefined, accounting);
   }
@@ -109,26 +110,17 @@ export class ReceiptRepository {
     if (this.policyVersion !== 3) throw new Error('Canonical import outcomes require receipt policy 3');
     return this.postgres.withTransaction(async tx => {
       await assertWriteAllowed();
-      const snapshot = await new ReceiptReconciliationStore((executor, receipt) => this.writeProjection(executor, receipt), this.policyVersion).load(tx, userId);
+      const snapshot = await new ReceiptReconciliationStore((executor, receipts) => this.writeProjection(executor, receipts), this.policyVersion).load(tx, userId);
       const outcome = await new ReceiptImportOutcomeStore().resolve(tx, userId, jobId, snapshot.receipts, scope);
       await assertWriteAllowed();
       return outcome;
     });
   }
 
-  private async writeProjection(tx: DatabaseQueryExecutor, resolved: Receipt): Promise<void> {
-    const m = resolved.monetaryDetails;
-    await tx.query(
-      `INSERT INTO receipts(id,user_id,receipt_type,data_source,restaurant_name,order_date,amount_spent,items,delivery_time,external_id,
-        currency_code,subtotal_amount,tax_amount,tip_amount,delivery_fee_amount,service_fee_amount,savings_amount,resolution)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
-        ON CONFLICT(id) DO UPDATE SET data_source=EXCLUDED.data_source,restaurant_name=EXCLUDED.restaurant_name,
-        order_date=EXCLUDED.order_date,amount_spent=EXCLUDED.amount_spent,items=EXCLUDED.items,delivery_time=EXCLUDED.delivery_time,
-        external_id=EXCLUDED.external_id,currency_code=EXCLUDED.currency_code,subtotal_amount=EXCLUDED.subtotal_amount,
-        tax_amount=EXCLUDED.tax_amount,tip_amount=EXCLUDED.tip_amount,delivery_fee_amount=EXCLUDED.delivery_fee_amount,
-        service_fee_amount=EXCLUDED.service_fee_amount,savings_amount=EXCLUDED.savings_amount,resolution=EXCLUDED.resolution,
-        last_seen_at=NOW(),updated_at=NOW()`,
-      [
+  private async writeProjection(tx: DatabaseQueryExecutor, receipts: readonly Receipt[]): Promise<void> {
+    const rows = receipts.map((resolved) => {
+      const m = resolved.monetaryDetails;
+      return [
         resolved.id,
         resolved.userId,
         resolved.receiptType,
@@ -147,7 +139,18 @@ export class ReceiptRepository {
         m?.serviceFee ?? null,
         m?.savings ?? null,
         JSON.stringify(resolved.resolution),
-      ],
+      ];
+    });
+    await writeDatabaseBatches(tx, rows, (parameters) =>
+      `INSERT INTO receipts(id,user_id,receipt_type,data_source,restaurant_name,order_date,amount_spent,items,delivery_time,external_id,
+        currency_code,subtotal_amount,tax_amount,tip_amount,delivery_fee_amount,service_fee_amount,savings_amount,resolution)
+        VALUES ${parameters.map((row) => `(${row.join(',')})`).join(',')}
+        ON CONFLICT(id) DO UPDATE SET data_source=EXCLUDED.data_source,restaurant_name=EXCLUDED.restaurant_name,
+        order_date=EXCLUDED.order_date,amount_spent=EXCLUDED.amount_spent,items=EXCLUDED.items,delivery_time=EXCLUDED.delivery_time,
+        external_id=EXCLUDED.external_id,currency_code=EXCLUDED.currency_code,subtotal_amount=EXCLUDED.subtotal_amount,
+        tax_amount=EXCLUDED.tax_amount,tip_amount=EXCLUDED.tip_amount,delivery_fee_amount=EXCLUDED.delivery_fee_amount,
+        service_fee_amount=EXCLUDED.service_fee_amount,savings_amount=EXCLUDED.savings_amount,resolution=EXCLUDED.resolution,
+        last_seen_at=NOW(),updated_at=NOW()`
     );
   }
 
@@ -185,8 +188,8 @@ export class ReceiptRepository {
       );
       const receipts = rows.rows.map((r) => decodeReceiptObservation(r.receipt));
       this.validateExport(userId, receipts);
-      const result = await new ReceiptReconciliationStore((executor, receipt) =>
-        this.writeProjection(executor, receipt),
+      const result = await new ReceiptReconciliationStore((executor, receipts) =>
+        this.writeProjection(executor, receipts),
         this.policyVersion,
       ).ingest(tx, receipts, assertWriteAllowed, batch ?? { id: jobId, rejected: 0 }, accounting);
       await tx.query('DELETE FROM import_receipt_staging WHERE job_id=$1', [jobId]);
@@ -210,8 +213,8 @@ export class ReceiptRepository {
     manifestId?: string;
   }> {
     return this.postgres.withTransaction((tx) =>
-      new ReceiptReconciliationStore((executor, receipt) =>
-        this.writeProjection(executor, receipt),
+      new ReceiptReconciliationStore((executor, receipts) =>
+        this.writeProjection(executor, receipts),
         this.policyVersion,
       ).repair(tx, userId, generation, mode, assertWriteAllowed, manifestId, stagedBatchIds, reviewChanges),
     );

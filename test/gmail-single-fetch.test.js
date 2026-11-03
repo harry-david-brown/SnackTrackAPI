@@ -114,7 +114,7 @@ test('Gmail quota pacing spaces requests according to their query cost', async (
   await pacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
   await pacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
 
-  assert.deepEqual(waits, [63, 250]);
+  assert.deepEqual(waits, [63, 750]);
 });
 
 test('Gmail import disables transport retries and uses the configured quota budget', async () => {

@@ -1,3 +1,4 @@
+import { writeDatabaseBatches } from './DatabaseBatchWriter';
 import { randomUUID } from 'crypto';
 import { ConflictError, NotFoundError } from '../../core/errors';
 import { Receipt, ReceiptWriteCommand, DataSource } from '../../models/Receipt';
@@ -35,7 +36,7 @@ import { createUberPriceReinterpreter } from '../receipt/UberPriceReinterpretati
 import { CURRENT_UBER_EXPORT_PARSER_VERSION } from '../../models/OrderEvidence';
 import { sourceDocumentIdentity } from '../receipt/ReceiptSourceInterpretations';
 
-type Writer = (tx: DatabaseQueryExecutor, receipt: Receipt) => Promise<void>;
+type Writer = (tx: DatabaseQueryExecutor, receipts: readonly Receipt[]) => Promise<void>;
 export interface ReconciliationSnapshot {
   reviews?: ReceiptReview[];
   receipts: Receipt[];
@@ -474,32 +475,33 @@ export class ReceiptReconciliationStore {
     await events.clear(tx, userId);
     // Clear uniqueness claims before reassigning/splitting canonical identities.
     await tx.query('UPDATE receipts SET external_id=NULL WHERE user_id=$1', [userId]);
-    for (const r of after.receipts) await this.write(tx, r);
+    await this.write(tx, after.receipts);
+    const observationRows: unknown[][] = [];
+    const lineageRows: unknown[][] = [];
     for (const o of after.observations) {
-      await tx.query(
-        `INSERT INTO receipt_observations(id,user_id,receipt_id,document_key,import_generation,parser_version,payload,association_enabled,last_receipt_id)
-        VALUES($1,$2,$3,$4,(SELECT import_generation FROM users WHERE id=$2),$6,$5::jsonb,$7,$8)
-        ON CONFLICT(id) DO UPDATE SET receipt_id=EXCLUDED.receipt_id,association_enabled=EXCLUDED.association_enabled,
-          last_receipt_id=COALESCE(EXCLUDED.last_receipt_id,receipt_observations.receipt_id,receipt_observations.last_receipt_id)`,
-        [
-          o.id,
-          userId,
-          o.receiptId ?? null,
-          documentKey(o.receipt),
-          JSON.stringify(o.receipt),
-          o.receipt.resolution?.orderEvidence?.parserVersion ?? 2,
-          o.associationEnabled !== false,
-          o.receiptId ?? o.lastReceiptId ?? null,
-        ],
-      );
+      observationRows.push([
+        o.id,
+        userId,
+        o.receiptId ?? null,
+        documentKey(o.receipt),
+        JSON.stringify(o.receipt),
+        o.receipt.resolution?.orderEvidence?.parserVersion ?? 2,
+        o.associationEnabled !== false,
+        o.receiptId ?? o.lastReceiptId ?? null,
+      ]);
       const prior = priorSources.get(o.id);
       const old = prior?.receiptId ?? prior?.lastReceiptId;
       if (old && old !== o.receiptId && prior?.receiptId !== o.receiptId)
-        await tx.query(
-          `INSERT INTO receipt_reconciliation_lineage(id,user_id,old_receipt_id,new_receipt_id,policy_version,observation_ids) VALUES($1,$2,$3,$4,$5,$6::uuid[])`,
-          [randomUUID(), userId, old, o.receiptId ?? null, this.policyVersion, [o.id]],
-        );
+        lineageRows.push([randomUUID(), userId, old, o.receiptId ?? null, this.policyVersion, [o.id]]);
     }
+    await writeDatabaseBatches(tx, observationRows, (parameters) =>
+      `INSERT INTO receipt_observations(id,user_id,receipt_id,document_key,import_generation,parser_version,payload,association_enabled,last_receipt_id)
+       VALUES ${parameters.map((p) => `(${p[0]},${p[1]},${p[2]},${p[3]},(SELECT import_generation FROM users WHERE id=${p[1]}),${p[5]},${p[4]}::jsonb,${p[6]},${p[7]})`).join(',')}
+       ON CONFLICT(id) DO UPDATE SET receipt_id=EXCLUDED.receipt_id,association_enabled=EXCLUDED.association_enabled,
+         last_receipt_id=COALESCE(EXCLUDED.last_receipt_id,receipt_observations.receipt_id,receipt_observations.last_receipt_id)`);
+    await writeDatabaseBatches(tx, lineageRows, (parameters) =>
+      `INSERT INTO receipt_reconciliation_lineage(id,user_id,old_receipt_id,new_receipt_id,policy_version,observation_ids)
+       VALUES ${parameters.map((p) => `(${p.join(',')})`).join(',')}`);
     const keep = after.receipts.map((r) => r.id!);
     await tx.query('DELETE FROM receipts WHERE user_id=$1 AND NOT (id=ANY($2::uuid[]))', [
       userId,

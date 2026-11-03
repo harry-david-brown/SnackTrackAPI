@@ -87,8 +87,8 @@ const seedAllData = async (pool) => {
   await pool.query(
     `INSERT INTO user_import_preferences (
        user_id, monitoring_consent_state, gmail_import_status,
-       gmail_baseline_completed_at, ongoing_tracking_consent_state, tracking_status
-     ) VALUES ($1, 'granted', 'completed', NOW(), 'granted', 'active')`,
+       gmail_baseline_completed_at, ongoing_tracking_consent_state, tracking_status, automatic_updates_offer_seen_at
+     ) VALUES ($1, 'granted', 'completed', NOW(), 'granted', 'active', NOW())`,
     [userId],
   );
   await pool.query(
@@ -279,7 +279,7 @@ test(
       const preferences = (
         await pool.query(
           `SELECT monitoring_consent_state, gmail_import_status,
-              ongoing_tracking_consent_state, tracking_status
+              ongoing_tracking_consent_state, tracking_status, automatic_updates_offer_seen_at
        FROM user_import_preferences WHERE user_id = $1`,
           [userId],
         )
@@ -290,6 +290,7 @@ test(
           gmail_import_status: 'never_started',
           ongoing_tracking_consent_state: 'not_offered',
           tracking_status: 'inactive',
+          automatic_updates_offer_seen_at: null,
         },
       ]);
     });

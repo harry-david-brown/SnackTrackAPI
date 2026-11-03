@@ -31,44 +31,50 @@ export class GmailUnitBudgetRepository {
       throw new Error('Invalid Gmail unit reservation');
     }
     await this.database.withTransaction(async (transaction) => {
-      const day = await transaction.query(
-        `INSERT INTO gmail_api_project_day_budget(bucket_start,units)
-         VALUES(CURRENT_DATE,$1)
-         ON CONFLICT(bucket_start) DO UPDATE SET units=gmail_api_project_day_budget.units+EXCLUDED.units
-           WHERE gmail_api_project_day_budget.units+EXCLUDED.units <= $2
-         RETURNING units`,
-        [units, this.limits.projectDay],
+      // Each write depends on the previous RETURNING row. Keep project/day →
+      // project/minute → user/minute lock order consistent across all callers.
+      const result = await transaction.query<{
+        day_allowed: boolean; minute_allowed: boolean; user_allowed: boolean;
+      }>(
+        `WITH day_budget AS (
+          INSERT INTO gmail_api_project_day_budget(bucket_start,units)
+          SELECT CURRENT_DATE,$1::bigint WHERE $1::bigint <= $2::bigint
+          ON CONFLICT(bucket_start) DO UPDATE SET units=gmail_api_project_day_budget.units+EXCLUDED.units
+            WHERE gmail_api_project_day_budget.units+EXCLUDED.units <= $2
+          RETURNING units
+        ), minute_budget AS (
+          INSERT INTO gmail_api_project_minute_budget(bucket_start,units)
+          SELECT date_trunc('minute',NOW()),$1 FROM day_budget WHERE $1 <= $3
+          ON CONFLICT(bucket_start) DO UPDATE SET units=gmail_api_project_minute_budget.units+EXCLUDED.units
+            WHERE gmail_api_project_minute_budget.units+EXCLUDED.units <= $3
+          RETURNING units
+        ), user_budget AS (
+          INSERT INTO gmail_api_user_minute_budget(user_id,bucket_start,units)
+          SELECT $4::uuid,date_trunc('minute',NOW()),$1 FROM minute_budget WHERE $1 <= $5
+          ON CONFLICT(user_id,bucket_start) DO UPDATE SET units=gmail_api_user_minute_budget.units+EXCLUDED.units
+            WHERE gmail_api_user_minute_budget.units+EXCLUDED.units <= $5
+          RETURNING units
+        ), usage AS (
+          INSERT INTO gmail_api_usage_minute(bucket_start,category,method,units,request_count)
+          SELECT date_trunc('minute',NOW()),$6,$7,$1,1 FROM user_budget
+          ON CONFLICT(bucket_start,category,method) DO UPDATE SET
+            units=gmail_api_usage_minute.units+EXCLUDED.units,
+            request_count=gmail_api_usage_minute.request_count+1
+          RETURNING units
+        )
+        SELECT EXISTS(SELECT 1 FROM day_budget) AS day_allowed,
+          EXISTS(SELECT 1 FROM minute_budget) AS minute_allowed,
+          EXISTS(SELECT 1 FROM usage) AS user_allowed`,
+        [units, this.limits.projectDay, this.limits.projectMinute, userId,
+          this.limits.userMinute, category, method],
       );
-      if (!day.rows[0]) this.exhausted('project_day', this.limits.projectDay);
-
-      const minute = await transaction.query(
-        `INSERT INTO gmail_api_project_minute_budget(bucket_start,units)
-         VALUES(date_trunc('minute',NOW()),$1)
-         ON CONFLICT(bucket_start) DO UPDATE SET units=gmail_api_project_minute_budget.units+EXCLUDED.units
-           WHERE gmail_api_project_minute_budget.units+EXCLUDED.units <= $2
-         RETURNING units`,
-        [units, this.limits.projectMinute],
-      );
-      if (!minute.rows[0]) this.exhausted('project_minute', this.limits.projectMinute);
-
-      const userMinute = await transaction.query(
-        `INSERT INTO gmail_api_user_minute_budget(user_id,bucket_start,units)
-         VALUES($1,date_trunc('minute',NOW()),$2)
-         ON CONFLICT(user_id,bucket_start) DO UPDATE SET units=gmail_api_user_minute_budget.units+EXCLUDED.units
-           WHERE gmail_api_user_minute_budget.units+EXCLUDED.units <= $3
-         RETURNING units`,
-        [userId, units, this.limits.userMinute],
-      );
-      if (!userMinute.rows[0]) this.exhausted('user_minute', this.limits.userMinute);
-
-      await transaction.query(
-        `INSERT INTO gmail_api_usage_minute(bucket_start,category,method,units,request_count)
-         VALUES(date_trunc('minute',NOW()),$1,$2,$3,1)
-         ON CONFLICT(bucket_start,category,method) DO UPDATE SET
-           units=gmail_api_usage_minute.units+EXCLUDED.units,
-           request_count=gmail_api_usage_minute.request_count+1`,
-        [category, method, units],
-      );
+      const allowed = result.rows[0];
+      if (!allowed) throw new Error('Gmail quota reservation returned no result');
+      // Throw inside withTransaction: a later limit failure rolls back earlier
+      // reservations as well, including usage reporting.
+      if (!allowed.day_allowed) this.exhausted('project_day', this.limits.projectDay);
+      if (!allowed.minute_allowed) this.exhausted('project_minute', this.limits.projectMinute);
+      if (!allowed.user_allowed) this.exhausted('user_minute', this.limits.userMinute);
     });
   }
 

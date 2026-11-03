@@ -373,7 +373,11 @@ export class ImportJobRepository {
   }
 
   async fail(job: ImportJob, code: string, message: string, details?: Readonly<Record<string, unknown>>): Promise<void> {
-    await this.finish(job, 'failed', 'failed', null, code, message, details);
+    // Preserve committed mailbox work without changing failure/retry semantics.
+    const partial = details?.partialResult;
+    const result = partial && typeof partial === 'object' && !Array.isArray(partial)
+      ? partial as Readonly<Record<string, unknown>> : null;
+    await this.finish(job, 'failed', 'failed', result, code, message, details);
   }
 
   async retry(jobId: string, code: string, message: string, details?: Readonly<Record<string, unknown>>): Promise<void> {

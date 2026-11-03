@@ -35,6 +35,13 @@ export class ImportLifecycleRepository {
     );
   }
 
+  async markAutomaticUpdatesOfferSeen(userId: string): Promise<void> {
+    await this.ensurePreferences(userId);
+    await this.database.query(`UPDATE user_import_preferences
+      SET automatic_updates_offer_seen_at = COALESCE(automatic_updates_offer_seen_at, NOW())
+      WHERE user_id = $1`, [userId]);
+  }
+
   async setInitialSetupDeferral(userId: string, decision: 'defer' | 'resume'): Promise<void> {
     await this.ensurePreferences(userId);
     await this.database.query(

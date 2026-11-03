@@ -149,7 +149,7 @@ test('rate adapter caches, single-flights, validates and retains last snapshot o
       if (fail) throw Error('offline');
       return {
         ok: true,
-        json: async () => ({ date: '2023-12-11', rates: { CAD: 1.5, USD: 1, GBP: 0.8 } }),
+        json: async () => ({ date: '2023-12-11', rates: { CAD: 1.5, USD: 1, GBP: 0.8, MXN: 20, AUD: 1.6, NZD: 1.8, JPY: 160 } }),
       };
     },
     () => now,

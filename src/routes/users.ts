@@ -137,6 +137,7 @@ export const createUsersRouter = (dependencies: UsersRouterDependencies): Router
    *     parameters:
    *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
    *       - { in: query, name: includeWrapped, schema: { type: boolean, default: false } }
+   *       - { in: query, name: spendCurrency, schema: { type: string, enum: [CAD, USD, EUR, GBP, MXN, AUD, NZD, JPY] }, description: Currency for the normalized tracked-spend total. }
    *       - { in: query, name: displayCurrency, schema: { type: string, enum: [CAD, USD, EUR, GBP] }, description: Approximate recap display currency; does not change summary totals. }
    *       - { in: header, name: X-Timezone, schema: { type: string } }
    *     responses:
@@ -153,6 +154,12 @@ export const createUsersRouter = (dependencies: UsersRouterDependencies): Router
     ...ownedUser,
     asyncHandler(async (request, response) => {
       const summary = await dependencies.summaries.execute({
+        spendCurrency: (() => {
+          const value = request.query.spendCurrency;
+          if (value === undefined) return undefined;
+          if (value === 'CAD' || value === 'USD' || value === 'EUR' || value === 'GBP' || value === 'MXN' || value === 'AUD' || value === 'NZD' || value === 'JPY') return value;
+          throw new ValidationError('Invalid spendCurrency');
+        })(),
         displayCurrency: (() => {
           const value = request.query.displayCurrency;
           if (value === undefined) return undefined;

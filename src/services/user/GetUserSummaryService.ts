@@ -3,6 +3,7 @@ import { investmentContext } from '../analytics/shared/historicalInvestment';
 import { spendingByCurrency, receiptCurrency } from '../analytics/shared/receiptMetrics';
 import { normalizeRestaurantName } from '../analytics/dashboard/normalization';
 import logger from '../../config/logger';
+import { normalizeTrackedSpend } from '../analytics/shared/normalizedTrackedSpend';
 import { NotFoundError } from '../../core/errors';
 import { getDefaultTimezone, getLocalDateKey } from '../../utils/timezone';
 import type { UserSummaryProjection } from '../core/cacheProjections';
@@ -13,7 +14,7 @@ import type {
 } from '../ports/ProjectionPorts';
 import type { ReceiptReadPort } from '../ports/ReceiptPorts';
 import { SingleFlight } from '../core/SingleFlight';
-import type { RecapCurrency, RecapExchangeRatesPort } from '../ports/RecapExchangeRatesPort';
+import type { DisplayCurrency, RecapCurrency, RecapExchangeRatesPort } from '../ports/RecapExchangeRatesPort';
 import {
   orderMetricEligibility,
   summarizeOrderMetrics,
@@ -27,6 +28,7 @@ type UserSummaryAnalyticsPort = WrappedAnalyticsPort;
 
 export interface GetUserSummaryInput {
   displayCurrency?: RecapCurrency;
+  spendCurrency?: DisplayCurrency;
   userId: string;
   includeWrapped: boolean;
   requestTimezone?: string;
@@ -63,15 +65,16 @@ export class GetUserSummaryService {
     // not the correctness boundary, and newer requests cannot join an older single flight.
     const scope = `${input.userId}:r${revision}`;
     const market = input.includeWrapped ? await this.market?.context(new Date()) ?? investmentContext('fixed', null, new Date()) : undefined;
-    const rates = input.includeWrapped ? await this.recapRates?.snapshot() : undefined;
+    const rates = input.includeWrapped || input.spendCurrency ? await this.recapRates?.snapshot() : undefined;
     const cacheKey = input.includeWrapped
       ? `${scope}-wrapped-v17-${timezone}-${input.displayCurrency ?? 'CAD'}-${rates?.id ?? 'unavailable'}-${market?.cacheToken}`
-      : `${scope}-v10-${timezone}`;
-    const cached = await this.cache.getUserSummary(cacheKey);
+      : `${scope}-v11-${timezone}`;
+    const projectionKey = `${cacheKey}-${input.spendCurrency ?? 'original'}-${input.spendCurrency ? rates?.id ?? 'unavailable' : ''}`;
+    const cached = await this.cache.getUserSummary(projectionKey);
     if (cached) return cached;
 
-    return this.singleFlight.run(cacheKey, async () => {
-      const cachedAfterWait = await this.cache.getUserSummary(cacheKey);
+    return this.singleFlight.run(projectionKey, async () => {
+      const cachedAfterWait = await this.cache.getUserSummary(projectionKey);
       if (cachedAfterWait) return cachedAfterWait;
       const receipts = await this.receipts.findByUserId(input.userId);
       const eventMetrics = usesOrderEventMetrics(receipts);
@@ -157,6 +160,7 @@ export class GetUserSummaryService {
           unresolvedReceiptCount: receipts.filter(
             (r) => r.resolution?.reconciliation?.status === 'unresolved',
           ).length,
+          ...(input.spendCurrency ? { normalizedSpend: normalizeTrackedSpend(spending.buckets, input.spendCurrency, rates) } : {}),
           totalSpent,
           currencyCode: spending.primary,
           totalsByCurrency: spending.buckets,
@@ -226,7 +230,7 @@ export class GetUserSummaryService {
 
       const current = await this.users.findProjectionProfileById(input.userId);
       if (current?.receiptProjectionRevision === revision) {
-        await this.cache.cacheUserSummary(cacheKey, summary);
+        await this.cache.cacheUserSummary(projectionKey, summary);
       }
       return summary;
     });

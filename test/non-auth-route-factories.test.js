@@ -91,8 +91,15 @@ test('non-auth resource routers delegate through the injected capabilities', asy
     },
   );
   assert.deepEqual(summaryCalls, [
-    { userId: 'route-user', includeWrapped: true, requestTimezone: undefined, displayCurrency: undefined },
+    { userId: 'route-user', includeWrapped: true, requestTimezone: undefined, displayCurrency: undefined, spendCurrency: undefined },
   ]);
+  await invoke(users, '/:id/summary', 'get', {
+    params: { id: 'route-user' }, query: { spendCurrency: 'JPY' }, headers: {},
+  });
+  assert.equal(summaryCalls.at(-1).spendCurrency, 'JPY');
+  await assert.rejects(invoke(users, '/:id/summary', 'get', {
+    params: { id: 'route-user' }, query: { spendCurrency: 'INVALID' }, headers: {},
+  }), error => error.code === 'VALIDATION_ERROR');
   await assert.rejects(
     invoke(users, '/:id/summary', 'get', {
       params: { id: 'route-user' },

@@ -109,3 +109,12 @@ test('eligible tracking users reject malformed database identities', async () =>
     /user_id/,
   );
 });
+
+
+test('offer exposure is returned without synthesizing consent or dropping the server timestamp', async () => {
+  const date = '2026-09-24T12:00:00.000Z';
+  const repo = new ImportPreferencesQueryRepository({ query: async () => ({ rows: [validPreferenceRow({ automatic_updates_offer_seen_at: date })] }) });
+  const preferences = await repo.get(userId);
+  assert.equal(preferences.automaticUpdatesOfferSeenAt, date);
+  assert.equal(preferences.ongoingTrackingConsentState, 'not_offered');
+});

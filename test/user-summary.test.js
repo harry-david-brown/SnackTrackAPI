@@ -21,7 +21,7 @@ test('recap currency and rate snapshot scope caches without changing ordinary su
   await service.execute({ userId: 'u', includeWrapped: true, displayCurrency: 'USD' });
   await service.execute({ userId: 'u', includeWrapped: false });
   assert.equal(new Set(keys.filter(k => k.includes('wrapped'))).size, 3);
-  assert.ok(keys.some(k => k === 'u:r1-v10-UTC'));
+  assert.ok(keys.some(k => k === 'u:r1-v11-UTC-original-'));
   assert.deepEqual(snapshots.map(s => s.displayCurrency), ['CAD', 'USD', 'USD']);
 });
 
@@ -103,4 +103,26 @@ test('user summary operation returns a valid cached projection without querying 
   });
 
   assert.equal(result, cached);
+});
+
+test('profile spending converts all currency buckets and caches by selected currency and rates', async () => {
+  const cached = new Map();
+  let rateId = 'a';
+  const profile = { id: 'u', email: 'u@example.com', timezone: 'UTC', receiptProjectionRevision: '1' };
+  const service = new GetUserSummaryService(
+    { findProjectionProfileById: async () => profile },
+    { findByUserId: async () => [
+      { amountSpent: 100, currencyCode: 'CAD', dataSource: 'csv' },
+      { amountSpent: 10, currencyCode: 'USD', dataSource: 'csv' },
+    ] }, {},
+    { getUserSummary: async key => cached.get(key), cacheUserSummary: async (key, data) => cached.set(key, data) },
+    { snapshot: async () => ({ id: rateId, rates: { CAD: rateId === 'a' ? 1.5 : 2, USD: 1 } }) },
+  );
+  const get = spendCurrency => service.execute({ userId: 'u', includeWrapped: false, spendCurrency });
+  assert.deepEqual((await get('CAD')).statistics.normalizedSpend, { amount: 115, currencyCode: 'CAD', approximate: true });
+  assert.equal((await get('USD')).statistics.normalizedSpend.amount, 76.67);
+  rateId = 'b';
+  assert.equal((await get('CAD')).statistics.normalizedSpend.amount, 120);
+  assert.equal(cached.size, 3);
+  assert.equal((await get('JPY')).statistics.normalizedSpend.amount, null);
 });

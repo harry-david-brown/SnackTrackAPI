@@ -33,22 +33,34 @@ export class FinazonMarketHistory implements MarketHistoryProviderPort {
       if (!value || typeof value !== 'object' || !('data' in value) || !Array.isArray(value.data))
         throw new Error('Invalid market provider response');
       const rows: unknown[] = value.data;
-      for (const row of rows) {
+      for (const [index, row] of rows.entries()) {
+        // Only include trusted request context and derived metadata, never raw provider fields.
+        const invalidObservation = (reason: string, date = 'unknown'): Error =>
+          new Error(
+            `Invalid market provider observation: symbol=${symbols[benchmark]} page=${page} row=${index + 1} date=${date} reason=${reason}`,
+          );
+        if (!row || typeof row !== 'object')
+          throw invalidObservation('row must be an object');
         if (
-          !row ||
-          typeof row !== 'object' ||
           !('t' in row) ||
           typeof row.t !== 'number' ||
-          !Number.isFinite(row.t) ||
+          !Number.isFinite(row.t)
+        )
+          throw invalidObservation('t must be a finite numeric Unix timestamp');
+        const timestamp = new Date(row.t * 1000);
+        if (!Number.isFinite(timestamp.getTime()))
+          throw invalidObservation('t is outside the supported date range');
+        const date = timestamp.toISOString().slice(0, 10);
+        if (
           !('c' in row) ||
           typeof row.c !== 'number' ||
-          !Number.isFinite(row.c) ||
-          row.c <= 0
+          !Number.isFinite(row.c)
         )
-          throw new Error('Invalid market provider observation');
+          throw invalidObservation('c must be a finite numeric close', date);
+        if (row.c <= 0)
+          throw invalidObservation('c must be greater than zero', date);
         if ('ticker' in row && row.ticker !== symbols[benchmark])
           throw new Error('Unexpected market series');
-        const date = new Date(row.t * 1000).toISOString().slice(0, 10);
         if (date < start || date > end || (points.length && date <= points[points.length - 1].date))
           throw new Error('Unordered market history');
         points.push({ date, close: row.c });

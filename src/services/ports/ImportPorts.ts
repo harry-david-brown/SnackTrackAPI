@@ -44,6 +44,7 @@ export interface MailboxUserPort {
 }
 
 export interface ImportLifecyclePort {
+  markAutomaticUpdatesOfferSeen(userId: string): Promise<void>;
   setInitialSetupDeferral(userId: string, decision: 'defer' | 'resume'): Promise<void>;
   setProviderRelevance(
     userId: string,

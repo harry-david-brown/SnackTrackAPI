@@ -1,7 +1,9 @@
 const GMAIL_QUOTA_WINDOW_MS = 60_000;
 
 export const GMAIL_MESSAGE_LIST_QUERY_UNITS = 5;
-export const GMAIL_MESSAGE_GET_QUERY_UNITS = 20;
+// Gmail full-message reads cost 60 units; metadata/minimal reads cost 20.
+// https://developers.google.com/workspace/gmail/api/reference/quota
+export const GMAIL_MESSAGE_GET_QUERY_UNITS = 60;
 export const DEFAULT_GMAIL_IMPORT_QUERY_UNITS_PER_MINUTE = 3_000;
 
 type Clock = () => number;

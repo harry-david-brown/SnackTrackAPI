@@ -212,3 +212,15 @@ test('provider ready-alert routes bind consent and checks to the authenticated a
   }));
   assert.equal(calls.length, 2);
 });
+
+test('automatic offer acknowledgment uses the authenticated account and returns its projection', async () => {
+  const calls = [];
+  const projection = { automaticUpdatesOfferSeenAt: '2026-09-24T12:00:00.000Z' };
+  const router = createGmailPreferencesRouter({ authenticate: passThrough, preferences: {
+    markAutomaticUpdatesOfferSeen: async userId => { calls.push(userId); return projection; },
+  } });
+  assert.equal(await invoke(router, '/preferences/tracking/offer-seen', 'post', {
+    user: { userId: 'token-user' }, body: { userId: 'ignored-user' },
+  }), projection);
+  assert.deepEqual(calls, ['token-user']);
+});

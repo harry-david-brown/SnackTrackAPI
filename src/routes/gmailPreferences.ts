@@ -19,6 +19,7 @@ export interface GmailPreferencesRouterDependencies {
     | 'queueProviderReadyCheck'
     | 'setProviderReadyAlertConsent'
     | 'get'
+    | 'markAutomaticUpdatesOfferSeen'
     | 'setMonitoringConsent'
     | 'setOngoingTrackingConsent'
     | 'markExportRequested'
@@ -60,6 +61,9 @@ export const createGmailPreferencesRouter = (
   dependencies: GmailPreferencesRouterDependencies,
 ): Router => {
   const router = Router();
+  router.post('/preferences/tracking/offer-seen', dependencies.authenticate, asyncHandler(async (request: Request, response: Response) => {
+    response.json(await dependencies.preferences.markAutomaticUpdatesOfferSeen(authenticatedUserId(request)));
+  }));
 
   router.post('/preferences/check-provider-ready',dependencies.authenticate,
     asyncHandler(async(request:Request,response:Response)=>{

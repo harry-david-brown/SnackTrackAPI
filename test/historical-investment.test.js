@@ -201,6 +201,30 @@ test('Finazon respects retry-after and rejects malformed data without leaking pr
     (e) => !/SPY|QQQ|secret/.test(e.message),
   );
 });
+test('Finazon observation errors identify the location and reason without exposing raw fields', async () => {
+  const timestamp = Date.parse('2023-08-28') / 1000;
+  const cases = [
+    [null, 'unknown', 'row must be an object'],
+    [{ t: 'secret-provider-value', c: 10 }, 'unknown', 't must be a finite numeric Unix timestamp'],
+    [{ t: 1e20, c: 10 }, 'unknown', 't is outside the supported date range'],
+    [{ t: timestamp, c: 'secret-provider-value' }, '2023-08-28', 'c must be a finite numeric close'],
+    [{ t: timestamp, c: 0 }, '2023-08-28', 'c must be greater than zero'],
+  ];
+  for (const [row, date, reason] of cases) {
+    const provider = new FinazonMarketHistory('secret-api-key', async () =>
+      new Response(JSON.stringify({ data: [
+        { t: Date.parse('2023-08-25') / 1000, c: 100 },
+        row,
+      ], debug: 'secret-provider-body' })),
+    );
+    await assert.rejects(provider.history('sp500', '2023-08-25', '2023-08-28'), error => {
+      assert.equal(error.message,
+        `Invalid market provider observation: symbol=SPY page=1 row=2 date=${date} reason=${reason}`);
+      assert.doesNotMatch(error.message, /secret/);
+      return true;
+    });
+  }
+});
 test('refresh publishes both complete histories and skips current snapshots', async () => {
   let current = null,
     reads = 0,

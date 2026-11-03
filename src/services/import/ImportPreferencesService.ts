@@ -21,6 +21,7 @@ import type { ImportPreferencesProjection, ImportStatusService } from './ImportS
 
 type LifecyclePort = Pick<
   ImportLifecyclePort,
+  | 'markAutomaticUpdatesOfferSeen'
   | 'setMonitoringConsent'
   | 'setOngoingTrackingConsent'
   | 'markExportRequested'
@@ -85,6 +86,14 @@ export class ImportPreferencesService {
     }
     finally { await ImportLockService.releaseLock(lock); }
     await this.syncGmailWatchForCurrentPurpose(userId);
+    return this.status.getPreferences(userId);
+  }
+
+  async markAutomaticUpdatesOfferSeen(userId: string): Promise<ImportPreferencesProjection> {
+    const lock = await ImportLockService.acquireLockWithWait(userId, 5_000);
+    if (!lock) throw new ConflictError('IMPORT_IN_PROGRESS', 'Please try again shortly.');
+    try { await this.lifecycle.markAutomaticUpdatesOfferSeen(userId); }
+    finally { await ImportLockService.releaseLock(lock); }
     return this.status.getPreferences(userId);
   }
 

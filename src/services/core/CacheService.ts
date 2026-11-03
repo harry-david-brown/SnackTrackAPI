@@ -95,11 +95,8 @@ export class CacheService {
       `${this.DASHBOARD_INSIGHTS_PREFIX}${userId}*`,
     ];
 
-    let totalDeleted = 0;
-    for (const pattern of patterns) {
-      const deleted = await redisCacheStore.delPattern(pattern);
-      totalDeleted += deleted;
-    }
+    const deleted = await Promise.all(patterns.map((pattern) => redisCacheStore.delPattern(pattern)));
+    const totalDeleted = deleted.reduce((total, count) => total + count, 0);
 
     if (totalDeleted > 0) logger.debug('User cache entries invalidated', { count: totalDeleted });
   }

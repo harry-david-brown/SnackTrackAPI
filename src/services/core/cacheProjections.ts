@@ -11,6 +11,7 @@ export interface UserSummaryProjection {
     dataSource: string;
   };
   statistics: {
+    normalizedSpend?: { amount: number | null; currencyCode: string; approximate: boolean };
     orderMetrics?: OrderMetrics;
     orderMetricPeriods?: ReturnType<typeof summarizeOrderMetricPeriods>;
     unresolvedReceiptCount?: number;
@@ -70,6 +71,12 @@ const isUserSummaryProjection = (value: unknown): value is UserSummaryProjection
     typeof statistics.totalSpent === 'number' &&
     typeof statistics.averageSpent === 'number' &&
     typeof statistics.totalReceipts === 'number' &&
+    (statistics.normalizedSpend === undefined ||
+      (isRecord(statistics.normalizedSpend) &&
+        typeof statistics.normalizedSpend.currencyCode === 'string' &&
+        typeof statistics.normalizedSpend.approximate === 'boolean' &&
+        (statistics.normalizedSpend.amount === null ||
+          (typeof statistics.normalizedSpend.amount === 'number' && Number.isFinite(statistics.normalizedSpend.amount))))) &&
     (statistics.orderMetrics === undefined || isOrderMetrics(statistics.orderMetrics)) &&
     (statistics.orderMetricPeriods === undefined ||
       isOrderMetricPeriods(statistics.orderMetricPeriods)) &&

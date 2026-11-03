@@ -49,6 +49,7 @@ const mapPreferences = (value: unknown): ImportPreferences => {
     gmailImportedCount: databaseNonNegativeInteger(row, 'gmail_imported_count'),
     gmailImportErrorCode: databaseNullableString(row, 'gmail_import_error_code'),
     gmailBaselineCompletedAt: databaseTimestamp(row, 'gmail_baseline_completed_at'),
+    automaticUpdatesOfferSeenAt: databaseTimestamp(row, 'automatic_updates_offer_seen_at'),
     ongoingTrackingConsentState: databaseEnum(
       row,
       'ongoing_tracking_consent_state',
@@ -106,6 +107,7 @@ export class ImportPreferencesQueryRepository {
               COALESCE(preferences.gmail_imported_count, 0)::int AS gmail_imported_count,
               preferences.gmail_import_error_code, preferences.gmail_baseline_completed_at,
               COALESCE(preferences.ongoing_tracking_consent_state, 'not_offered') AS ongoing_tracking_consent_state,
+              preferences.automatic_updates_offer_seen_at,
               preferences.ongoing_tracking_consent_version,
               preferences.ongoing_tracking_consented_at, preferences.ongoing_tracking_revoked_at,
               COALESCE(preferences.tracking_status, 'inactive') AS tracking_status,

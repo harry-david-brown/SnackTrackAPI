@@ -85,6 +85,7 @@ export interface ImportPreferences {
   gmailImportedCount: number;
   gmailImportErrorCode: string | null;
   gmailBaselineCompletedAt: string | null;
+  automaticUpdatesOfferSeenAt?: string | null;
   ongoingTrackingConsentState: MonitoringConsentState;
   ongoingTrackingConsentVersion: string | null;
   ongoingTrackingConsentedAt: string | null;

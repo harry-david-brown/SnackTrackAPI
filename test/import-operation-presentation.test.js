@@ -45,7 +45,7 @@ test('estimates Gmail processing time from the remaining quota-paced message fet
     { getP75DurationSeconds: async () => 30 },
     { metrics: async () => [{ name: 'mailbox-imports', waiting: 0, active: 1, delayed: 0, failed: 0, paused: false, workers: 1, oldestWaitingAgeSeconds: null }] },
     () => 1_030_000,
-    { messageGetQueryUnits: 20, queryUnitsPerMinute: 3_000 },
+    { messageGetQueryUnits: 60, queryUnitsPerMinute: 3_000 },
   );
 
   const presentation = await service.forJob(job({
@@ -58,11 +58,11 @@ test('estimates Gmail processing time from the remaining quota-paced message fet
     },
   }));
 
-  // 450 remaining messages * 20 units / 3,000 units per minute = 3 minutes.
+  // 450 remaining messages * 60 units / 3,000 units per minute = 9 minutes.
   assert.deepEqual(presentation.timeEstimate, {
-    kind: 'remaining', minimumMinutes: 2, maximumMinutes: 4, revision: 0,
+    kind: 'remaining', minimumMinutes: 7, maximumMinutes: 11, revision: 0,
   });
-  assert.equal(presentation.expectedDurationBand, 'under_5_minutes');
+  assert.equal(presentation.expectedDurationBand, 'over_5_minutes');
 });
 
 test('exposes delayed mode only for a backlog or elapsed threshold', async () => {

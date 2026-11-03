@@ -254,6 +254,7 @@ export class GmailClient implements MailboxClient {
           await gmail.users.messages.get({
             userId: 'me',
             id: messageId,
+            format: 'full',
           }),
         );
         if (!message.internalDate || !Number.isFinite(Number(message.internalDate)) || Number(message.internalDate)<requestedTimestamp) continue;
@@ -486,16 +487,22 @@ export class GmailClient implements MailboxClient {
           });
         }
         const processingBatch = pendingMessageIds.slice(0, GMAIL_PROCESSING_BATCH_SIZE);
-        const fetched = await Promise.all(processingBatch.map((messageId) => limit(async () => {
+        const fetchResults = await Promise.allSettled(processingBatch.map((messageId) => limit(async () => {
           if (pageFailure) throw pageFailure;
-          await quotaPacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
-          await this.reserve(user.id, usageCategory, 'messages.get', GMAIL_MESSAGE_GET_QUERY_UNITS);
+          try {
+            await quotaPacer.waitFor(GMAIL_MESSAGE_GET_QUERY_UNITS);
+            if (pageFailure) throw pageFailure;
+            await this.reserve(user.id, usageCategory, 'messages.get', GMAIL_MESSAGE_GET_QUERY_UNITS);
+          } catch (error) {
+            pageFailure ??= error;
+            throw pageFailure;
+          }
           if (pageFailure) throw pageFailure;
           try {
             gmailRequestCount += 1;
             modeledQueryUnits += GMAIL_MESSAGE_GET_QUERY_UNITS;
             // A full response already contains the headers used by the safety preflight.
-            // Reading metadata separately doubles messages.get quota without adding data.
+            // Reading metadata separately adds quota cost without adding data.
             const message = decodeGmailMessage(await gmail.users.messages.get({
               userId: 'me', id: messageId, format: 'full',
             }, { retry: false }));
@@ -540,6 +547,7 @@ export class GmailClient implements MailboxClient {
               receivedAt && !Number.isNaN(receivedAt.getTime()) ? receivedAt : undefined,
             );
           } catch (error) {
+            if (pageFailure) throw pageFailure;
             if (error instanceof AppError && error.code === 'GMAIL_PROVIDER_PAYLOAD_INVALID') return null;
             const failure = classifyGmailRequestFailure(error);
             if (failure.status === 404) return null;
@@ -562,7 +570,13 @@ export class GmailClient implements MailboxClient {
             throw pageFailure;
           }
         })));
-        const messages = fetched.filter((message): message is MailboxMessage => message !== null);
+        // Drain in-flight reads before yielding a failure or releasing the import
+        // lock. Queued reads stop as soon as the first failure is observed.
+        const messages: MailboxMessage[] = [];
+        for (const result of fetchResults) {
+          if (result.status === 'rejected') throw result.reason;
+          if (result.value !== null) messages.push(result.value);
+        }
         pendingMessageIds = pendingMessageIds.slice(processingBatch.length);
         const nextCursor = pendingMessageIds.length > 0
           ? encodeGmailBufferedCursor({

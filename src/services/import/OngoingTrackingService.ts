@@ -5,7 +5,7 @@ import type {
   MicrosoftMailboxConnectionPort,
   ReceiptWriterLockPort,
 } from '../ports/ImportPorts';
-import { GmailImportService, GmailImportResult } from './GmailImportService';
+import { GmailImportService, GmailImportResult, MailboxImportOutcome } from './GmailImportService';
 import type { OutlookImportService } from './OutlookImportService';
 import type { ImportLockHandle } from './ImportLockService';
 import type { ImportExecutionCheckpoint } from './ImportJobTypes';
@@ -81,15 +81,23 @@ export class OngoingTrackingService {
     }
 
     const results: GmailImportResult[] = [];
+    const mailboxOutcomes: MailboxImportOutcome[] = [];
+    const record = (mailbox: 'gmail' | 'outlook', email: string | null, result: GmailImportResult) => {
+      results.push(result);
+      mailboxOutcomes.push({ mailbox, email, success: result.success, newOrders: result.newOrders,
+        updatedOrders: result.updatedOrders, unchangedOrders: result.unchangedOrders, errorCode: result.errorCode });
+    };
       const scopedExecutions = this.providerExecutions(execution);
       if (providers.gmail && durableGmail) {
-        results.push(await this.gmailImport.importFromGmail(user, lockHandle, 'background', scopedExecutions.gmail));
+        record('gmail', user.gmailEmail ?? null, await this.gmailImport.importFromGmail(user, lockHandle, 'background', scopedExecutions.gmail));
       }
       if (providers.microsoft && durableMicrosoft && this.outlookImport) {
-        results.push(await this.outlookImport.importFromOutlook(user, lockHandle, 'background', scopedExecutions.microsoft));
+        await this.locks.assertLockOwned(lockHandle);
+        record('outlook', microsoft?.email ?? null, await this.outlookImport.importFromOutlook(user, lockHandle, 'background', scopedExecutions.microsoft));
       }
       let combined = this.combineResults(results);
-      if (combined?.success && execution?.accountingJobId) {
+      if (combined) combined = { ...combined, mailboxOutcomes };
+      if (combined && execution?.accountingJobId) {
         if (!this.outcomes) throw new Error('Canonical import outcome service is unavailable');
         const outcome = await this.outcomes.getImportOutcome(userId, execution.accountingJobId, () => this.locks.assertLockOwned(lockHandle));
         combined = { ...combined, ...receiptImportOutcomeFields(outcome) };

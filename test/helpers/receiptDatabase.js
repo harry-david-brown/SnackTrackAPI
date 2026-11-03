@@ -10,6 +10,18 @@ function database() {
     eventObservations: [],
   };
   const query = async (sql, p = []) => {
+    const batchWidth = [
+      ['INSERT INTO receipts(', 18], ['INSERT INTO receipt_observations(', 8],
+      ['INSERT INTO receipt_reconciliation_lineage(', 6],
+      ['INSERT INTO receipt_order_events(', 10],
+      ['INSERT INTO receipt_order_event_observations(', 4],
+    ].find(([prefix]) => sql.startsWith(prefix))?.[1];
+    if (batchWidth && p.length > batchWidth) {
+      assert.equal(p.length % batchWidth, 0);
+      for (let offset = 0; offset < p.length; offset += batchWidth)
+        await query(sql, p.slice(offset, offset + batchWidth));
+      return { rows: [] };
+    }
     // Published review mutations are covered against PostgreSQL, not emulated here.
     if (sql.startsWith('SELECT r.* FROM receipt_association_reviews')) return { rows: [] };
     if (sql.startsWith('SELECT import_generation')) return { rows: [{ import_generation: 1 }] };

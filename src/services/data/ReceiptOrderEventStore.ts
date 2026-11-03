@@ -1,3 +1,4 @@
+import { writeDatabaseBatches } from './DatabaseBatchWriter';
 import type { Receipt } from '../../models/Receipt';
 import type { DatabaseQueryExecutor } from '../ports/DatabasePort';
 import type { SourceObservation } from '../receipt/ReceiptGroupReconciler';
@@ -15,6 +16,8 @@ export class ReceiptOrderEventStore {
     receipts: readonly Receipt[],
     observations: readonly SourceObservation[],
   ): Promise<void> {
+    const eventRows: unknown[][] = [];
+    const sourceRows: unknown[][] = [];
     const byId = new Map(observations.map((o) => [o.id, o]));
     for (const receipt of receipts) {
       if (receipt.userId !== userId || !receipt.id)
@@ -46,28 +49,28 @@ export class ReceiptOrderEventStore {
             (time): time is string => typeof time === 'string' && Number.isFinite(Date.parse(time)),
           )
           .sort((a, b) => Date.parse(a) - Date.parse(b));
-        await tx.query(
-          `INSERT INTO receipt_order_events(user_id,receipt_id,event_key,kind,amount,currency_code,confidence,occurred_at,reported_at,payload)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-          [
-            userId,
-            receipt.id,
-            event.key,
-            event.kind,
-            event.amount,
-            event.currencyCode ?? receipt.monetaryDetails?.currencyCode ?? 'UNKNOWN',
-            event.confidence,
-            occurredAt ?? null,
-            reportedTimes[0] ?? null,
-            JSON.stringify(event),
-          ],
-        );
+        eventRows.push([
+          userId,
+          receipt.id,
+          event.key,
+          event.kind,
+          event.amount,
+          event.currencyCode ?? receipt.monetaryDetails?.currencyCode ?? 'UNKNOWN',
+          event.confidence,
+          occurredAt ?? null,
+          reportedTimes[0] ?? null,
+          JSON.stringify(event),
+        ]);
         for (const source of sources)
-          await tx.query(
-            `INSERT INTO receipt_order_event_observations(user_id,receipt_id,event_key,observation_id) VALUES($1,$2,$3,$4)`,
-            [userId, receipt.id, event.key, source.id],
-          );
+          sourceRows.push([userId, receipt.id, event.key, source.id]);
       }
     }
+    // Parent events precede their evidence links; the caller owns rollback.
+    await writeDatabaseBatches(tx, eventRows, (parameters) =>
+      `INSERT INTO receipt_order_events(user_id,receipt_id,event_key,kind,amount,currency_code,confidence,occurred_at,reported_at,payload)
+       VALUES ${parameters.map((p) => `(${p.join(',')})`).join(',')}`);
+    await writeDatabaseBatches(tx, sourceRows, (parameters) =>
+      `INSERT INTO receipt_order_event_observations(user_id,receipt_id,event_key,observation_id)
+       VALUES ${parameters.map((p) => `(${p.join(',')})`).join(',')}`);
   }
 }

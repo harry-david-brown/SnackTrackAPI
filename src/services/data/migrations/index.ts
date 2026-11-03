@@ -1,3 +1,4 @@
+import { automaticUpdatesOfferMigration } from './036_automatic_updates_offer';
 import { marketHistoryMigration } from './032_market_history';
 import { receiptEvidenceMigration } from './024_receipt_evidence';
 import { receiptReconciliationMigration } from './026_receipt_reconciliation';
@@ -72,4 +73,5 @@ export const migrations: readonly Migration[] = [
   exportReadyAlertsMigration,
   authSecurityMigration,
   importObjectCleanupMigration,
+  automaticUpdatesOfferMigration,
 ];

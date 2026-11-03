@@ -195,6 +195,7 @@ export class ImportJobProcessor {
     throw new AppError({
       code,
       message: `Mailbox tracking failed: ${code}`,
+      details: { partialResult: this.compactMailboxResult(result) },
       publicMessage: code.includes('RECONNECT_REQUIRED')
         ? 'Reconnect your mailbox to continue.'
         : 'Mailbox tracking could not be completed. Please try again.',

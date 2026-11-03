@@ -1,7 +1,7 @@
 import type {
   RecapExchangeRatesPort,
   RecapRateSnapshot,
-  RecapCurrency,
+  DisplayCurrency,
 } from '../ports/RecapExchangeRatesPort';
 
 /** Public rates only: no user, receipt, or account information leaves this adapter. */
@@ -25,7 +25,7 @@ export class FrankfurterRecapRates implements RecapExchangeRatesPort {
   private async refresh(): Promise<RecapRateSnapshot> {
     try {
       const response = await this.fetchRates(
-        'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=CAD,USD,GBP',
+        'https://api.frankfurter.dev/v1/latest?base=EUR&symbols=CAD,USD,GBP,MXN,AUD,NZD,JPY',
         { signal: AbortSignal.timeout(4000) },
       );
       if (!response.ok) throw new Error('Rate request failed');
@@ -45,14 +45,14 @@ export class FrankfurterRecapRates implements RecapExchangeRatesPort {
       if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== raw.date)
         throw new Error('Invalid rate date');
       const rates: RecapRateSnapshot['rates'] = { EUR: 1 };
-      for (const code of ['CAD', 'USD', 'GBP'] as RecapCurrency[]) {
+      for (const code of ['CAD', 'USD', 'GBP', 'MXN', 'AUD', 'NZD', 'JPY'] as DisplayCurrency[]) {
         const value = (raw.rates as Record<string, unknown>)[code];
         if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
           throw new Error('Invalid rate');
         rates[code] = value;
       }
       this.last = {
-        id: `${raw.date}:${rates.CAD}:${rates.USD}:${rates.GBP}`,
+        id: `${raw.date}:${JSON.stringify(rates)}`,
         date: raw.date,
         rates,
       };
