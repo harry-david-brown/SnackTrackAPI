@@ -21,6 +21,17 @@ Use this skill to preserve the distinctions between connection, import, export, 
    - user-visible action and recovery path.
 6. Add regression coverage at the canonical transition or resolver. Run only the relevant TypeScript check unless the user explicitly requests tests or other verification.
 
+For user-facing import changes, also use `snacktrack-frontend-engineering` and its user-comprehension review. Translate the state model into the user's task instead of exposing lifecycle terminology as the interface.
+
+## User understanding of imports
+
+- Introduce choices through recognizable sources and outcomes: email receipts, Uber Eats orders, and DoorDash orders. Explain the request → download → upload process before requiring users to choose the file route; introduce archive/export terminology where it becomes useful.
+- Do not describe a guided file import as a direct provider connection or promise complete history without verified coverage. Explain provider preparation and the user's remaining actions before the external handoff.
+- Keep SnackTrack login, receipt inbox authorization, one-time import, download-ready alerts, and automatic receipt updates distinct in both language and consent. Show the connected address and a correction path before importing.
+- Match ready-alert and background-processing promises to the active capability and operation state. Distinguish a selected file, a completed transfer, accepted work, queued work, and saved orders without making users learn those implementation states.
+- Make zero results, duplicate-only results, unknown counts, partial success, and failures lead to relevant recovery. Optional update offers must not silently replace an explicitly selected destination.
+- Check initial setup, returning-user import, Home, and Settings for consistent meaning when a shared action or status changes. Review only affected paths; do not expand a small copy fix into a full import redesign.
+
 ## Canonical files
 
 ### App
