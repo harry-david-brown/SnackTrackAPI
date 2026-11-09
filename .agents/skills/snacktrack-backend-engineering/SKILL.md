@@ -19,7 +19,7 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 5. Define the response/error contract and postcondition before implementation.
 6. Implement the narrowest cohesive service operation. Keep routes responsible for authentication, validation, and response construction.
 7. Add regression tests at the durable service/repository boundary and any affected route contract.
-8. Run `npm run build` as the API TypeScript check. Do not run focused or full tests unless the user explicitly requests them.
+8. Run `npm run build` and `npm run lint`; also lint changed/staged tests with the local ESLint binary and `--max-warnings=0`. Fix lint errors and warnings before finishing and re-run affected checks. Do not run focused or full tests unless the user explicitly requests them.
 
 ## Core rules
 

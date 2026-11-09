@@ -36,9 +36,12 @@ Run from `SnackTrackAPI`:
 
 ```sh
 npm run build
+npm run lint
 ```
 
-Do not run focused tests, `npm test`, lint, or full suites unless the user explicitly requests them. Adding tests does not imply permission to execute them. Inspect `git diff --check` and the final diff.
+Run one final verification pass after implementation is complete: the relevant TypeScript check and lint coverage for changed/staged code and tests. Do not run routine checks between edits or repeatedly during implementation. Avoid duplicate lint runs when the repository-wide check already covers those files. If a final check fails, fix the issue and re-run only the affected check; once checks pass, stop unless subsequent code changes invalidate the result. Fix changed-file errors and warnings without suppressing rules or bypassing commit hooks; report unrelated pre-existing failures explicitly. Lint changed/staged tests with the local ESLint binary and `--max-warnings=0` as the API lint script covers only `src`.
+
+Do not run focused tests, `npm test`, or full suites unless the user explicitly requests them. Adding tests does not imply permission to execute them. Inspect `git diff --check` and the final diff.
 
 ## Definition of done
 

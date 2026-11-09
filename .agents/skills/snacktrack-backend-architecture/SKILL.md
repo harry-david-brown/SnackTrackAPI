@@ -20,7 +20,7 @@ Keep `SnackTrackAPI` understandable as it grows: one owner per responsibility, d
 4. Choose the narrowest cohesive owner. Prefer improving a touched boundary over introducing a parallel abstraction or reorganizing unrelated files.
 5. Keep behavior changes and structural cleanup separable in the diff when practical. Preserve API, database, and provider compatibility unless the task explicitly changes a contract.
 6. Add or update regression coverage at the authoritative decision point and affected transport boundary.
-7. Run `npm run build` from `SnackTrackAPI` as the ordinary TypeScript check. Do not run tests or other suites unless the user explicitly requests them.
+7. Run `npm run build` and `npm run lint` from `SnackTrackAPI`; also lint changed/staged tests with the local ESLint binary and `--max-warnings=0`. Fix lint errors and warnings before finishing and re-run affected checks. Tests and other suites remain opt-in.
 
 ## Target dependency model
 

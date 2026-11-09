@@ -16,7 +16,7 @@ Preserve one coherent identity and session contract across SnackTrackAPI and Sna
 5. Load `snacktrack-backend-architecture` for API changes and `snacktrack-frontend-engineering` for app changes. Load `snacktrack-account-data-lifecycle` for account deletion.
 6. Define stable success/error contracts and which failures retain or clear the local session before editing.
 7. Add regression coverage at the verifier/service decision point and app normalization/session boundary.
-8. Run only the relevant TypeScript check unless the user explicitly requests broader verification.
+8. Run the relevant TypeScript and lint checks; fix errors and warnings in changed/staged code and tests before finishing. Run test suites or broader verification only when explicitly requested.
 
 ## Core invariants
 

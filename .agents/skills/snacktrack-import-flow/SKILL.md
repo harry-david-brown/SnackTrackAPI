@@ -19,7 +19,7 @@ Use this skill to preserve the distinctions between connection, import, export, 
    - app response normalization and hooks;
    - dashboard/upload/post-summary resolver precedence;
    - user-visible action and recovery path.
-6. Add regression coverage at the canonical transition or resolver. Run only the relevant TypeScript check unless the user explicitly requests tests or other verification.
+6. Add regression coverage at the canonical transition or resolver. Run the relevant TypeScript and lint checks; fix errors and warnings in changed/staged code and tests before finishing. Tests and other suites remain opt-in.
 
 For user-facing import changes, also use `snacktrack-frontend-engineering` and its user-comprehension review. Translate the state model into the user's task instead of exposing lifecycle terminology as the interface.
 

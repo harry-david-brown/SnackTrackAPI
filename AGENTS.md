@@ -26,7 +26,9 @@ This repository contains the SnackTrack Express/PostgreSQL API.
 
 - Add or update focused regression tests at the service/repository boundary and for every affected route contract.
 - Tests for mutations should verify postconditions, rollback and lock release, cache effects, stable error behavior, and realistic races where applicable.
-- For ordinary code changes, run only `npm run build` as the API TypeScript check.
+- For ordinary code changes, run `npm run build` and `npm run lint`.
+- Run one final verification pass after implementation is complete: the relevant TypeScript check and lint coverage for changed/staged code and tests. Do not run routine checks between edits or repeatedly during implementation. Avoid duplicate lint runs when the repository-wide check already covers those files. If a final check fails, fix the issue and re-run only the affected check; once checks pass, stop unless subsequent code changes invalidate the result. Fix changed-file errors and warnings without suppressing rules or bypassing commit hooks; report unrelated pre-existing failures explicitly.
+- Check the final changed/staged JavaScript and TypeScript files with the repository’s ESLint configuration as well when the lint script does not cover them; use `--max-warnings=0`. Do not modify unrelated staged content.
 - Do not run focused tests, `npm test`, or other test suites unless the user explicitly requests them.
 - iOS Simulator and Android Emulator testing, including app-driven end-to-end API checks, are outside the scope of agent tasks. Do not launch or control either environment unless the user explicitly requests it; the user will handle device and emulator verification.
 - Do not treat the absence of Simulator or Emulator testing as incomplete verification. Clearly hand off any app-driven manual flows the user should check.

@@ -16,7 +16,7 @@ Add mailbox providers without leaking vendor models into receipt extraction or c
 5. Load `snacktrack-import-flow` for import lifecycle, consent, tracking, source coverage, deduplication, or UI state changes; load backend architecture/engineering for API or persistence work.
 6. Define runtime payload decoders, stable provider-neutral outputs, error classification, credential retention, and cache invalidation before implementation.
 7. Add adapter contract coverage plus the relevant import-flow transition coverage.
-8. Run only the relevant TypeScript check unless the user explicitly requests broader verification.
+8. Run the relevant TypeScript and lint checks; fix errors and warnings in changed/staged code and tests before finishing. Run test suites or broader verification only when explicitly requested.
 
 ## Core invariants
 
