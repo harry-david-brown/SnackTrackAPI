@@ -65,7 +65,7 @@ export class OngoingTrackingService {
       this.queries.get(userId),
       this.mailboxConnections?.findMicrosoft(userId),
     ]);
-    if (!user || preferences.ongoingTrackingConsentState !== 'granted') return null;
+    if (!user || user.deletionRequested || preferences.ongoingTrackingConsentState !== 'granted') return null;
     const baseline = await this.queries.getTrackingBaseline(userId);
     if (!baseline.eligible) return null;
 
@@ -87,14 +87,17 @@ export class OngoingTrackingService {
       mailboxOutcomes.push({ mailbox, email, success: result.success, newOrders: result.newOrders,
         updatedOrders: result.updatedOrders, unchangedOrders: result.unchangedOrders, errorCode: result.errorCode });
     };
+      await execution?.assertActive?.();
       const scopedExecutions = this.providerExecutions(execution);
       if (providers.gmail && durableGmail) {
         record('gmail', user.gmailEmail ?? null, await this.gmailImport.importFromGmail(user, lockHandle, 'background', scopedExecutions.gmail));
       }
       if (providers.microsoft && durableMicrosoft && this.outlookImport) {
+        await execution?.assertActive?.();
         await this.locks.assertLockOwned(lockHandle);
         record('outlook', microsoft?.email ?? null, await this.outlookImport.importFromOutlook(user, lockHandle, 'background', scopedExecutions.microsoft));
       }
+      await execution?.assertActive?.();
       let combined = this.combineResults(results);
       if (combined) combined = { ...combined, mailboxOutcomes };
       if (combined && execution?.accountingJobId) {
@@ -121,6 +124,7 @@ export class OngoingTrackingService {
       ? execution.checkpoint
       : { provider: 'tracking', version: 1 };
     const scoped = (provider: 'gmail' | 'microsoft'): ImportExecutionCheckpoint => ({
+      assertActive: execution.assertActive,
       ...(execution.accountingJobId ? { accountingJobId: execution.accountingJobId } : {}),
       checkpoint: typeof root[provider] === 'object' && root[provider] !== null
         ? root[provider] as Readonly<Record<string, unknown>>

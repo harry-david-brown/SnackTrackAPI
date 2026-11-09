@@ -45,15 +45,37 @@ explicit account-deletion transaction and this inventory.
 
 ## Account deletion
 
-- Is the only permanent deletion operation and is used by both self-service and administrator routes.
-- Acquires the same user-scoped writer lock as every receipt writer.
-- Deletes email-keyed verification codes and the root user row in one transaction; foreign keys cascade
-  through every user-owned relational table.
-- A repeated request after commit returns the same `{ "deleted": true }` result. This covers lost client
-  responses and post-commit cleanup retries without treating an already-absent account as failure.
-- Connection-health invalidation, cache invalidation, and refresh-token revocation are observable
-  best-effort effects after commit. Failures are logged without turning a committed deletion into a
-  misleading API failure.
+- Self-service `DELETE /auth/delete-account` returns HTTP 202 with
+  `{ "success": true, "status": "pending", "message": "..." }` only after a durable request commits.
+  It does not wait for the import writer lock or claim the account has already been erased.
+- `AccountDeletionRequestRepository` atomically marks the account as pending deletion, advances its
+  import generation once, cancels active and queued import jobs (including upload intents), suppresses
+  dispatch/notification outbox work, disables push devices, and removes outstanding mailbox authorizations.
+  Repeated requests are idempotent. Import admission checks the account fence before idempotency lookup.
+- Existing sessions and fresh sign-in/refresh attempts are rejected with `ACCOUNT_DELETION_PENDING`.
+  Only the authenticated deletion retry route allows an otherwise-valid pending-deletion session.
+- Mailbox workers check durable cancellation before acquisition, between batches, after extraction,
+  and at checkpoint/finalization boundaries. Export workers check around download/extraction/parsing
+  and before committing receipts. An in-flight call or write is allowed to unwind safely; cancellation
+  never forcibly releases another worker's lock. Cancelled work is not retried or announced as complete.
+- `AccountDeletionRequestService` is polled every five seconds by the worker and also by the scheduler.
+  PostgreSQL owns the queue. Failed attempts remain pending with a ten-second retry delay and an error
+  code, so API/worker restarts and Redis outages do not lose accepted requests. Finalization requires
+  healthy lock infrastructure and a running worker or scheduler; there is no client timer or live-app dependency.
+- The finalizer uses `AccountDeletionService` with a non-waiting lock attempt. Once the writer exits,
+  it stops the Gmail watch and deletes verification codes and the user in one transaction. Foreign keys
+  remove relational data and the pending request together. Existing object-deletion triggers retain
+  staged object cleanup work after user deletion, including the signed-upload retention window.
+- Administrator/debug deletion retains its synchronous contract and shares the same finalizer and lock.
+- Connection-health and projection-cache invalidation remain best effort after commit. Refresh tokens
+  cannot restore a pending or absent account; the durable request stores no token secrets.
+- The app validates acceptance, cancels queries, clears account/device and authentication state, and
+  signs out through the existing root route guard. It says deletion continues if the app closes.
+  An uncertain network result is described as unconfirmed, not proof that deletion failed.
+
+Deployment: apply migration 037 before deploying the API/worker, and deploy the updated worker with
+its deletion poller. Pending requests are visible in `account_deletion_requests` (`requested_at`,
+`next_attempt_at`, `attempts`, `last_error_code`); investigate growing age rather than clearing the fence.
 
 ## Concurrency and failure invariants
 
@@ -75,7 +97,7 @@ explicit account-deletion transaction and this inventory.
 | Uber Eats and DoorDash exports                  | `ReceiptRepository.replaceProviderExport` through `CsvImportUseCase`              | One user-scoped lock for parsing, lifecycle transition, replacement transaction, and cache boundary |
 | Receipt clear                                   | `ReceiptClearService.clearReceipts`                                               | Bounded lock acquisition and ownership assertion inside the transaction                             |
 | Onboarding reset                                | `AccountResetService.resetForOnboarding`                                          | Bounded lock acquisition and ownership assertion before commit                                      |
-| Self-service and administrator account deletion | `AccountDeletionService.deleteAccount`                                            | Both routes delegate to the same bounded, ownership-bearing operation                               |
+| Self-service and administrator account deletion | `AccountDeletionRequestService` → `AccountDeletionService.deleteAccount` | Durable self-service cancellation; finalization and synchronous admin deletion share the writer lock |
 
 There is no unlocked single-receipt or bulk-save repository method. A future manual receipt
 mutation must be introduced as an application operation that acquires the same user-scoped lock and

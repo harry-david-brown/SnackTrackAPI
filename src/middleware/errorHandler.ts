@@ -84,6 +84,7 @@ export const statusForError = (error: AppError): number => {
     case 'AUTHENTICATION_REQUIRED':
     case 'INVALID_CREDENTIALS':
     case 'ACCESS_TOKEN_EXPIRED':
+    case 'ACCOUNT_DELETION_PENDING':
     case 'ACCESS_TOKEN_INVALID':
     case 'REFRESH_TOKEN_EXPIRED':
     case 'REFRESH_TOKEN_INVALID':

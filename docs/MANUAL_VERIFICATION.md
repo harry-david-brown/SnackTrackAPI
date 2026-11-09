@@ -5,9 +5,9 @@ These checks require credentials, external services, or a physical/simulator dev
 ## Mobile session and account lifecycle
 
 - Register, log in, refresh a session after the access token expires, log out, and relaunch on both iOS and Android.
-- Force a temporary network failure during refresh and account deletion; confirm the signed-in session and local data remain intact.
+- Force a temporary network failure during refresh; confirm the signed-in session and local data remain intact. Drop the deletion response and confirm the app reports an unconfirmed request; a committed request still completes server-side.
 - Complete receipt clearing and onboarding reset; confirm the session remains, affected receipts/import state disappear, and the fresh authenticated journey opens.
-- Complete account deletion; confirm auth, user-bound device state, and server resources disappear only after success.
+- Start Gmail/Outlook and file imports, then request account deletion. Confirm HTTP 202 acceptance signs out and clears local state, cancels imports, and eventually removes server data. Close the app immediately after acceptance and restart the worker while deletion is pending; confirm deletion resumes without another request. Confirm pending-deletion accounts cannot sign in or start new imports.
 
 ## Gmail and import lifecycle
 

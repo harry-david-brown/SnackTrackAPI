@@ -61,7 +61,7 @@ test('the shared auth fixture is accepted unchanged by the route contract and Op
       confirmVerificationEmail: async () => AUTH_SESSION_FIXTURE,
     },
     sessions: { refresh: async () => ({}), revoke: async () => undefined },
-    accountDeletion: { deleteAccount: async () => ({}) },
+    accountDeletion: { request: async () => ({ success: true, status: 'pending', message: 'Deletion requested' }) },
     authenticate: pass,
     rateLimitRegistration: pass,
     rateLimitMicrosoftAttempt: pass,

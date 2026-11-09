@@ -13,6 +13,7 @@ const { statusForError } = require('../dist/middleware/errorHandler');
 
 test('stable failures cover authorization, missing resources, busy conflicts, and providers', () => {
   const cases = [
+    [new AppError({ code: 'ACCOUNT_DELETION_PENDING', message: 'Deletion pending' }), 401, 'ACCOUNT_DELETION_PENDING'],
     [new AuthorizationError(), 403, 'AUTHORIZATION_DENIED'],
     [new NotFoundError('User'), 404, 'NOT_FOUND'],
     [new ConflictError('IMPORT_IN_PROGRESS', 'Busy'), 409, 'IMPORT_IN_PROGRESS'],

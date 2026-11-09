@@ -81,7 +81,7 @@ for (const invalid of [false, true]) {
     const processor = new ImportJobProcessor(
       {
         findById: async () => operation,
-        claimForRun: async () => operation,
+        claimForRun: async () => { operation.status = 'running'; return operation; },
         progress: async () => {},
         heartbeat: async () => {},
         succeed: async (_op, value) => {
@@ -161,7 +161,7 @@ for (const kind of [
     let result, accountingJobId;
     const jobs = {
       findById: async () => operation,
-      claimForRun: async () => operation,
+      claimForRun: async () => { operation.status = 'running'; return operation; },
       progress: async () => {},
       heartbeat: async () => {},
       saveCheckpoint: async () => {},
@@ -217,7 +217,8 @@ for (const kind of [
   });
 }
 
-test('provider-scoped tracking checkpoints keep the shared accounting identity', async () => {
+test('provider-scoped tracking checkpoints keep the shared accounting identity and cancellation check', async () => {
+  const assertActive = async () => {};
   const identities = [];
   const empty = {
     ...tentative,
@@ -234,6 +235,7 @@ test('provider-scoped tracking checkpoints keep the shared accounting identity',
   };
   const track = async (_user, _lock, _trigger, execution) => {
     identities.push(execution.accountingJobId);
+    assert.equal(execution.assertActive, assertActive);
     await execution.save({ provider: 'test' }, 'done', 90);
     return empty;
   };
@@ -261,7 +263,7 @@ test('provider-scoped tracking checkpoints keep the shared accounting identity',
   const result = await service.checkUserWithLock(
     'user',
     { userId: 'user' },
-    { accountingJobId: 'job', checkpoint: {}, save: async (state) => saved.push(state) },
+    { accountingJobId: 'job', checkpoint: {}, assertActive, save: async (state) => saved.push(state) },
   );
   assert.equal(result.newOrders, 1, 'overall tracking must not add provider outcomes');
   assert.deepEqual(identities, ['job', 'job']);
@@ -456,3 +458,57 @@ for (const provider of ['gmail', 'microsoft'])
     assert.equal(result.errorCode, 'IMPORT_CHECKPOINT_INVALID');
     assert.equal(failure, 'IMPORT_CHECKPOINT_INVALID');
   });
+
+test('cancellation during an executing import releases its lock without retry or completion', async (t) => {
+  const operation = { id: randomUUID(), userId: randomUUID(), kind: 'gmail_historical', trigger: 'user', status: 'queued', checkpoint: {} };
+  const lock = { userId: operation.userId };
+  let released = false;
+  t.mock.method(ImportLockService, 'acquireLockWithWait', async () => lock);
+  t.mock.method(ImportLockService, 'releaseLock', async () => { released = true; return true; });
+  const unexpected = async () => assert.fail('Cancelled work must not retry, fail, or succeed');
+  const jobs = {
+    findById: async () => operation,
+    claimForRun: async () => { operation.status = 'running'; return operation; },
+    progress: async () => {}, heartbeat: async () => {},
+    succeed: unexpected, retry: unexpected, fail: unexpected, saveCheckpoint: unexpected,
+  };
+  const gmail = { executeWithLock: async (_user, _lock, execution) => {
+    await execution.assertActive();
+    operation.status = 'cancelled';
+    await assert.rejects(execution.save({}, 'processing', 20), error => error.code === 'IMPORT_CANCELLED');
+    // Provider wrappers can translate the cancellation; the worker must re-read durable status.
+    throw new Error('provider stopped');
+  } };
+  const processor = new ImportJobProcessor(jobs, {}, {}, {}, gmail, {}, {}, {},
+    { delayGmailImportIfEnabled: async () => null }, {}, undefined, undefined, 2);
+  await processor.process({ data: { jobId: operation.id }, attemptsMade: 0, opts: { attempts: 5 } });
+  assert.equal(operation.status, 'cancelled');
+  assert.equal(released, true);
+});
+
+for (const provider of ['gmail', 'outlook']) {
+  test(`${provider} cancellation after extraction prevents persistence of the batch`, async () => {
+    let cancelled = false, persisted = false;
+    const acquisition = { acquire: async () => ({ exportCutoffs: {}, pages: (async function* () {
+      yield { messages: [], matchedCount: 1, nextCursor: null };
+    })() }) };
+    const extraction = { extract: async () => { cancelled = true; return {}; } };
+    const persistence = { persist: async () => { persisted = true; assert.fail('Cancelled batch must not be written'); } };
+    const lifecycle = { start: async () => 'run', fail: async () => {}, complete: async () => {} };
+    const service = provider === 'gmail'
+      ? new GmailImportService(acquisition, extraction, persistence, lifecycle, undefined, 2)
+      : new OutlookImportService(acquisition, extraction, persistence,
+        { startSyncRun: async () => 'run', failSyncRun: async () => {} }, {}, {}, undefined, 2);
+    const execution = { checkpoint: {}, save: async () => {}, assertActive: async () => {
+      if (cancelled) throw new (require('../dist/core/errors').AppError)({ code: 'IMPORT_CANCELLED', message: 'Cancelled' });
+    } };
+    const user = { id: randomUUID(), timezone: 'America/Toronto' };
+    const result = provider === 'gmail'
+      ? await service.importFromGmail(user, { userId: user.id }, 'manual', execution)
+      : await service.importFromOutlook(user, { userId: user.id }, 'manual', execution);
+    assert.equal(cancelled, true);
+    assert.equal(persisted, false);
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'IMPORT_CANCELLED');
+  });
+}

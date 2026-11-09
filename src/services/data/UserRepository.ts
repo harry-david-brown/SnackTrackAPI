@@ -43,7 +43,7 @@ const mapUser = (value: unknown, includePassword = false): User => {
       : {}),
     emailVerified: databaseBoolean(row, 'email_verified'),
     sessionVersion: databaseNonNegativeInteger(row, 'session_version'),
-    deletionRequested: row.deletion_requested_at != null,
+    ...(databaseTimestamp(row, 'deletion_requested_at') ? { deletionRequested: true } : {}),
     timezone: databaseString(row, 'timezone'),
     createdAt: requiredTimestamp(row, 'created_at'),
   };

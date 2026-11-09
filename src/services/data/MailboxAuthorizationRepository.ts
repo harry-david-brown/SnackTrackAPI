@@ -25,7 +25,7 @@ export class MailboxAuthorizationRepository implements MailboxAuthorizationPort 
       `INSERT INTO mailbox_authorization_attempts
          (state_hash, user_id, provider, verifier_hash, session_version, import_generation)
        SELECT $1, id, $3, $4, session_version, import_generation FROM users
-       WHERE id = $2 AND session_version = $5`,
+       WHERE id = $2 AND session_version = $5 AND deletion_requested_at IS NULL`,
       [hash(state), userId, provider, verifierHash, sessionVersion]);
     if (!result.rowCount) throw expired();
   }
@@ -51,6 +51,7 @@ export class MailboxAuthorizationRepository implements MailboxAuthorizationPort 
          AND a.completion_hash = $3 AND a.verifier_hash = $4 AND a.expires_at > NOW()
          AND a.encrypted_callback IS NOT NULL AND a.claimed_at IS NULL
          AND a.session_version = u.session_version AND a.import_generation = u.import_generation
+         AND u.deletion_requested_at IS NULL
        RETURNING a.state_hash, a.session_version, a.import_generation::text, a.encrypted_callback`,
       [userId, provider, hash(completionToken), hash(verifier)]);
     if (!result.rows[0]) throw expired();
@@ -70,7 +71,7 @@ export class MailboxAuthorizationRepository implements MailboxAuthorizationPort 
     await this.database.withTransaction(async (transaction) => {
       // Serialize against password recovery, account deletion, and import-data resets.
       const current = await transaction.query(
-        `SELECT id FROM users WHERE id = $1 AND session_version = $2 AND import_generation = $3 FOR UPDATE`,
+        `SELECT id FROM users WHERE id = $1 AND session_version = $2 AND import_generation = $3 AND deletion_requested_at IS NULL FOR UPDATE`,
         [claim.userId, claim.sessionVersion, claim.importGeneration]);
       if (!current.rows[0]) throw expired();
       const attempt = await transaction.query(

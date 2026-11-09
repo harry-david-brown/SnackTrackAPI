@@ -20,7 +20,7 @@ export class GmailWatchService {
     ]);
     const exportAlertActive = Object.values(exports).some(p=>p.status==='requested' && p.readyAlert?.consentState==='granted');
     if (
-      !user?.gmailConnected || user.gmailConnectionMode !== 'offline' || !user.gmailRefreshToken ||
+      user?.deletionRequested || !user?.gmailConnected || user.gmailConnectionMode !== 'offline' || !user.gmailRefreshToken ||
       (!exportAlertActive && preferences.ongoingTrackingConsentState !== 'granted')
     ) return false;
     if (!force && await this.pushes.hasHealthyWatch(userId)) return true;

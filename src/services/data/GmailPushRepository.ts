@@ -24,7 +24,7 @@ export class GmailPushRepository implements GmailPushStatePort {
         `SELECT u.id
          FROM users u
          JOIN user_import_preferences p ON p.user_id=u.id
-         WHERE LOWER(u.gmail_email)=LOWER($1)
+         WHERE LOWER(u.gmail_email)=LOWER($1) AND u.deletion_requested_at IS NULL
            AND u.gmail_connected=TRUE AND u.gmail_connection_mode='offline'
            AND u.gmail_refresh_token IS NOT NULL
            AND (p.ongoing_tracking_consent_state='granted' OR (
@@ -78,6 +78,7 @@ export class GmailPushRepository implements GmailPushStatePort {
         `WITH due AS (
            SELECT user_id FROM gmail_push_state
            WHERE pending AND next_attempt_at<=NOW()
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id=gmail_push_state.user_id AND u.deletion_requested_at IS NULL)
            ORDER BY next_attempt_at,user_id FOR UPDATE SKIP LOCKED LIMIT $1
          )
          UPDATE gmail_push_state s

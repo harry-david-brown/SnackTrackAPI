@@ -296,3 +296,79 @@ test(
     });
   },
 );
+
+const { AccountDeletionRequestRepository } = require('../dist/services/data/AccountDeletionRequestRepository');
+const { AccountDeletionRequestService } = require('../dist/services/account/AccountDeletionRequestService');
+const { ImportJobRepository } = require('../dist/services/data/ImportJobRepository');
+
+test('durable deletion cancels work, blocks admission, and resumes after restart without stealing the writer lock', {
+  skip: databaseUrl ? false : 'MIGRATION_TEST_DATABASE_URL is not configured',
+}, async () => {
+  await withTemporaryDatabase('durable_delete', async (pool) => {
+    await seedAllData(pool);
+    const database = { ...transactions(pool), query: pool.query.bind(pool) };
+    const jobs = new ImportJobRepository(database);
+    const job = await jobs.create({ userId, kind: 'gmail_historical', trigger: 'user', idempotencyKey: 'history' });
+    await jobs.claimForRun(job.id);
+    const initialGeneration = (await pool.query('SELECT import_generation FROM users WHERE id=$1', [userId])).rows[0].import_generation;
+    let writerRunning = true;
+    let released = 0;
+    const finalizer = new AccountDeletionService(database,
+      { invalidateAllUserCaches: async () => {} }, { invalidate() {} }, { revokeRefreshToken: async () => {} },
+      { ...lock, acquireLockWithWait: async (_id, wait) => {
+        assert.equal(wait, 0);
+        return writerRunning ? null : lockHandle;
+      }, releaseLock: async () => { released++; return true; } });
+    const repository = new AccountDeletionRequestRepository(database);
+    const service = new AccountDeletionRequestService(repository, finalizer, { warn() {} });
+    assert.equal((await service.request(userId)).status, 'pending');
+    await service.request(userId);
+    assert.equal(await count(pool, 'account_deletion_requests'), 1);
+    const pendingUser = (await pool.query('SELECT import_generation,deletion_requested_at FROM users WHERE id=$1', [userId])).rows[0];
+    assert.equal(Number(pendingUser.import_generation), Number(initialGeneration) + 1);
+    assert.ok(pendingUser.deletion_requested_at);
+    assert.equal((await jobs.findById(job.id)).status, 'cancelled');
+    assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM import_job_outbox WHERE published_at IS NULL')).rows[0].n, 0);
+    assert.equal(await jobs.claimForRun(job.id), null);
+    for (const idempotencyKey of ['history', 'new-import']) {
+      await assert.rejects(jobs.create({ userId, kind: 'gmail_historical', trigger: 'user', idempotencyKey }),
+        error => error.code === 'ACCOUNT_DELETION_PENDING');
+    }
+    await service.processPending();
+    assert.equal(await count(pool, 'users'), 1);
+    assert.equal(await count(pool, 'receipts'), 2);
+    assert.equal(released, 0, 'must not release the import owner’s lock');
+    assert.equal((await pool.query('SELECT attempts FROM account_deletion_requests')).rows[0].attempts, 1);
+    writerRunning = false;
+    await pool.query('UPDATE account_deletion_requests SET next_attempt_at=NOW()');
+    // New service/repository instances model a restart; no in-memory request state is needed.
+    const resumed = new AccountDeletionRequestService(new AccountDeletionRequestRepository(database), finalizer, { warn() {} });
+    await resumed.processPending();
+    assert.equal(await count(pool, 'users'), 0);
+    assert.equal(await count(pool, 'receipts'), 0);
+    assert.equal(await count(pool, 'import_jobs'), 0);
+    assert.equal(await count(pool, 'account_deletion_requests'), 0);
+    assert.equal(released, 1);
+    await resumed.processPending();
+    assert.equal(released, 1);
+  });
+});
+
+test('failed deletion acceptance rolls back its fence and cancellations together', {
+  skip: databaseUrl ? false : 'MIGRATION_TEST_DATABASE_URL is not configured',
+}, async () => {
+  await withTemporaryDatabase('delete_rollback', async (pool) => {
+    await seedAllData(pool);
+    const database = { ...transactions(pool), query: pool.query.bind(pool) };
+    const jobs = new ImportJobRepository(database);
+    const job = await jobs.create({ userId, kind: 'outlook_historical', trigger: 'user' });
+    await pool.query(`CREATE FUNCTION reject_deletion_outbox_update() RETURNS TRIGGER AS $$
+      BEGIN RAISE EXCEPTION 'injected failure'; END; $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER reject_deletion_outbox_update BEFORE UPDATE ON import_job_outbox
+      FOR EACH ROW EXECUTE FUNCTION reject_deletion_outbox_update()`);
+    await assert.rejects(new AccountDeletionRequestRepository(database).request(userId), /injected failure/);
+    assert.equal(await count(pool, 'account_deletion_requests'), 0);
+    assert.equal((await pool.query('SELECT deletion_requested_at FROM users WHERE id=$1', [userId])).rows[0].deletion_requested_at, null);
+    assert.equal((await jobs.findById(job.id)).status, 'pending_dispatch');
+  });
+});

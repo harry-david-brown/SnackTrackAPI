@@ -45,7 +45,7 @@ export class ExportReadyAlertRepository {
     }>(
       `SELECT p.user_id,p.provider,p.request_id FROM user_export_provider_preferences p
        JOIN users u ON u.id=p.user_id
-       WHERE p.status='requested' AND p.requested_at IS NOT NULL AND p.alert_consent='granted'
+       WHERE u.deletion_requested_at IS NULL AND p.status='requested' AND p.requested_at IS NOT NULL AND p.alert_consent='granted'
          AND p.alert_consent_version=$1 AND ($2::uuid IS NULL OR p.user_id=$2)
          AND ($2::uuid IS NOT NULL OR COALESCE(p.alert_next_check_at,NOW())<=NOW())
          AND ((u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL) OR EXISTS(SELECT 1 FROM mailbox_connections m WHERE m.user_id=p.user_id AND m.status='connected' AND m.connection_mode='offline'))

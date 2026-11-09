@@ -191,13 +191,15 @@ test('authentication route factories validate once and delegate to narrow capabi
       refresh: async (token) => ({ accessToken: token, refreshToken: 'new' }),
       revoke: async () => {},
     },
-    accountDeletion: { deleteAccount: async () => ({ deleted: true }) },
+    accountDeletion: { request: async () => ({ success: true, status: 'pending', message: 'Deletion requested' }) },
     authenticate: pass,
     rateLimitRegistration: pass,
     rateLimitMicrosoftAttempt: pass,
     rateLimitMicrosoftEmail: pass,
     rateLimitMicrosoftConfirmation: pass,
   });
+  const deletion = await invoke(auth, '/delete-account', 'delete', { user: { userId: user.id }, body: {} });
+  assert.deepEqual(deletion, { status: 202, body: { success: true, status: 'pending', message: 'Deletion requested' } });
   const google = await invoke(auth, '/google', 'post', { body: { idToken: 'provider-token' } });
   assert.deepEqual(google, { status: 200, body: { token: 'provider-token' } });
   await assert.rejects(
@@ -321,4 +323,18 @@ test('OTP protected mutations consume the code atomically and roll back on mutat
     events.some((event) => String(event).startsWith('UPDATE verification_codes SET used_at')),
     true,
   );
+});
+
+test('pending deletion rejects login, refresh and ordinary access but permits an idempotent deletion retry', async () => {
+  const tokens = new TokenService(options, createCacheFake(), silentLogger);
+  const pair = tokens.generateTokens(user);
+  const pendingUser = { ...user, deletionRequested: true };
+  const sessions = new SessionService({ findById: async () => pendingUser }, tokens);
+  const payload = tokens.verifyAccessToken(pair.accessToken);
+  assert.throws(() => tokens.generateTokens(pendingUser), error => error.code === 'ACCOUNT_DELETION_PENDING');
+  await assert.rejects(sessions.refresh(pair.refreshToken), error => error.code === 'ACCOUNT_DELETION_PENDING');
+  await assert.rejects(sessions.verifyAccessSession(payload), error => error.code === 'ACCOUNT_DELETION_PENDING');
+  await sessions.verifyAccessSession(payload, true);
+  await assert.rejects(sessions.verifyAccessSession({ ...payload, sessionVersion: 99 }, true),
+    error => error.code === 'ACCESS_TOKEN_INVALID');
 });
