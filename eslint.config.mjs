@@ -4,7 +4,12 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   { ignores: ['dist/**', 'node_modules/**'] },
   eslint.configs.recommended,
-  ...tseslint.configs.recommended,
+  // TypeScript rules apply to TypeScript; node:test suites use CommonJS JavaScript.
+  ...tseslint.configs.recommended.map(config => ({ ...config, files: ['**/*.ts'] })),
+  {
+    files: ['test/**/*.js'],
+    languageOptions: { sourceType: 'commonjs' },
+  },
   {
     files: ['src/**/*.ts'],
     languageOptions: {

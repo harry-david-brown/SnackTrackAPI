@@ -1,3 +1,4 @@
+import { IMPORT_JOB_TRANSITION_SOURCES, type ImportJobTransition } from '../import/ImportJobTransitions';
 import { AppError, ConflictError, NotFoundError } from '../../core/errors';
 import { importCompletionResult } from '../import/ImportCompletionResult';
 import type { DatabaseQueryExecutor, DatabaseTransactionRunner } from '../ports/DatabasePort';
@@ -50,7 +51,7 @@ const redactEventText = (value: string): string => value
   .replace(/[\w.+-]+@[\w.-]+/g, '[address]')
   .replace(/https?:\/\/[^\s"<>]+/gi, '[url]')
   .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-  .replace(/(?:ya29\.|1\/\/|GOCSPX-)[A-Za-z0-9_.\/-]+/g, '[redacted]')
+  .replace(/(?:ya29\.|1\/\/|GOCSPX-)[A-Za-z0-9_./-]+/g, '[redacted]')
   .slice(0, 1_500);
 const safeEventDetailValue = (value: unknown, depth = 0): unknown => {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
@@ -147,6 +148,12 @@ export interface CancelledImportJob {
   readonly id: string;
   readonly kind: ImportJobKind;
 }
+
+/** Expands only closed domain constants; predicates still execute atomically in PostgreSQL. */
+const transitionSource = (command: ImportJobTransition, column: 'status' | 'j.status' = 'status'): string => {
+  const states = IMPORT_JOB_TRANSITION_SOURCES[command];
+  return states.length === 1 ? `${column}='${states[0]}'` : `${column} IN (${states.map(state => `'${state}'`).join(',')})`;
+};
 
 export class ImportJobRepository {
   constructor(
@@ -281,7 +288,7 @@ export class ImportJobRepository {
         `UPDATE import_jobs SET status='pending_dispatch',phase='waiting_for_queue',progress=0,content_length=$3,
            submitted_content_length=$3,submitted_content_type=$4,object_etag=$5,
            queued_at=NULL,expires_at=NULL,updated_at=NOW()
-         WHERE id=$1 AND user_id=$2 AND status='awaiting_upload' AND expires_at>NOW()
+         WHERE id=$1 AND user_id=$2 AND ${transitionSource('submitUpload')} AND expires_at>NOW()
          RETURNING ${selectColumns}`,
         [jobId,userId,input.contentLength,input.contentType,input.etag],
       );
@@ -321,7 +328,7 @@ export class ImportJobRepository {
 
   async markQueued(jobId: string): Promise<void> {
     await this.database.withTransaction(async (transaction) => {
-      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='queued',phase='waiting',queued_at=COALESCE(queued_at,NOW()),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','retrying') RETURNING ${selectColumns}`, [jobId]);
+      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='queued',phase='waiting',queued_at=COALESCE(queued_at,NOW()),updated_at=NOW() WHERE id=$1 AND ${transitionSource('queue')} RETURNING ${selectColumns}`, [jobId]);
       if (result.rows[0]) await this.insertEvent(transaction, decode(result.rows[0]), 'queued');
     });
   }
@@ -333,7 +340,7 @@ export class ImportJobRepository {
            error_code=NULL,error_message=NULL,completed_at=NULL,
            started_at=COALESCE(started_at,NOW()),heartbeat_at=NOW(),updated_at=NOW()
          FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND u.deletion_requested_at IS NULL
-           AND j.status IN ('pending_dispatch','queued','running','retrying') RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
+           AND ${transitionSource('claim', 'j.status')} RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
         [jobId],
       );
       if (result.rows[0]) {
@@ -341,19 +348,19 @@ export class ImportJobRepository {
         await this.insertEvent(transaction, job, 'attempt_started');
         return job;
       }
-      const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status IN ('pending_dispatch','queued','retrying') RETURNING ${selectColumns}`, [jobId]);
+      const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND ${transitionSource('supersedeUnclaimed')} RETURNING ${selectColumns}`, [jobId]);
       if (superseded.rows[0]) await this.insertEvent(transaction, decode(superseded.rows[0]), 'superseded');
       return null;
     });
   }
 
   async progress(jobId: string, phase: string, progress: number): Promise<void> {
-    await this.database.query(`UPDATE import_jobs SET phase=$2,progress=GREATEST(progress,$3),heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`, [jobId,phase,Math.max(1,Math.min(99,Math.round(progress)))]);
+    await this.database.query(`UPDATE import_jobs SET phase=$2,progress=GREATEST(progress,$3),heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND ${transitionSource('progress')}`, [jobId,phase,Math.max(1,Math.min(99,Math.round(progress)))]);
   }
 
   async heartbeat(jobId: string): Promise<void> {
     await this.database.query(
-      `UPDATE import_jobs SET heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running'`,
+      `UPDATE import_jobs SET heartbeat_at=NOW(),updated_at=NOW() WHERE id=$1 AND ${transitionSource('progress')}`,
       [jobId],
     );
   }
@@ -366,7 +373,7 @@ export class ImportJobRepository {
   ): Promise<void> {
     await this.database.query(
       `UPDATE import_jobs SET checkpoint=$2::jsonb,phase=$3,progress=GREATEST(progress,$4),heartbeat_at=NOW(),updated_at=NOW()
-       WHERE id=$1 AND status='running'`,
+       WHERE id=$1 AND ${transitionSource('progress')}`,
       [jobId, JSON.stringify(checkpoint), phase, Math.max(1, Math.min(94, Math.round(progress)))],
     );
   }
@@ -387,7 +394,7 @@ export class ImportJobRepository {
     await this.database.withTransaction(async (transaction) => {
       const result = await transaction.query<Row>(
         `UPDATE import_jobs SET status='retrying',phase='retrying',error_code=$2,error_message=$3,
-           heartbeat_at=NULL,updated_at=NOW() WHERE id=$1 AND status='running' RETURNING ${selectColumns}`,
+           heartbeat_at=NULL,updated_at=NOW() WHERE id=$1 AND ${transitionSource('retry')} RETURNING ${selectColumns}`,
         [jobId,code,message.slice(0,500)],
       );
       if (!result.rows[0]) {
@@ -406,7 +413,7 @@ export class ImportJobRepository {
       const result = await transaction.query<Row>(
         `UPDATE import_jobs SET status='retrying',phase='waiting_for_infrastructure',
            attempts=GREATEST(0,attempts-1),error_code=$2,error_message=$3,heartbeat_at=NULL,updated_at=NOW()
-         WHERE id=$1 AND status='running' RETURNING ${selectColumns}`,
+         WHERE id=$1 AND ${transitionSource('retry')} RETURNING ${selectColumns}`,
         [jobId, code, message.slice(0, 500)],
       );
       if (result.rows[0]) await this.insertEvent(transaction, decode(result.rows[0]), 'infrastructure_wait', details);
@@ -435,7 +442,7 @@ export class ImportJobRepository {
               AND u.id=p.user_id AND u.import_generation=$4
               AND ((u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL)
                 OR EXISTS(SELECT 1 FROM mailbox_connections m WHERE m.user_id=p.user_id AND m.status='connected' AND m.connection_mode='offline'))
-              AND j.id=$5 AND j.status='running' AND j.import_generation=u.import_generation
+              AND j.id=$5 AND ${transitionSource('finish', 'j.status')} AND j.import_generation=u.import_generation
             RETURNING p.request_id`, [job.userId,job.exportProvider,job.checkpoint.requestId,job.importGeneration,job.id]);
           detected = (ready.rowCount ?? 0)>0;
         }
@@ -444,12 +451,12 @@ export class ImportJobRepository {
       const updated = await transaction.query(
         `UPDATE import_jobs j SET status=$2,phase=$3,progress=100,result=$4,error_code=$5,error_message=$6,
            completed_at=NOW(),heartbeat_at=NOW(),updated_at=NOW()
-         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND j.status='running'
+         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND ${transitionSource('finish', 'j.status')}
          RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
         [job.id,status,phase,result ? JSON.stringify(result) : null,code,message?.slice(0,500) ?? null],
       );
       if (!updated.rows[0]) {
-        const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND status='running' RETURNING ${selectColumns}`, [job.id]);
+        const superseded = await transaction.query<Row>(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND ${transitionSource('finish')} RETURNING ${selectColumns}`, [job.id]);
         if (superseded.rows[0]) await this.insertEvent(transaction, decode(superseded.rows[0]), 'superseded');
         return;
       }
@@ -497,12 +504,12 @@ export class ImportJobRepository {
   }
 
   async supersedeActive(userId: string, executor: DatabaseQueryExecutor = this.database): Promise<void> {
-    await executor.query(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE user_id=$1 AND status IN ('awaiting_upload','pending_dispatch','queued','running','retrying')`, [userId]);
+    await executor.query(`UPDATE import_jobs SET status='superseded',phase='superseded',completed_at=NOW(),updated_at=NOW() WHERE user_id=$1 AND ${transitionSource('supersedeActive')}`, [userId]);
   }
 
   async expireUploads(): Promise<number> {
     return this.database.withTransaction(async (transaction) => {
-      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='expired',phase='expired',completed_at=NOW(),updated_at=NOW() WHERE status='awaiting_upload' AND expires_at<=NOW() RETURNING ${selectColumns}`);
+      const result = await transaction.query<Row>(`UPDATE import_jobs SET status='expired',phase='expired',completed_at=NOW(),updated_at=NOW() WHERE ${transitionSource('expireUpload')} AND expires_at<=NOW() RETURNING ${selectColumns}`);
       for (const row of result.rows) await this.insertEvent(transaction, decode(row), 'expired');
       return result.rowCount ?? 0;
     });
@@ -566,14 +573,14 @@ export class ImportJobRepository {
     return this.database.withTransaction(async (transaction) => {
       const selected = await transaction.query<Row>(
         `SELECT id,kind FROM import_jobs
-         WHERE status IN ('pending_dispatch','queued','retrying') FOR UPDATE`,
+         WHERE ${transitionSource('cancelPending')} FOR UPDATE`,
       );
       const jobs = selected.rows.map((row) => ({ id: text(row, 'id'), kind: enumValue(row, 'kind', IMPORT_JOB_KINDS) }));
       if (jobs.length > 0) {
         const ids = jobs.map((job) => job.id);
         const cancelled = await transaction.query<Row>(
           `UPDATE import_jobs SET status='cancelled',phase='cancelled',completed_at=NOW(),heartbeat_at=NULL,updated_at=NOW()
-           WHERE id=ANY($1::uuid[]) AND status IN ('pending_dispatch','queued','retrying') RETURNING ${selectColumns}`, [ids],
+           WHERE id=ANY($1::uuid[]) AND ${transitionSource('cancelPending')} RETURNING ${selectColumns}`, [ids],
         );
         for (const row of cancelled.rows) await this.insertEvent(transaction, decode(row), 'cancelled_by_admin', { reason: input.reason });
         await transaction.query(
@@ -596,7 +603,7 @@ export class ImportJobRepository {
     return this.database.withTransaction(async (transaction) => {
       const result = await transaction.query<Row>(
         `UPDATE import_jobs SET status='pending_dispatch',phase='recovered',queued_at=NULL,heartbeat_at=NULL,updated_at=NOW()
-         WHERE status IN ('queued','running','retrying')
+         WHERE ${transitionSource('recoverStale')}
            AND COALESCE(heartbeat_at,queued_at,updated_at) < NOW()-($1::integer*INTERVAL '1 minute')
          RETURNING ${selectColumns}`,
         [Math.max(15, Math.min(staleMinutes, 240))],

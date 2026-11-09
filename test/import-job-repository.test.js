@@ -306,3 +306,17 @@ test('ready transition and notification outbox share one transaction and stale c
     assert.equal(JSON.parse(finished.params[3]).exportReadyDetected, transitioned);
   }
 });
+
+test('claim and stale recovery retain atomic source-state and generation guards', async () => {
+  const statements = [];
+  const executor = { query: async sql => { statements.push(sql); return { rows: [], rowCount: 0 }; } };
+  const repository = new ImportJobRepository({ ...executor, withTransaction: async action => action(executor) });
+  await repository.claimForRun(persistedJob.id);
+  const claim = statements.find(sql => sql.includes("SET status='running'"));
+  assert.match(claim, /j.import_generation=u.import_generation/);
+  assert.match(claim, /j.status IN \('pending_dispatch','queued','running','retrying'\)/);
+  statements.length = 0;
+  await repository.recoverStaleJobs();
+  assert.match(statements[0], /status IN \('queued','running','retrying'\)/);
+  assert.match(statements[0], /COALESCE\(heartbeat_at,queued_at,updated_at\) </);
+});
