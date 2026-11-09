@@ -512,3 +512,20 @@ for (const provider of ['gmail', 'outlook']) {
     assert.equal(result.errorCode, 'IMPORT_CANCELLED');
   });
 }
+
+test('file import cancelled during parsing never stages or replaces receipts', async () => {
+  let cancelled = false;
+  const unexpected = async () => assert.fail('Cancelled export must not write receipts');
+  const service = new CsvImportUseCase({
+    validateCsvFormat: () => ({ valid: true }),
+    detectCsvFormat: () => 'uber',
+    parseCsvFile: async () => { cancelled = true; return { receipts: [{}], errors: [], totalReceipts: 1, totalAmount: 1 }; },
+  }, { stageProviderExport: unexpected, replaceStagedProviderExport: unexpected, replaceProviderExport: unexpected },
+  { findById: async () => ({ id: 'user' }) }, { setExportStatus: async () => true },
+  { invalidateAllUserCaches: async () => {} }, { assertLockOwned: async () => {} }, undefined, 2);
+  await assert.rejects(service.executeWithLock({ userId: 'user', provider: 'uber_eats', fileType: 'csv',
+    jobId: 'job', csvBuffer: Buffer.from('csv'), assertActive: async () => {
+      if (cancelled) throw new (require('../dist/core/errors').AppError)({ code: 'IMPORT_CANCELLED', message: 'Cancelled' });
+    },
+  }, { userId: 'user' }), error => error.code === 'IMPORT_CANCELLED');
+});

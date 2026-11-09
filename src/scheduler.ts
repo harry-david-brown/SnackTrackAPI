@@ -4,9 +4,25 @@ import logger from './config/logger';
 import { container } from './services/core/ServiceContainer';
 import { ImportPushNotificationService } from './services/notifications/ImportPushNotificationService';
 import { config } from './config/AppConfig';
+import { redisConfig, redisLockStore } from './config/redis';
+
+const initializeDeletionLocks = async (): Promise<void> => {
+  await redisConfig.initialize();
+  if (!redisLockStore.isEnabled() || redisLockStore.isAvailable()) return;
+  // An outage must not prevent the rest of this one-shot maintenance pass.
+  await new Promise<void>((resolve) => {
+    const finish = () => { clearTimeout(timeout); unsubscribe(); resolve(); };
+    const unsubscribe = redisLockStore.onStateChange(snapshot => {
+      if (snapshot.state === 'ready') finish();
+    });
+    const timeout = setTimeout(finish, 3_000);
+    if (redisLockStore.isAvailable()) finish();
+  });
+};
 
 const run = async (): Promise<void> => {
   try {
+    await initializeDeletionLocks();
     await container.accountDeletionRequestService.processPending();
     const expiredUploads = await container.importJobRepository.expireUploads();
     const deletedAccountObjects = await container.importObjectCleanupService.run();
@@ -38,6 +54,7 @@ const run = async (): Promise<void> => {
     });
   } finally {
     container.importObjectStorage.close();
+    await redisConfig.close();
     await container.postgres.close();
   }
 };

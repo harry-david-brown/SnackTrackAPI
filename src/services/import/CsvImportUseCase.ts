@@ -73,10 +73,9 @@ export class CsvImportUseCase {
 
   async executeWithLock(command: CsvImportCommand, lock: ImportLockHandle): Promise<CsvImportOperationResult> {
     await command.assertActive?.();
-    const assertWritable = async () => {
-      await command.assertActive?.();
-      await this.locks.assertLockOwned(lock);
-    };
+    // The transaction's accounting/generation fence rejects cancelled canonical work.
+    // Keep its lease callback free of additional database connections.
+    const assertWritable = () => this.locks.assertLockOwned(lock);
     const accounting = receiptImportAccounting(this.receiptPolicy, command.accountingJobId, 'export');
     if (command.jobId && accounting && command.jobId !== accounting.jobId)
       throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Staged export and accounting belong to different import operations' });
@@ -128,6 +127,7 @@ export class CsvImportUseCase {
       let persisted:ReceiptUpsertResult | void;
       if (command.jobId) {
         await this.receipts.stageProviderExport(command.jobId, parsed.receipts);
+        await command.assertActive?.();
         persisted=await this.receipts.replaceStagedProviderExport(command.jobId, command.userId, assertWritable,batch,accounting);
       } else {
         persisted=await this.receipts.replaceProviderExport(command.userId, parsed.receipts, assertWritable,batch,accounting);
