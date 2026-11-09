@@ -43,6 +43,7 @@ const mapUser = (value: unknown, includePassword = false): User => {
       : {}),
     emailVerified: databaseBoolean(row, 'email_verified'),
     sessionVersion: databaseNonNegativeInteger(row, 'session_version'),
+    deletionRequested: row.deletion_requested_at != null,
     timezone: databaseString(row, 'timezone'),
     createdAt: requiredTimestamp(row, 'created_at'),
   };
@@ -83,7 +84,7 @@ export class UserRepository {
 
   async findById(id: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, deletion_requested_at, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               created_at FROM users WHERE id = $1`,
       [id],
     );
@@ -107,7 +108,7 @@ export class UserRepository {
 
   async findByEmail(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, deletion_requested_at, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               created_at FROM users WHERE email = $1`,
       [email],
     );
@@ -116,7 +117,7 @@ export class UserRepository {
 
   async findByEmailWithPassword(email: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, password, session_version, email_verified,
+      `SELECT id, email, password, session_version, deletion_requested_at, email_verified,
               COALESCE(timezone, 'America/New_York') AS timezone, created_at
        FROM users WHERE email = $1`,
       [email],
@@ -216,7 +217,7 @@ export class UserRepository {
 
   async findByIdWithGmailTokens(userId: string): Promise<User | undefined> {
     const result = await this.postgres.query(
-      `SELECT id, email, session_version, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
+      `SELECT id, email, session_version, deletion_requested_at, email_verified, COALESCE(timezone, 'America/New_York') AS timezone,
               gmail_refresh_token, gmail_access_token, gmail_token_expiry, gmail_connected,
               gmail_email, gmail_scopes, gmail_connection_mode, created_at
        FROM users WHERE id = $1`,

@@ -18,15 +18,19 @@ export class SessionService {
         'REFRESH_TOKEN_INVALID',
       );
     }
+    if (user.deletionRequested) throw new AuthenticationError(
+      'Your account is being deleted. Deletion will continue even if you close the app.', 'ACCOUNT_DELETION_PENDING');
     await this.tokens.consumeRefreshToken(refreshToken);
     return this.tokens.generateTokens(user);
   }
 
-  async verifyAccessSession(payload: TokenPayload): Promise<void> {
+  async verifyAccessSession(payload: TokenPayload, allowPendingDeletion = false): Promise<void> {
     const user = await this.loadUser(payload.userId);
     if (!user || (payload.sessionVersion ?? 0) !== (user.sessionVersion ?? 0)) {
       throw new AuthenticationError('This session is no longer valid. Please sign in again.', 'ACCESS_TOKEN_INVALID');
     }
+    if (user.deletionRequested && !allowPendingDeletion) throw new AuthenticationError(
+      'Your account is being deleted. Deletion will continue even if you close the app.', 'ACCOUNT_DELETION_PENDING');
   }
 
   private async loadUser(userId: string) {

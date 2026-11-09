@@ -84,6 +84,7 @@ export class ImportJobProcessor {
       }
       operation = await this.jobs.claimForRun(queueJob.data.jobId);
       if (!operation) return;
+      await this.assertActive(operation.id);
       if (operation.kind === 'gmail_historical' && operation.trigger === 'user') {
         const resumeAt = await this.testScenarios.delayGmailImportIfEnabled(operation.id, operation.userId);
         if (resumeAt) {
@@ -96,7 +97,11 @@ export class ImportJobProcessor {
       const execution: ImportExecutionCheckpoint = {
         ...(accountReceipts ? { accountingJobId: operation.id } : {}),
         checkpoint: operation.checkpoint,
-        save: (checkpoint, phase, progress) => this.jobs.saveCheckpoint(operation!.id, checkpoint, phase, progress),
+        assertActive: () => this.assertActive(operation!.id),
+        save: async (checkpoint, phase, progress) => {
+          await this.assertActive(operation!.id);
+          await this.jobs.saveCheckpoint(operation!.id, checkpoint, phase, progress);
+        },
       };
       heartbeat = setInterval(() => void this.jobs.heartbeat(operation!.id).catch(() => undefined), 30_000);
       heartbeat.unref();
@@ -126,6 +131,7 @@ export class ImportJobProcessor {
           break;
         case 'export_file': result = await this.processExport(operation, lock); break;
       }
+      await this.assertActive(operation.id);
       await this.jobs.progress(operation.id, 'finalizing', 95);
       if (accountReceipts && this.receiptOutcomes) {
         const outcome = await this.receiptOutcomes.getImportOutcome(operation.userId, operation.id, () => ImportLockService.assertLockOwned(lock));
@@ -138,6 +144,9 @@ export class ImportJobProcessor {
     } catch (error) {
       if (error instanceof DelayedError) throw error;
       if (!operation) throw error;
+      // Cancellation is terminal even when a provider wrapper changed the thrown error code.
+      const current = await this.jobs.findById(operation.id);
+      if (!current || ['cancelled', 'superseded'].includes(current.status)) return;
       const code = error instanceof AppError ? error.code : 'IMPORT_WORKER_FAILED';
       const message = error instanceof AppError ? error.publicMessage : 'The import could not be completed.';
       if (code === 'LOCK_BACKEND_UNAVAILABLE' || code === 'LOCK_OWNERSHIP_LOST') {
@@ -162,6 +171,13 @@ export class ImportJobProcessor {
     } finally {
       if (heartbeat) clearInterval(heartbeat);
       await ImportLockService.releaseLock(lock);
+    }
+  }
+
+  private async assertActive(jobId: string): Promise<void> {
+    const current = await this.jobs.findById(jobId);
+    if (!current || current.status !== 'running') {
+      throw new AppError({ code: 'IMPORT_CANCELLED', message: 'Import is no longer active.' });
     }
   }
 
@@ -206,6 +222,7 @@ export class ImportJobProcessor {
     if (!operation.objectKey) throw new AppError({ code: 'UPLOAD_NOT_FOUND', message: 'Import object key is missing.' });
     if (!operation.exportProvider) throw new AppError({ code: 'UPLOAD_PROVIDER_REQUIRED', message: 'Import provider is missing.' });
     if (!operation.objectEtag || !operation.submittedContentLength) throw new AppError({ code: 'UPLOAD_INTEGRITY_FAILED', message: 'Submitted upload integrity metadata is missing.' });
+    await this.assertActive(operation.id);
     await this.jobs.progress(operation.id, 'downloading', 20);
     const maximumBytes = operation.originalFilename?.toLowerCase().endsWith('.zip') ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
     const temporary = await this.storage.downloadToTemporaryFile(operation.objectKey, {
@@ -214,14 +231,17 @@ export class ImportJobProcessor {
       maximumBytes,
     });
     try {
+      await this.assertActive(operation.id);
       const isZip = await this.zip.isZipFile(temporary.path);
       const expectedZip = operation.originalFilename?.toLowerCase().endsWith('.zip') ?? false;
       if (isZip !== expectedZip) throw new AppError({ code: 'UNSUPPORTED_UPLOAD_TYPE', message: 'The file contents do not match the selected file type.' });
       await this.jobs.progress(operation.id, isZip ? 'extracting' : 'parsing', 40);
       const extracted = isZip ? await this.zip.extractProviderCSVToFile(temporary.path, operation.exportProvider) : null;
       try {
+        await this.assertActive(operation.id);
         await this.jobs.progress(operation.id, 'importing', 70);
         return await this.csv.executeWithLock({ userId: operation.userId, provider: operation.exportProvider, csvPath: extracted?.path ?? temporary.path, fileType: isZip ? 'zip' : 'csv', jobId: operation.id,
+          assertActive: () => this.assertActive(operation.id),
           ...(this.receiptPolicy === 3 ? { accountingJobId: operation.id } : {}),
         }, lock) as unknown as Readonly<Record<string, unknown>>;
       } finally {

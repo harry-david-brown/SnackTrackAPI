@@ -132,7 +132,7 @@ export class GmailPushRepository implements GmailPushStatePort {
       await transaction.query(
         `INSERT INTO gmail_push_state(user_id)
          SELECT u.id FROM users u JOIN user_import_preferences p ON p.user_id=u.id
-         WHERE u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
+         WHERE u.deletion_requested_at IS NULL AND u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
            AND (p.ongoing_tracking_consent_state='granted' OR (EXISTS (
                SELECT 1 FROM user_export_provider_preferences export
                WHERE export.user_id=u.id AND export.status='requested'
@@ -144,7 +144,7 @@ export class GmailPushRepository implements GmailPushStatePort {
         `WITH due AS (
            SELECT s.user_id FROM gmail_push_state s
            JOIN users u ON u.id=s.user_id JOIN user_import_preferences p ON p.user_id=u.id
-           WHERE u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
+           WHERE u.deletion_requested_at IS NULL AND u.gmail_connected=TRUE AND u.gmail_connection_mode='offline' AND u.gmail_refresh_token IS NOT NULL
              AND (p.ongoing_tracking_consent_state='granted' OR (EXISTS (
                SELECT 1 FROM user_export_provider_preferences export
                WHERE export.user_id=u.id AND export.status='requested'

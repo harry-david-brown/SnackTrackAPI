@@ -63,6 +63,17 @@ const unsubscribeRedis = redisLockStore.onStateChange((snapshot) => {
 void redisConfig.initialize();
 void startLockDependentWorkers();
 dispatcher.start();
+// PostgreSQL owns pending deletion. Polling resumes after crashes and needs no live client.
+let deletionPass: Promise<void> | null = null;
+const processDeletions = (): void => {
+  if (deletionPass) return;
+  deletionPass = container.accountDeletionRequestService.processPending()
+    .catch((error: unknown) => { logger.error('Account deletion pass failed', { operation: 'account_deletion', error }); })
+    .finally(() => { deletionPass = null; });
+};
+const accountDeletionTimer = setInterval(processDeletions, 5_000);
+accountDeletionTimer.unref();
+processDeletions();
 const gmailPushDispatchTimer = setInterval(() => {
   void container.gmailPushDispatchService.dispatchDue(100).catch((error: unknown) =>
     logger.warn('Gmail push dispatch pass failed', {
@@ -82,10 +93,12 @@ const close = async (signal: string): Promise<void> => {
   if (closing) return;
   closing = true;
   clearInterval(gmailPushDispatchTimer);
+  clearInterval(accountDeletionTimer);
   unsubscribeRedis();
   logger.info('Import worker shutting down', { signal });
   await dispatcher.close();
   await Promise.all([mailboxWorker?.close(), exportWorker?.close(), notificationWorker.close()]);
+  await deletionPass;
   await publisher.close();
   await redisConfig.close();
   container.importObjectStorage.close();

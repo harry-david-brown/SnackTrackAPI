@@ -5,7 +5,7 @@ import { requestTimezone } from '../http/requestTimezone';
 import { requireObject, requireStringField } from '../http/validation/requestValues';
 import { asyncHandler } from '../middleware/errorHandler';
 import { validateEmail } from '../middleware/validation';
-import { AccountDeletionResult } from '../services/account/AccountDeletionService';
+import type { AccountDeletionAccepted } from '../services/account/AccountDeletionRequestService';
 import { CredentialAuthService } from '../services/auth/CredentialAuthService';
 import { AppleFirstSignInData, ProviderAuthService } from '../services/auth/ProviderAuthService';
 import { SessionService } from '../services/auth/SessionService';
@@ -13,7 +13,7 @@ import { MicrosoftLoginService } from '../services/auth/MicrosoftLoginService';
 import { getDefaultTimezone } from '../utils/timezone';
 
 export interface AuthAccountDeletionOperation {
-  deleteAccount(userId: string, refreshToken?: string): Promise<AccountDeletionResult>;
+  request(userId: string): Promise<AccountDeletionAccepted>;
 }
 
 export interface AuthRouterDependencies {
@@ -26,6 +26,7 @@ export interface AuthRouterDependencies {
   readonly sessions: Pick<SessionService, 'refresh' | 'revoke'>;
   readonly accountDeletion: AuthAccountDeletionOperation;
   readonly authenticate: RequestHandler;
+  readonly authenticateDeletion?: RequestHandler;
   readonly rateLimitRegistration: RequestHandler;
   readonly rateLimitMicrosoftAttempt: RequestHandler;
   readonly rateLimitMicrosoftEmail: RequestHandler;
@@ -175,11 +176,10 @@ export const createAuthRouter = (dependencies: AuthRouterDependencies): Router =
 
   router.delete(
     '/delete-account',
-    dependencies.authenticate,
+    dependencies.authenticateDeletion ?? dependencies.authenticate,
     asyncHandler(async (req, res) => {
       const userId = authenticatedUserId(req);
-      await dependencies.accountDeletion.deleteAccount(userId, optionalRefreshToken(req.body));
-      res.status(200).json({ success: true, message: 'Account deleted successfully' });
+      res.status(202).json(await dependencies.accountDeletion.request(userId));
     }),
   );
 

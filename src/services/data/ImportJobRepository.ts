@@ -157,6 +157,9 @@ export class ImportJobRepository {
   async create(input: CreateImportJobInput): Promise<ImportJob> {
     return this.database.withTransaction(async (transaction) => {
       await transaction.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [input.userId]);
+      const account = await transaction.query<Row>('SELECT deletion_requested_at FROM users WHERE id=$1 FOR SHARE', [input.userId]);
+      if (!account.rows[0]) throw new NotFoundError('User', input.userId);
+      if (account.rows[0].deletion_requested_at) throw new ConflictError('ACCOUNT_DELETION_PENDING', 'Your account is being deleted. New imports cannot be started.');
       if (input.idempotencyKey) {
         const existing = await transaction.query<Row>(
           `SELECT ${selectColumns} FROM import_jobs WHERE user_id=$1 AND idempotency_key=$2`,
@@ -329,7 +332,7 @@ export class ImportJobRepository {
         `UPDATE import_jobs j SET status='running',phase='starting',progress=1,attempts=attempts+1,
            error_code=NULL,error_message=NULL,completed_at=NULL,
            started_at=COALESCE(started_at,NOW()),heartbeat_at=NOW(),updated_at=NOW()
-         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation
+         FROM users u WHERE j.id=$1 AND j.user_id=u.id AND j.import_generation=u.import_generation AND u.deletion_requested_at IS NULL
            AND j.status IN ('pending_dispatch','queued','running','retrying') RETURNING ${selectColumns.split(',').map((c) => `j.${c.trim()}`).join(',')}`,
         [jobId],
       );

@@ -128,6 +128,7 @@ export class AuthenticationError extends AppError {
       | 'AUTHENTICATION_REQUIRED'
       | 'INVALID_CREDENTIALS'
       | 'ACCESS_TOKEN_EXPIRED'
+      | 'ACCOUNT_DELETION_PENDING'
       | 'ACCESS_TOKEN_INVALID'
       | 'REFRESH_TOKEN_EXPIRED'
       | 'REFRESH_TOKEN_INVALID'

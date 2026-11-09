@@ -94,6 +94,8 @@ export type ImportOperation = Omit<ImportJob,
 export interface ImportExecutionCheckpoint {
   /** Internal durable accounting identity, separate from provider cursor checkpoints. */
   readonly accountingJobId?: string;
+  /** Cooperative cancellation at external-work and write boundaries. */
+  assertActive?(): Promise<void>;
   readonly checkpoint: Readonly<Record<string, unknown>>;
   save(checkpoint: Readonly<Record<string, unknown>>, phase: string, progress: number): Promise<void>;
 }

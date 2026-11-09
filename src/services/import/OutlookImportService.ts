@@ -77,6 +77,7 @@ export class OutlookImportService {
     let state = restoreMailboxCheckpoint(execution, 'microsoft');
     const syncRunId = await this.syncRuns.startSyncRun(user.id, trigger, execution?.accountingJobId);
     try {
+      await execution?.assertActive?.();
       if (!state.done) {
         const acquired = await this.acquisition.acquire(user.id, trigger, state.cursor ?? undefined);
         for await (const page of acquired.pages) {
@@ -91,7 +92,9 @@ export class OutlookImportService {
           if (state.counters.decodedBytesExamined + (page.decodedBytes ?? 0) > byteBudget) {
             throw new AppError({ code: 'MAILBOX_IMPORT_LIMIT_REACHED', message: 'Outlook import exceeded its decoded byte budget', publicMessage: 'This mailbox is too large to import safely in one operation.' });
           }
+          await execution?.assertActive?.();
           const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
+          await execution?.assertActive?.();
           const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
           const deduplicated = deduplicateReceipts(eligible);
           const persisted = await this.persistence.persist(user.id, deduplicated.receipts, lock, accounting);
@@ -118,6 +121,7 @@ export class OutlookImportService {
           await saveMailboxCheckpoint(execution, state);
         }
       }
+      await execution?.assertActive?.();
       const receiptOutcome = accounting ? await this.persistence.getOutcome(user.id, lock, accounting) : undefined;
       if (receiptOutcome && state.counters.deduplicatedReceipts > 0 && receiptOutcome.sourceDocuments === 0)
         throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Saved mailbox progress has no canonical accounting evidence', publicMessage: 'This saved import cannot be resumed safely. Your existing history is preserved; start a new import.' });

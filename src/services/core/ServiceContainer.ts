@@ -80,6 +80,8 @@ import logger from '../../config/logger';
 import { refreshTokenStore, authAbuseBudgetStore } from '../../config/redis';
 import appleSignin from 'apple-signin-auth';
 import { ZipExtractor } from '../import/ZipExtractor';
+import { AccountDeletionRequestRepository } from '../data/AccountDeletionRequestRepository';
+import { AccountDeletionRequestService } from '../account/AccountDeletionRequestService';
 import { ImportLockService } from '../import/ImportLockService';
 import { ImportStatusService } from '../import/ImportStatusService';
 import { ImportPreferencesService } from '../import/ImportPreferencesService';
@@ -172,6 +174,7 @@ export class ServiceContainer {
   readonly receiptClearService: ReceiptClearService;
   readonly listReceiptsService: ListReceiptsService;
   readonly accountDeletionService: AccountDeletionService;
+  readonly accountDeletionRequestService: AccountDeletionRequestService;
   readonly wrappedAnalyticsService: WrappedAnalyticsService;
   readonly wrappedAnalyticsQueryRepository: WrappedAnalyticsQueryRepository;
   readonly otpService: OtpService;
@@ -536,6 +539,9 @@ export class ServiceContainer {
       logger,
       this.adminRepository,
       this.gmailWatchService,
+    );
+    this.accountDeletionRequestService = new AccountDeletionRequestService(
+      new AccountDeletionRequestRepository(this.postgres), this.accountDeletionService, logger,
     );
     const marketHistoryRepository = new MarketHistoryRepository(this.postgres);
     this.refreshMarketHistoryService = new RefreshMarketHistoryService(

@@ -7,6 +7,7 @@ import { config } from './config/AppConfig';
 
 const run = async (): Promise<void> => {
   try {
+    await container.accountDeletionRequestService.processPending();
     const expiredUploads = await container.importJobRepository.expireUploads();
     const deletedAccountObjects = await container.importObjectCleanupService.run();
     const cleanupCandidates = await container.importJobRepository.listObjectCleanupCandidates();

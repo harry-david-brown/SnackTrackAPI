@@ -232,7 +232,7 @@ export class ImportPreferencesQueryRepository {
       `SELECT preferences.user_id
        FROM user_import_preferences preferences
        JOIN users ON users.id = preferences.user_id
-       WHERE preferences.ongoing_tracking_consent_state = 'granted'
+       WHERE users.deletion_requested_at IS NULL AND preferences.ongoing_tracking_consent_state = 'granted'
          AND (
            preferences.gmail_baseline_completed_at IS NOT NULL
            OR EXISTS (
@@ -283,6 +283,7 @@ export class ImportPreferencesQueryRepository {
       `SELECT preferences.user_id
        FROM user_import_preferences preferences
        WHERE preferences.ongoing_tracking_consent_state='granted'
+         AND EXISTS (SELECT 1 FROM users u WHERE u.id=preferences.user_id AND u.deletion_requested_at IS NULL)
          AND (
            EXISTS (SELECT 1 FROM mailbox_import_states state
              WHERE state.user_id=preferences.user_id AND state.provider='microsoft'

@@ -135,6 +135,7 @@ export class GmailImportService {
     let state = restoreMailboxCheckpoint(execution, 'gmail');
     const syncRunId = await this.lifecycle.start(user.id, trigger, execution?.accountingJobId);
     try {
+      await execution?.assertActive?.();
       if (!state.done) {
         const acquired = await this.acquisition.acquire(user, trigger, state.cursor ?? undefined);
         const pages = prefetchMailboxPages(acquired.pages, (page) => {
@@ -154,7 +155,9 @@ export class GmailImportService {
         for await (const page of pages) {
           const batchStartedAt = Date.now();
           const fetchWaitMs = batchStartedAt - waitingSince;
+          await execution?.assertActive?.();
           const extracted = await this.extraction.extract(page.messages, user.timezone, { userId: user.id, trigger });
+          await execution?.assertActive?.();
           const eligible = filterReceiptsAfterExportCutoffs(extracted.supportedReceipts, acquired.exportCutoffs);
           const deduplicated = deduplicateReceipts(eligible);
           const persistenceStartedAt = Date.now();
@@ -192,6 +195,7 @@ export class GmailImportService {
           waitingSince = Date.now();
         }
       }
+      await execution?.assertActive?.();
       const receiptOutcome = accounting ? await this.persistence.getOutcome(user.id, lock, accounting) : undefined;
       if (receiptOutcome && state.counters.deduplicatedReceipts > 0 && receiptOutcome.sourceDocuments === 0)
         throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Saved mailbox progress has no canonical accounting evidence', publicMessage: 'This saved import cannot be resumed safely. Your existing history is preserved; start a new import.' });

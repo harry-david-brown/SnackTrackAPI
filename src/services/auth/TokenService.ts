@@ -60,6 +60,8 @@ export class TokenService {
   ) {}
 
   generateTokens(user: User): AuthTokens {
+    if (user.deletionRequested) throw new AuthenticationError(
+      'Your account is being deleted. Deletion will continue even if you close the app.', 'ACCOUNT_DELETION_PENDING');
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'access', sessionVersion: user.sessionVersion ?? 0 } satisfies TokenPayload,
       this.options.accessSecret,

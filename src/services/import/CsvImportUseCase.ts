@@ -20,6 +20,7 @@ export type CsvImportCommand = {
   fileType: 'csv' | 'zip';
   jobId?: string;
   accountingJobId?: string;
+  assertActive?: () => Promise<void>;
 } & ({ csvBuffer: Buffer; csvPath?: never } | { csvPath: string; csvBuffer?: never });
 
 export interface CsvImportOperationResult {
@@ -71,6 +72,11 @@ export class CsvImportUseCase {
   }
 
   async executeWithLock(command: CsvImportCommand, lock: ImportLockHandle): Promise<CsvImportOperationResult> {
+    await command.assertActive?.();
+    const assertWritable = async () => {
+      await command.assertActive?.();
+      await this.locks.assertLockOwned(lock);
+    };
     const accounting = receiptImportAccounting(this.receiptPolicy, command.accountingJobId, 'export');
     if (command.jobId && accounting && command.jobId !== accounting.jobId)
       throw new AppError({ code: 'IMPORT_CHECKPOINT_INVALID', message: 'Staged export and accounting belong to different import operations' });
@@ -117,16 +123,17 @@ export class CsvImportUseCase {
         });
       }
 
+      await command.assertActive?.();
       const batch={id:command.jobId ?? randomUUID(),rejected:parsed.rejectedRecords ?? parsed.errors.length};
       let persisted:ReceiptUpsertResult | void;
       if (command.jobId) {
         await this.receipts.stageProviderExport(command.jobId, parsed.receipts);
-        persisted=await this.receipts.replaceStagedProviderExport(command.jobId, command.userId, () => this.locks.assertLockOwned(lock),batch,accounting);
+        persisted=await this.receipts.replaceStagedProviderExport(command.jobId, command.userId, assertWritable,batch,accounting);
       } else {
-        persisted=await this.receipts.replaceProviderExport(command.userId, parsed.receipts, () => this.locks.assertLockOwned(lock),batch,accounting);
+        persisted=await this.receipts.replaceProviderExport(command.userId, parsed.receipts, assertWritable,batch,accounting);
       }
       const receiptOutcome = accounting && this.outcomes
-        ? await this.outcomes.getImportOutcome(command.userId, accounting.jobId, () => this.locks.assertLockOwned(lock), accounting.scope)
+        ? await this.outcomes.getImportOutcome(command.userId, accounting.jobId, assertWritable, accounting.scope)
         : undefined;
       const result = {
         ...(persisted ? {newOrders:persisted.newOrders,updatedOrders:persisted.updatedOrders,unresolvedOrders:persisted.unresolvedOrders ?? 0} : {}),

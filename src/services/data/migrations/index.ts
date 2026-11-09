@@ -37,6 +37,8 @@ import { exportReadyAlertsMigration } from './033_export_ready_alerts';
 import { authSecurityMigration } from './034_auth_security';
 import { importObjectCleanupMigration } from './035_import_object_cleanup';
 
+import { accountDeletionRequestsMigration } from './037_account_deletion_requests';
+
 export const migrations: readonly Migration[] = [
   coreSchemaMigration,
   authAndProviderIdentityMigration,
@@ -74,4 +76,5 @@ export const migrations: readonly Migration[] = [
   authSecurityMigration,
   importObjectCleanupMigration,
   automaticUpdatesOfferMigration,
+  accountDeletionRequestsMigration,
 ];

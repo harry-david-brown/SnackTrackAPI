@@ -70,8 +70,9 @@ export class AccountDeletionService {
     userId: string,
     refreshToken?: string,
     adminContext?: AccountDeletionContext,
+    lockWaitMs = 300000,
   ): Promise<AccountDeletionResult> {
-    const lockHandle = await this.accountLock.acquireLockWithWait(userId, 300000);
+    const lockHandle = await this.accountLock.acquireLockWithWait(userId, lockWaitMs);
     if (!lockHandle) {
       throw new ConflictError(
         'IMPORT_IN_PROGRESS',
