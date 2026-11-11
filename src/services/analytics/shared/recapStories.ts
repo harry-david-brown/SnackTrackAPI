@@ -9,7 +9,31 @@ import {
 } from './recapScoring';
 import { canonicalBasketKey, normalizeItem } from '../dashboard/normalization';
 import { merchantIdentity } from '../../receipt/ReceiptObservationMatching';
-import { getLocalDateKey } from '../../../utils/timezone';
+import { isSingleItemOrder, singleItemDisplayName } from './singleItemOrders';
+import { isLateNightHour } from './timeWindows';
+import { overnightMinute, currencyOf, spendingByCurrency } from './receiptMetrics';
+import { usesOrderEventMetrics } from './orderMetrics';
+import { getLocalDateKey, getLocalMinuteOfDay } from '../../../utils/timezone';
+
+export interface RecapDayOrder {
+  id: string;
+  restaurant: string;
+  /** Local placement time (HH:mm); absent for date-only evidence. */
+  localTime?: string;
+}
+
+export interface RecapEvidenceOrder extends RecapDayOrder {
+  date?: string;
+  amount?: number;
+  approximate?: boolean;
+  items?: { name: string; quantity: number }[];
+}
+
+export interface RecapEvidence {
+  kind: 'receipt' | 'items' | 'late-night' | 'spending' | 'single-items' | 'streak';
+  orders: RecapEvidenceOrder[];
+  total: number;
+}
 
 export interface RecapStory {
   id: string;
@@ -26,6 +50,8 @@ export interface RecapStory {
   detail: string;
   punchline: string;
   approximate?: boolean;
+  orders?: RecapDayOrder[];
+  evidence?: RecapEvidence;
   supportingMoney?: { amount: number; approximate: boolean; label: string };
   startDate?: string;
   endDate?: string;
@@ -173,6 +199,28 @@ export function buildRecapStories(
         detail: 'In your tracked history',
         punchline: 'Your doorbell worked overtime.',
         startDate: bestDay[0],
+        orders: bestDay[1]
+          .map(({ r }) => {
+            const localTime =
+              hasOrderTimeEvidence(r) && r.orderDate
+                ? new Intl.DateTimeFormat('en-GB', {
+                    timeZone: r.resolution?.timestamp?.timezone ?? r.timezone ?? timezone,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hourCycle: 'h23',
+                  }).format(r.orderDate)
+                : undefined;
+            return {
+              id: r.id,
+              restaurant: r.restaurantName?.trim() || 'Unknown restaurant',
+              localTime,
+            };
+          })
+          .sort(
+            (a, b) =>
+              (a.localTime ?? '99:99').localeCompare(b.localTime ?? '99:99') ||
+              a.id.localeCompare(b.id),
+          ),
         protected: true,
       },
       {
@@ -217,7 +265,9 @@ export function buildRecapStories(
   const baskets = groups(itemized, (r) =>
     canonicalBasketKey(
       `${r.r.receiptType}:${r.restaurant}`,
-      r.r.items.map(item => normalizeItem(item, r.r)).filter((i): i is NonNullable<typeof i> => i !== null),
+      r.r.items
+        .map((item) => normalizeItem(item, r.r))
+        .filter((i): i is NonNullable<typeof i> => i !== null),
     ),
   );
   const basket = baskets[0];
@@ -875,6 +925,108 @@ export function buildRecapStories(
     dayGroups.length,
     'delivery dates in your history',
   );
+  // Supporting records come from the exact selected cohorts, never a second client query.
+  const eventTimezone = (r: R) => r.r.resolution?.timestamp?.timezone ?? r.r.timezone ?? timezone;
+  const evidenceOrder = (r: R): RecapEvidenceOrder => ({
+    id: r.r.id,
+    restaurant: r.r.restaurantName?.trim() || 'Unknown restaurant',
+    date: r.day,
+    localTime:
+      hasOrderTimeEvidence(r.r) && r.r.orderDate
+        ? new Intl.DateTimeFormat('en-GB', {
+            timeZone: eventTimezone(r),
+            hour: '2-digit',
+            minute: '2-digit',
+            hourCycle: 'h23',
+          }).format(r.r.orderDate)
+        : undefined,
+    ...(r.amount !== null ? { amount: money(r.amount), approximate: r.approximate } : {}),
+    items: r.r.items
+      .filter(
+        (i) =>
+          i.name.trim() &&
+          i.name.toLowerCase() !== 'unknown' &&
+          i.quantity > 0 &&
+          i.evidence?.method !== 'preserved_ambiguous',
+      )
+      .map((i) => ({ name: singleItemDisplayName(r.r, i), quantity: i.quantity })),
+  });
+  const minute = (r: R) =>
+    r.r.orderDate ? (getLocalMinuteOfDay(r.r.orderDate, eventTimezone(r)) ?? -1) : -1;
+  const byDate = (a: R, b: R) =>
+    (a.day ?? '').localeCompare(b.day ?? '') ||
+    minute(a) - minute(b) ||
+    a.r.id.localeCompare(b.r.id);
+  const chronological = [...dated].sort(byDate);
+  const nights = timed
+    .filter((r) => isLateNightHour(Math.floor(minute(r) / 60)))
+    .sort((a, b) => overnightMinute(minute(b)) - overnightMinute(minute(a)) || byDate(b, a));
+  const primaryCurrency = spendingByCurrency(unique).primary;
+  const singles = deliveries
+    .filter(
+      (r) =>
+        currencyOf(r.r) === primaryCurrency &&
+        isSingleItemOrder(r.r, usesOrderEventMetrics(unique)),
+    )
+    .sort((a, b) => byDate(b, a));
+  for (const story of stories) {
+    let cohort: R[] = [];
+    let kind: RecapEvidence['kind'] = 'receipt';
+    let total = 0;
+    switch (story.id) {
+      case 'most-expensive-order':
+        cohort = bestOrder ? [bestOrder] : [];
+        break;
+      case 'history-first':
+        cohort = chronological.slice(0, 1);
+        break;
+      case 'history-latest':
+        cohort = chronological.slice(-1);
+        break;
+      case 'repeated-basket':
+        cohort = basket ? basket[1].slice(0, 1) : [];
+        kind = 'items';
+        break;
+      case 'late-night-orders':
+      case 'night-owl':
+        cohort = nights.slice(0, 3);
+        total = nights.length;
+        kind = 'late-night';
+        break;
+      case 'spending-burst':
+        cohort = [...(bestWeek?.rs ?? [])]
+          .filter((r) => r.amount !== null)
+          .sort((a, b) => b.amount! - a.amount! || byDate(a, b))
+          .slice(0, 3);
+        total = bestWeek?.rs.length ?? 0;
+        kind = 'spending';
+        break;
+      case 'single-item-orders':
+        cohort = singles.slice(0, 3);
+        total = singles.length;
+        kind = 'single-items';
+        break;
+      case 'longest-streak': {
+        const days = dayGroups
+          .filter(([day]) => day >= story.startDate! && day <= story.endDate!)
+          .sort(([a], [b]) => a.localeCompare(b));
+        // Keep both ends visible for long streaks, with an explicit omitted-days label.
+        const shown = days.length > 7 ? [...days.slice(0, 3), ...days.slice(-3)] : days;
+        cohort = shown.map(([, rs]) => [...rs].sort(byDate)[0]);
+        total = days.length;
+        kind = 'streak';
+        break;
+      }
+    }
+    if (!cohort.length) continue;
+    story.evidence = { kind, orders: cohort.map(evidenceOrder), total: total || cohort.length };
+    if (story.id === 'repeated-basket') story.detail = cohort[0].r.restaurantName ?? '';
+    if (story.id === 'history-first' || story.id === 'history-latest') {
+      story.value = cohort[0].day!;
+      story.detail = '';
+      story.punchline = story.id === 'history-first' ? 'The first chapter.' : 'The latest chapter.';
+    }
+  }
   return {
     version: RECAP_POLICY_VERSION,
     currency,

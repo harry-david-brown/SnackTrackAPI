@@ -1,3 +1,4 @@
+import { isSingleItemOrder, singleItemDisplayName } from './shared/singleItemOrders';
 import { calculateHistoricalInvestment, type InvestmentContext } from './shared/historicalInvestment';
 import { classifyItemPersonality } from './dashboard/itemPersonalities';
 import { normalizeRestaurantName as normalizeRestaurant } from './dashboard/normalization';
@@ -71,26 +72,6 @@ export interface WrappedAnalyticsQueryPort {
 export interface WrappedAnalyticsLogPort {
   warn(message: string, context: Readonly<Record<string, unknown>>): void;
 }
-
-const COMPOSITE_MENU_ITEM_PATTERN =
-  /\b(?:meal|combo|bundle|box|platter|feast|family\s+pack|party\s+pack|variety\s+pack)\b/i;
-
-const isCompositeMenuItem = (item: ReceiptForAnalytics['items'][number]): boolean =>
-  item.evidence?.components.some((component) => component.quantity > 0) === true ||
-  COMPOSITE_MENU_ITEM_PATTERN.test(item.name);
-
-const GENERIC_PIZZA_SIZE_PATTERN = /^(?:small|medium|large|extra\s+large|x-?large)$/i;
-
-const singleItemDisplayName = (
-  receipt: ReceiptForAnalytics,
-  item: ReceiptForAnalytics['items'][number],
-): string => {
-  const name = item.name.trim();
-  if (GENERIC_PIZZA_SIZE_PATTERN.test(name) && /\bpizza\b/i.test(receipt.restaurantName ?? '')) {
-    return `${name} pizza`;
-  }
-  return name;
-};
 
 /** Import/row order must not choose a different merchant when records tie. */
 const compareReceiptTie = (left: ReceiptForAnalytics, right: ReceiptForAnalytics): number => {
@@ -537,25 +518,8 @@ export class WrappedAnalyticsCalculator {
   private async calculateSingleItemOrders(
     receipts: ReceiptForAnalytics[],
   ): Promise<SingleItemOrders | undefined> {
-    const singleOrders = receipts.filter((r) => {
-      const itemCount = r.items.reduce((sum, item) => sum + item.quantity, 0);
-      // Exclude receipts with any "Unknown" items (case-insensitive)
-      const hasUnknownItems = r.items.some(
-        (item) => item.name.toLowerCase() === 'unknown' || item.name.trim() === '' || !item.name,
-      );
-      const hasCompositeItem = r.items.some(isCompositeMenuItem);
-      const amount = wrappedNetAmount(r);
-      return (
-        (!usesOrderEventMetrics(receipts) ||
-          normalizeRestaurant(r.restaurantName ?? undefined)?.merchantClass === 'restaurant') &&
-        r.items.length > 0 &&
-        itemCount === 1 &&
-        amount !== null &&
-        amount < 20 &&
-        !hasUnknownItems &&
-        !hasCompositeItem
-      );
-    });
+    const eventMetrics = usesOrderEventMetrics(receipts);
+    const singleOrders = receipts.filter(r => isSingleItemOrder(r, eventMetrics));
 
     if (singleOrders.length === 0) return undefined;
 

@@ -58,7 +58,7 @@ test('same records have different surprise and habit scores for different histor
 });
 test('recap spending uses canonical net costs and counts each order once', async () => {
   const receipts = analyticsReceipts(await decemberCanonicalOrders());
-  const source = structuredClone(receipts);
+  const source = globalThis.structuredClone(receipts);
   const canonical = await new WrappedAnalyticsCalculator().calculate(receipts, 'America/Toronto');
   const recap = buildRecapStories(
     [...receipts, receipts[0]],
@@ -199,4 +199,88 @@ test('escalation requires declared comparable coverage and respects gaps', () =>
   assert.equal(run([]).stories.some(s => s.id.startsWith('ordering-escalation')), false);
   assert.equal(run([{ provider: 'uber_eats', start: '2024-01-01', end: '2024-04-30' }]).stories.some(s => s.id === 'ordering-escalation-2024-04'), true);
   assert.equal(run([{ provider: 'uber_eats', start: '2024-01-01', end: '2024-02-01' }, { provider: 'uber_eats', start: '2024-03-01', end: '2024-04-30' }]).stories.some(s => s.id.startsWith('ordering-escalation')), false);
+});
+
+test('busy-day orders match the counted local day, deduplicate and preserve time evidence', () => {
+  const early = order('early', {
+    restaurantName: 'Breakfast',
+    orderDate: new Date('2023-12-10T14:12:00Z'),
+  });
+  early.resolution.timestamp = { role: 'placed', precision: 'minute', timezone: 'America/Toronto' };
+  const late = order('late', {
+    restaurantName: 'Dinner',
+    orderDate: new Date('2023-12-11T03:16:00Z'),
+  });
+  late.resolution.timestamp = { role: 'placed', precision: 'minute', timezone: 'America/Toronto' };
+  late.resolution.orderOutcome.refundStatus = 'full';
+  const unknown = order('unknown', { restaurantName: null });
+  const canceled = order('canceled');
+  canceled.resolution.orderOutcome.fulfillment = 'canceled';
+  const nextDay = order('next', { orderDate: new Date('2023-12-11T15:00:00Z') });
+  const story = build([late, unknown, early, early, canceled, nextDay]).stories.find(
+    (s) => s.id === 'most-deliveries-day',
+  );
+  assert.equal(story.startDate, '2023-12-10');
+  assert.equal(story.value, 3);
+  assert.deepEqual(story.orders, [
+    { id: 'early', restaurant: 'Breakfast', localTime: '09:12' },
+    { id: 'late', restaurant: 'Dinner', localTime: '22:16' },
+    { id: 'unknown', restaurant: 'Unknown restaurant', localTime: undefined },
+  ]);
+});
+
+test('recap supporting receipts use real cohorts, local chronology, and bounded streaks', () => {
+  const rs = Array.from({ length: 10 }, (_, i) => {
+    const r = order(`day-${i}`, { restaurantName: 'McDonald’s', orderDate: new Date(`2023-12-${String(i + 1).padStart(2, '0')}T18:00:00Z`), amountSpent: 12 });
+    r.resolution.timestamp = { role: 'placed', precision: 'minute', timezone: 'America/Toronto' };
+    r.resolution.orderOutcome.netAmount = 12;
+    return r;
+  });
+  const biggest = order('biggest', { amount: 80, orderDate: new Date('2023-12-04T19:00:00Z') });
+  const stories = build([...rs, biggest]).stories;
+  const big = stories.find(s => s.id === 'most-expensive-order');
+  assert.equal(big.evidence.orders[0].id, 'biggest');
+  assert.equal(big.evidence.orders[0].amount, big.value);
+  assert.equal(big.evidence.orders[0].items[0].name, 'Burger');
+  const week = stories.find(s => s.id === 'spending-burst');
+  assert.equal(week.evidence.orders.length, 3);
+  assert.equal(week.evidence.orders[0].id, 'biggest');
+  assert.ok(week.evidence.orders.every(o => o.date >= week.startDate && o.date <= week.endDate));
+  const streak = stories.find(s => s.id === 'longest-streak');
+  assert.equal(streak.evidence.total, 10);
+  assert.equal(streak.evidence.orders.length, 6);
+  assert.equal(streak.evidence.orders[0].date, '2023-12-01');
+  assert.equal(streak.evidence.orders[5].date, '2023-12-10');
+  assert.equal(stories.find(s => s.id === 'history-first').evidence.orders[0].id, 'day-0');
+  assert.equal(stories.find(s => s.id === 'history-latest').evidence.orders[0].id, 'day-9');
+  assert.equal(stories.find(s => s.id === 'repeated-basket').evidence.kind, 'items');
+});
+
+test('late-night examples rank across midnight and exclude dates without time evidence', () => {
+  const rs = ['23:00', '03:42', '01:16'].map((time, i) => {
+    const r = order(`night-${i}`, { orderDate: new Date(`2023-12-10T${time}:00Z`) });
+    r.resolution.timestamp = { role: 'placed', precision: 'minute', timezone: 'UTC' };
+    return r;
+  });
+  const data = buildRecapStories([...rs, order('date-only')], 'UTC', 'CAD', rates, {
+    ...legacy, shame: { lateNightOrders: { count: 3 } }, flex: { nightOwl: { count: 3, percentage: 100 } },
+  });
+  for (const id of ['late-night-orders', 'night-owl']) {
+    const evidence = data.stories.find(s => s.id === id).evidence;
+    assert.deepEqual(evidence.orders.map(o => o.id), ['night-1', 'night-2', 'night-0']);
+    assert.equal(evidence.total, 3);
+  }
+});
+
+test('single-item examples follow the priced restaurant cohort and exclude combos', async () => {
+  const solo = order('solo', { amount: 8, restaurantName: 'McDonald’s', items: [{ name: 'McFlurry', quantity: 1, price: 8 }] });
+  const combo = order('combo', { amount: 12, restaurantName: 'McDonald’s', items: [{ name: 'Burger combo', quantity: 1, price: 12 }] });
+  const expensive = order('expensive', { amount: 30, restaurantName: 'McDonald’s', items: [{ name: 'Burger', quantity: 1, price: 30 }] });
+  const receipts = [solo, combo, expensive];
+  const canonical = await new WrappedAnalyticsCalculator().calculate(receipts, 'America/Toronto');
+  const recap = buildRecapStories(receipts, 'America/Toronto', 'USD', rates, canonical);
+  const story = recap.stories.find(s => s.id === 'single-item-orders');
+  assert.equal(story.value, 1);
+  assert.deepEqual(story.evidence.orders.map(o => o.id), ['solo']);
+  assert.equal(story.evidence.total, story.value);
 });

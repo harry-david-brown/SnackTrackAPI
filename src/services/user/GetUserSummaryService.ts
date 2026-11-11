@@ -67,7 +67,7 @@ export class GetUserSummaryService {
     const market = input.includeWrapped ? await this.market?.context(new Date()) ?? investmentContext('fixed', null, new Date()) : undefined;
     const rates = input.includeWrapped || input.spendCurrency ? await this.recapRates?.snapshot() : undefined;
     const cacheKey = input.includeWrapped
-      ? `${scope}-wrapped-v17-${timezone}-${input.displayCurrency ?? 'CAD'}-${rates?.id ?? 'unavailable'}-${market?.cacheToken}`
+      ? `${scope}-wrapped-v19-${timezone}-${input.displayCurrency ?? 'CAD'}-${rates?.id ?? 'unavailable'}-${market?.cacheToken}`
       : `${scope}-v11-${timezone}`;
     const projectionKey = `${cacheKey}-${input.spendCurrency ?? 'original'}-${input.spendCurrency ? rates?.id ?? 'unavailable' : ''}`;
     const cached = await this.cache.getUserSummary(projectionKey);
