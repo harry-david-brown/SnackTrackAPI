@@ -46,6 +46,16 @@ function order(id, changes = {}) {
 }
 const build = (rs, currency = 'CAD', snapshot = rates) =>
   buildRecapStories(rs, 'America/Toronto', currency, snapshot, legacy);
+test('sparse recap labels distinguish one order from multiple orders', () => {
+  for (const count of [1, 2]) {
+    const { stories } = build(Array.from({ length: count }, (_, i) => order(String(i))));
+    const label = id => stories.find(story => story.id === id).label;
+    const noun = count === 1 ? 'order' : 'orders';
+    assert.equal(label('history-total'), `tracked ${noun}`);
+    assert.equal(label('history-provider'), `${count} tracked ${noun}`);
+    assert.equal(label('history-restaurants'), 'restaurant in your delivery history');
+  }
+});
 test('same records have different surprise and habit scores for different histories', () => {
   const score = (input) => scoreRecapStory({ magnitude: 50, ...input }).score;
   assert.ok(

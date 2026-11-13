@@ -520,7 +520,7 @@ export function buildRecapStories(
       id: 'late-night-orders',
       count: legacy.shame.lateNightOrders?.count,
       title: 'AFTER HOURS.',
-      label: 'late-night deliveries',
+      label: legacy.shame.lateNightOrders?.count === 1 ? 'late-night delivery' : 'late-night deliveries',
       detail: 'Between 10 PM and 4 AM',
       family: 'late-night',
     },
@@ -528,7 +528,7 @@ export function buildRecapStories(
       id: 'peak-hunger-hour',
       count: legacy.patterns.peakHungerHour?.orderCount,
       title: 'RIGHT ON TIME.',
-      label: 'orders at your favorite hour',
+      label: legacy.patterns.peakHungerHour?.orderCount === 1 ? 'order at your favorite hour' : 'orders at your favorite hour',
       detail: legacy.patterns.peakHungerHour?.hourDisplay ?? '',
       family: 'hour',
     },
@@ -650,7 +650,7 @@ export function buildRecapStories(
         title: weekendHeavy ? 'WEEKEND PLANS.' : 'THE WEEKDAY ROUTINE.',
         value: n,
         format: 'number',
-        label: weekendHeavy ? 'weekend deliveries' : 'weekday deliveries',
+        label: `${weekendHeavy ? 'weekend' : 'weekday'} ${n === 1 ? 'delivery' : 'deliveries'}`,
         detail: 'Your busier side of the week, per calendar day',
         punchline: 'Your week has a flavor.',
       },
@@ -665,17 +665,19 @@ export function buildRecapStories(
     );
   }
   const waits = legacy.patterns.deliveryWaits;
-  if (waits)
+  if (waits) {
+    const hours = Math.round((waits.totalMinutes / 60) * 10) / 10;
+    const averageMinutes = Math.round(waits.averageMinutes);
     add(
       {
         id: 'delivery-waits',
         category: 'perspective',
         family: 'delivery-time',
         title: 'ON THE WAY.',
-        value: Math.round((waits.totalMinutes / 60) * 10) / 10,
+        value: hours,
         format: 'number',
-        label: 'combined delivery-window hours',
-        detail: `${waits.totalOrders} deliveries · ${Math.round(waits.averageMinutes)} minutes on average`,
+        label: hours === 1 ? 'combined delivery-window hour' : 'combined delivery-window hours',
+        detail: `${waits.totalOrders} ${waits.totalOrders === 1 ? 'delivery' : 'deliveries'} · ${averageMinutes} ${averageMinutes === 1 ? 'minute' : 'minutes'} on average`,
         punchline: 'A lot of little journeys to your door.',
       },
       {
@@ -685,6 +687,7 @@ export function buildRecapStories(
         magnitude: (waits.totalMinutes / 1440) * 100,
       },
     );
+  }
   if (restaurants.length >= 3)
     add(
       {
@@ -797,7 +800,7 @@ export function buildRecapStories(
     order: number,
     title: string,
     value: number | string,
-    label: string,
+    label: string | readonly [singular: string, plural: string],
     detail = '',
     format: RecapStory['format'] = 'number',
     approximate = false,
@@ -811,20 +814,20 @@ export function buildRecapStories(
         title,
         value,
         format,
-        label,
+        label: typeof label === 'string' ? label : label[value === 1 ? 0 : 1],
         detail,
         punchline: '',
         approximate,
       },
       { magnitude: 0 },
     );
-  fallback('history-total', 0, 'ORDER BY ORDER.', records.length, 'tracked orders');
+  fallback('history-total', 0, 'ORDER BY ORDER.', records.length, ['tracked order', 'tracked orders']);
   fallback(
     'history-restaurants',
     1,
     'YOUR FOOD MAP.',
     restaurants.length,
-    'restaurants in your delivery history',
+    ['restaurant in your delivery history', 'restaurants in your delivery history'],
   );
   const provider = groups(records, (r) => r.r.receiptType)[0];
   if (provider)
@@ -837,7 +840,7 @@ export function buildRecapStories(
         : provider[0] === 'doordash'
           ? 'DoorDash'
           : provider[0],
-      `${provider[1].length} tracked orders`,
+      `${provider[1].length} tracked ${provider[1].length === 1 ? 'order' : 'orders'}`,
       '',
       'text',
     );
@@ -865,7 +868,7 @@ export function buildRecapStories(
       5,
       'THE LONG VIEW.',
       dayNumber(dated[dated.length - 1].day!) - dayNumber(dated[0].day!) + 1,
-      'calendar days spanned by your history',
+      ['calendar day spanned by your history', 'calendar days spanned by your history'],
     );
   }
   if (priced.length)
@@ -885,7 +888,7 @@ export function buildRecapStories(
       7,
       'A FAMILIAR FAVORITE.',
       top[1][0].r.restaurantName ?? '',
-      `${top[1].length} completed deliveries`,
+      `${top[1].length} completed ${top[1].length === 1 ? 'delivery' : 'deliveries'}`,
       '',
       'text',
     );
@@ -895,35 +898,35 @@ export function buildRecapStories(
     8,
     'THE APP LINEUP.',
     groups(records, (r) => r.r.receiptType).length,
-    'delivery apps represented',
+    ['delivery app represented', 'delivery apps represented'],
   );
   fallback(
     'history-itemized',
     9,
     'ON THE MENU.',
     itemized.length,
-    'deliveries with recorded item details',
+    ['delivery with recorded item details', 'deliveries with recorded item details'],
   );
   fallback(
     'history-item-count',
     10,
     'ITEM BY ITEM.',
     sum(itemized.map((r) => sum(r.r.items.map((i) => i.quantity)))),
-    'items recorded in your delivery history',
+    ['item recorded in your delivery history', 'items recorded in your delivery history'],
   );
   fallback(
     'history-menu-variety',
     11,
     'YOUR MENU INDEX.',
     new Set(itemized.flatMap((r) => r.r.items.map((i) => merchantIdentity(i.name)))).size,
-    'different item names in your receipts',
+    ['different item name in your receipts', 'different item names in your receipts'],
   );
   fallback(
     'history-ordering-days',
     12,
     'DAY BY DAY.',
     dayGroups.length,
-    'delivery dates in your history',
+    ['delivery date in your history', 'delivery dates in your history'],
   );
   // Supporting records come from the exact selected cohorts, never a second client query.
   const eventTimezone = (r: R) => r.r.resolution?.timestamp?.timezone ?? r.r.timezone ?? timezone;

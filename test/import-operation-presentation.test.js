@@ -154,6 +154,20 @@ test('starts with a broad total estimate and finishes without a countdown', asyn
   });
 });
 
+test('short export duration does not imply the worker is finishing', async () => {
+  const service = new ImportOperationPresentationService(
+    { getP75DurationSeconds: async () => 15 },
+    { metrics: async () => [{ name: 'export-imports', waiting: 1, active: 0, workers: 1, paused: false }] },
+    () => 1_010_000,
+  );
+  for (const status of ['pending_dispatch', 'queued', 'retrying', 'running']) {
+    const presentation = await service.forJob(job({ kind: 'export_file', status, progress: 15 }));
+    assert.deepEqual(presentation.timeEstimate, {
+      kind: 'remaining', minimumMinutes: 1, maximumMinutes: 1, revision: 0,
+    });
+  }
+});
+
 test('includes elapsed time when forecasting a completion beyond five minutes', async () => {
   const service = new ImportOperationPresentationService(
     { getP75DurationSeconds: async () => 180 },

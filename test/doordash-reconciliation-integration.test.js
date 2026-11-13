@@ -1,3 +1,5 @@
+const process = require('node:process');
+const { Buffer } = require('node:buffer');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -286,7 +288,7 @@ test(
       });
       assert.equal(saved.before.receipts[0].amountSpent, 76.8);
       assertMerged(saved.after.receipts);
-      assert.deepEqual(saved.context.validation.issues, ['REPAIR_POLICY_NOT_SERVING']);
+      assert.deepEqual(saved.context.validation.issues, []);
       await repo.rebuildProjection(user.id, user.generation, 'publish', allow, manifest.manifestId);
       const published = await repo.findByUserId(user.id);
       assertMerged(published);

@@ -22,6 +22,7 @@ export interface ReceiptResponse {
   readonly sources?: readonly string[];
   readonly checkoutDifference?: CheckoutDifference;
   readonly currencyCode?: string;
+  readonly itemSubtotal?: number;
   readonly amountBasis?: string;
   readonly evidenceSummary?: string;
   readonly resolutionVersion?: number;
@@ -78,6 +79,8 @@ export const mapReceiptResponse = (receipt: Receipt, context?: { accountTimezone
     sources: receipt.resolution?.sources ?? [receipt.dataSource],
     ...(receipt.resolution?.checkoutDifference ? { checkoutDifference: receipt.resolution.checkoutDifference } : {}),
     currencyCode: receipt.monetaryDetails?.currencyCode ?? 'UNKNOWN',
+    ...(receipt.resolution?.amountBasis === 'item_subtotal' && receipt.monetaryDetails?.subtotal != null
+      ? { itemSubtotal: receipt.monetaryDetails.subtotal } : {}),
     amountBasis: receipt.resolution?.amountBasis ?? 'legacy',
     ...(receipt.resolution ? { resolutionVersion: receipt.resolution.version } : {}),
     evidenceSummary: receipt.resolution?.amountBasis === 'receipt_total' ? 'Based on receipt total' : receipt.resolution?.amountBasis === 'item_subtotal' ? `Item subtotal; final charge unavailable${receipt.resolution?.currencyInference ? '; currency inferred' : ''}` : 'Based on exported or legacy totals',

@@ -9,6 +9,8 @@ Make server mutations durable, race-safe, observable, and consistent with every 
 
 ## Required workflow
 
+Use the shared [change review guidance](../../../../SnackTrackApp/.agents/skills/snacktrack-codebase-navigation/references/reviewing-changes.md) to choose the scope of the fix and its verification.
+
 1. Load `snacktrack-backend-architecture` for module ownership, dependency direction, type design, contracts, and cleanup rules.
 2. Use `snacktrack-codebase-navigation` to trace route → service → repository/database → cache → tests.
 3. Identify the authoritative mutation owner and every concurrent writer before editing.

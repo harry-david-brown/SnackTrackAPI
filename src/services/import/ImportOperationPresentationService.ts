@@ -148,7 +148,7 @@ export class ImportOperationPresentationService {
     if (retrySeconds.maximum > 0) {
       return this.rangeEstimate('retry_wait', retrySeconds.minimum, retrySeconds.maximum, job.attempts);
     }
-    if (job.progress >= 90 || processingSeconds <= 45) {
+    if (job.status === 'running' && (job.progress >= 90 || job.phase === 'finalizing')) {
       return { kind: 'finishing', minimumMinutes: null, maximumMinutes: null, revision: job.attempts };
     }
     const kind = elapsedSeconds < 20 && job.progress <= 10 ? 'total' : 'remaining';

@@ -9,6 +9,8 @@ Keep `SnackTrackAPI` understandable as it grows: one owner per responsibility, d
 
 ## Workflow
 
+Use the shared [change review guidance](../../../../SnackTrackApp/.agents/skills/snacktrack-codebase-navigation/references/reviewing-changes.md) to choose the scope of the fix and its verification.
+
 1. Use `snacktrack-codebase-navigation` to trace the current route → service → repository/adapter → tests path and find all callers.
 2. State the use case, invariant, authoritative owner, inputs, outputs, and failure modes before choosing files or abstractions.
 3. Read only the references needed for the change:

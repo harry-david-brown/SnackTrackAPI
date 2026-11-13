@@ -1,0 +1,22 @@
+# Local QA inbox for verification and password-reset emails sent to synthetic addresses.
+# docker compose -f docker-compose.yml -f docker-compose.qa-mail.yml up -d api qa-mail
+services:
+  qa-mail:
+    image: axllent/mailpit:v1.21.8
+    ports:
+      - "127.0.0.1:8025:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+
+  api:
+    depends_on:
+      qa-mail:
+        condition: service_started
+    environment:
+      SENDGRID_API_KEY: ""
+      SMTP_HOST: qa-mail
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      SMTP_USER: snacktrack-qa
+      SMTP_PASS: local-qa
